@@ -1,0 +1,49 @@
+From: Julian Bouzas <julian.bouzas@collabora.com>
+Subject: [PATCH] alsa: backport the opt-out for Pro Audio profile probing
+
+Backport of upstream a8b9ce2050dfb3f91c19061562d0a161117c3ab8:
+https://github.com/PipeWire/pipewire/commit/a8b9ce2050dfb3f91c19061562d0a161117c3ab8
+
+PipeWire 1.0.5 unconditionally probes every PCM for its Pro Audio profile,
+even when a valid UCM profile already limits ordinary HiFi to one PCM.
+Allow the specific device to opt out with api.acp.disable-pro-audio.
+Default behavior for other cards is unchanged. The G955N rule enables it
+only for the Exynos8895-Madera primary card.
+
+Adaptation to 1.0.5: place property parsing beside pro-channels, before the
+later split-enable property existed. Build against the exact Ubuntu source
+including its existing distribution/security patches, not vanilla 1.0.5.
+
+diff --git a/spa/plugins/alsa/acp/acp.c b/spa/plugins/alsa/acp/acp.c
+--- a/spa/plugins/alsa/acp/acp.c
++++ b/spa/plugins/alsa/acp/acp.c
+@@ -470,7 +470,8 @@
+ 	ap->profile.flags = ACP_PROFILE_OFF;
+ 	pa_hashmap_put(impl->profiles, ap->name, ap);
+ 
+-	add_pro_profile(impl, impl->card.index);
++	if (!impl->disable_pro_audio)
++		add_pro_profile(impl, impl->card.index);
+ 
+ 	PA_HASHMAP_FOREACH(ap, impl->profile_set->profiles, state) {
+ 		pa_alsa_mapping *m;
+@@ -1607,6 +1608,8 @@
+ 			impl->rate = atoi(s);
+ 		if ((s = acp_dict_lookup(props, "api.acp.pro-channels")) != NULL)
+ 			impl->pro_channels = atoi(s);
++		if ((s = acp_dict_lookup(props, "api.acp.disable-pro-audio")) != NULL)
++			impl->disable_pro_audio = spa_atob(s);
+ 	}
+ 
+ 	impl->ucm.default_sample_spec.format = PA_SAMPLE_S16NE;
+diff --git a/spa/plugins/alsa/acp/card.h b/spa/plugins/alsa/acp/card.h
+--- a/spa/plugins/alsa/acp/card.h
++++ b/spa/plugins/alsa/acp/card.h
+@@ -47,6 +47,7 @@
+ 	bool auto_profile;
+ 	bool auto_port;
+ 	bool ignore_dB;
++	bool disable_pro_audio;
+ 	uint32_t rate;
+ 	uint32_t pro_channels;
+ 

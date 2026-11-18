@@ -5,10 +5,14 @@ R=/work/rootfs
 test -x "$R/sbin/init"
 test "$(cat "$R/etc/hostname")" = g955n-ubuntu
 tar -C /source/image/rootfs-overlay -cf - . | tar -C "$R" --keep-directory-symlink -xpf -
+# Broad ACP probing still reaches unsafe Abox endpoints. New images must retain
+# isolation until a separately reviewed runtime trial qualifies the replacement.
+test "$(readlink "$R/etc/systemd/user/wireplumber.service")" = /dev/null
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
 chmod 755 "$R/usr/local/sbin/g955n-grow-root"
 chmod 755 "$R/usr/local/sbin/g955n-android-bsp"
 chmod 755 "$R/usr/local/sbin/g955n-fb-display"
+chmod 755 "$R/usr/local/sbin/g955n-location-hub"
 chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service serial-getty@ttyGS0.service
 chroot "$R" dconf update
 chroot "$R" systemctl set-default graphical.target

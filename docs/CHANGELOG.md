@@ -323,3 +323,76 @@
 - Existing speaker RDMA7 is a realtime frontend. A normal RDMA0 comparison
   requires PCM proc diagnostics, absent in kernel 11. The new probe now
   distinguishes missing diagnostics from a busy device. No fabricated success.
+
+### Kernel 15 regression results and audio fault isolation
+
+- Kernel 15 booted, mounts original EFS ro,norecovery automatically and exposes
+  PCM proc diagnostics. The p2p0 startup rule survives reboot and wait-online
+  succeeds. Actual named-user ext4 ACL read permission and write denial passed.
+- The initially zero taint became 512 after GDM's codec enumeration exposed six
+  additional known MFC formats. Patch 0015 covers the full 33-format driver
+  inventory; it is built but not yet deployed. No clean-log claim is made.
+- Normal RDMA0/SIFS1/UAIF4 speaker routing completed two seconds/96000 frames,
+  aplay exit 0, progressing hardware pointer, no xrun and verified mixer restore.
+  The owner's acoustic check was postponed when they went to sleep. No further
+  tones, microphone recording or physical-action requests are scheduled overnight.
+- Installed ALSA UCM metadata and discovered a separate ACP behavior: Noble's
+  Pro Audio profile construction probes every PCM even with UCM. A later native
+  scan provoked an Abox SysMMU write fault and reboot; the previous log is saved.
+  Fault 0x0a400080 is not the driver's WDMA4 IOVA. CALL RDMA4 SRAM acquisition
+  failed while VTS was active but the old kernel ignored the failure.
+- Temporarily masked WirePlumber and stopped both user audio engines to isolate
+  that trigger. This is a mitigation, not audio/kernel acceptance. The desktop
+  display remains available; normal playback remains unqualified acoustically.
+- Rebuilt only SPA ALSA from the exact authenticated Ubuntu 1.0.5-1ubuntu3.3
+  source, preserving all 31 distribution/security patches, with upstream
+  a8b9ce2050dfb3f91c19061562d0a161117c3ab8's Pro Audio opt-out. AArch64/public
+  symbol ABI and distro hardening checks passed; stock libraries are unchanged.
+- Installed the new plugin in a private root-owned SPA tree with checked stock
+  links for other plugin families. A root-owned hash/version guard prevents
+  fallback to stock ALSA and checks exact UCM/card rules. Root and gdm guard
+  checks passed independently. Global/user activation remains masked pending
+  a bounded quiet profile-enumeration trial. Runtime UCM is intentionally muted.
+- The original stock LHD successfully loaded/verified the sensor MCU with the
+  reviewed location-hub wrapper/service. Sensor calibration initialization
+  validated the original version/checksum, changed only MCU RAM, and preserved
+  the entire raw EFS hash. Light remains physically unverified and OnChange
+  reports are not treated as continuous-rate sensor failures.
+- A longer isolated GPU test passed all 10000 shader/readback frames at
+  1440x2960 in 21.989 seconds without reboot, renderer ARM/Mali-G71. This still
+  does not accelerate the GNOME/GLX desktop or qualify suspend/thermal limits.
+- Prepared real Bionic/property/HWBinder diagnostic scaffolding without Android
+  init. A private PID/mount namespace selftest passed, preserving all parent
+  mounts. Initial real-manager trial failed honestly on missing stock service
+  contexts; selected original BOOT context files are staged privately. Later
+  actual ready-property observation is separate from HWC/presentation acceptance.
+
+### Quiet trial follow-up
+
+- The bounded muted gdm profile trial loaded the exact private ALSA plugin and
+  applied `api.acp.disable-pro-audio=true`; final profiles were Off/HiFi only.
+  Despite that, 211 special PCM/backend/VTS log events occurred during its
+  interval. The process ended, Speaker Gain remained 0, and the boot ID stayed
+  unchanged. This is an unresolved probe-isolation failure, not an audio pass.
+  Default WirePlumber remains masked and both users' audio engines are stopped.
+  Future rootfs overlays now retain the global mask and finalization checks it.
+- Rebuilt the revised per-endpoint CALL CPU-vote ownership patch together with
+  the DMA buffer mapping-size correction. Matching Image/vmlinux/System.map are
+  saved privately; no new BOOT image has been flashed while recovery assistance
+  is unavailable. Compiler success does not qualify the kernel fault correction.
+- Patch 0019 also checks CPU-vote table exhaustion before access/PM side effects
+  and propagates failed votes before CALL L2/PCM requests. Extracted actual
+  functions passed ASan/UBSan full-table, existing-ID and failure-path checks;
+  the combined candidate rebuilt successfully. Concurrent insertion and
+  asynchronous clock-programming error propagation remain separate work.
+- Source review found that WirePlumber renames duplicate device objects before
+  applying policy. Candidate primary/debug-card rules now match verified bus
+  paths and card identity instead of mutable names. Lua syntax passes; this
+  plausible explanation of residual probing is not confirmed by a new trial.
+  Revised rules are not installed on the running phone.
+- Real HWM/property trials passed ready-property authentication, second-process
+  reads, bounded lifetime and namespace cleanup. A no-device HWC diagnostic then
+  reached real HWBinder communication but waited for graphics allocator 2.0,
+  which has not been started. Original allocator/mapper files and manifest
+  declarations are present. ION was intentionally unavailable; desktop GPU
+  acceleration remains pending.

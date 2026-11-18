@@ -33,9 +33,9 @@ chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   systemd-sysv udev dbus openssh-server sudo busybox-static iproute2 iputils-ping \
   network-manager wpasupplicant iw bluez modemmanager gpsd gpsd-clients \
-  iio-sensor-proxy alsa-utils e2fsprogs kmod ca-certificates curl tzdata \
+  iio-sensor-proxy alsa-utils alsa-ucm-conf acl e2fsprogs kmod ca-certificates curl tzdata \
   libegl1 libgles2 libgbm1 libdrm2 mesa-utils weston wayland-utils \
-  ubuntu-desktop-minimal xserver-xorg-video-fbdev xserver-xorg-input-libinput \
+  ubuntu-desktop-minimal rtkit libspa-0.2-libcamera xserver-xorg-video-fbdev xserver-xorg-input-libinput \
   xserver-xorg-legacy xinit fonts-dejavu-core ibus ibus-hangul
 chroot "$R" useradd -m -s /bin/bash -G sudo ubuntu
 install -d -m 700 "$R/home/ubuntu/.ssh"

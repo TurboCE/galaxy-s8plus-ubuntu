@@ -1,0 +1,141 @@
+#!/usr/bin/python3
+"""Fail closed unless the reviewed G955N ALSA plugin and card rules are present.
+
+Candidate installer target: /usr/local/libexec/g955n-wireplumber, root-owned 0755.
+This launcher never installs files, opens ALSA, changes controls or reboots.
+--check verifies the guard without starting WirePlumber or any audio monitor.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import stat
+import subprocess
+import sys
+
+PRIVATE_ROOT = Path('/usr/local/lib/g955n/spa-0.2')
+STOCK_ROOT = Path('/usr/lib/aarch64-linux-gnu/spa-0.2')
+PLUGIN = PRIVATE_ROOT / 'alsa/libspa-alsa.so'
+STOCK_ALSA = STOCK_ROOT / 'alsa/libspa-alsa.so'
+MANIFEST = Path('/usr/local/share/g955n/pipewire-plugin.json')
+UCM = Path('/usr/share/alsa/ucm2/Samsung/SM-G955N')
+MASTER = UCM / 'SM-G955N.conf'
+LINK = Path('/usr/share/alsa/ucm2/conf.d/Exynos8895-Made/Exynos8895-Madera.conf')
+REQUIRED = (
+    PLUGIN,
+    Path('/etc/wireplumber/main.lua.d/51-g955n-abox-dump.lua'),
+    Path('/etc/wireplumber/main.lua.d/52-g955n-ucm-only.lua'),
+    Path('/usr/share/alsa-card-profile/mixer/profile-sets/g955n-ucm-only.conf'),
+    MASTER,
+    UCM / 'HiFi.conf',
+)
+
+
+def trusted_regular(path):
+    if path.resolve(strict=True) != path:
+        raise ValueError('Unexpected symlink in guarded path: ' + str(path))
+    metadata = path.stat()
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ValueError('Guarded file is not regular: ' + str(path))
+    for entry in (path, *path.parents):
+        metadata = entry.stat()
+        if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise ValueError('Guarded path is not exclusively root-managed: ' + str(entry))
+
+
+def digest(path):
+    with path.open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest()
+
+
+def trusted_directory(path):
+    if path.resolve(strict=True) != path or not path.is_dir():
+        raise ValueError('Unexpected guarded directory: ' + str(path))
+    for entry in (path, *path.parents):
+        metadata = entry.stat()
+        if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise ValueError('Directory is not exclusively root-managed: ' + str(entry))
+
+
+def check_plugin_tree():
+    # Use a single search root: a private ALSA load error must never lead to
+    # falling back to the original ALSA module with unrestricted probing.
+    trusted_directory(PRIVATE_ROOT)
+    trusted_directory(PRIVATE_ROOT / 'alsa')
+    trusted_directory(STOCK_ROOT)
+    families = {entry.name for entry in STOCK_ROOT.iterdir() if entry.is_dir()}
+    if 'alsa' not in families:
+        raise ValueError('Installed stock SPA tree has no ALSA family')
+    if {entry.name for entry in PRIVATE_ROOT.iterdir()} != families:
+        raise ValueError('Private SPA families do not match the reviewed stock layout')
+    if {entry.name for entry in (PRIVATE_ROOT / 'alsa').iterdir()} != {'libspa-alsa.so'}:
+        raise ValueError('Unexpected file in private ALSA family')
+    for family in sorted(families - {'alsa'}):
+        target = STOCK_ROOT / family
+        trusted_directory(target)
+        link = PRIVATE_ROOT / family
+        if (not link.is_symlink() or link.lstat().st_uid != 0
+                or link.readlink() != target or link.resolve(strict=True) != target):
+            raise ValueError('Unexpected stock SPA family link: ' + str(link))
+
+
+def check():
+    if (platform.machine() != 'aarch64' or 'g955n-ubuntu' not in platform.release()
+            or 'SM-G955N' not in Path('/proc/device-tree/model').read_text()):
+        raise ValueError('Requires the native SM-G955N Ubuntu image')
+    trusted_regular(MANIFEST)
+    manifest = json.loads(MANIFEST.read_text())
+    if manifest.get('feature') != 'api.acp.disable-pro-audio':
+        raise ValueError('Missing reviewed ALSA probe-control feature attestation')
+    if manifest.get('plugin_search_mode') != 'private-only':
+        raise ValueError('Manifest does not attest to a private-only SPA search root')
+    version = subprocess.check_output(
+        ['dpkg-query', '-W', '-f=${Version}', 'libspa-0.2-modules'], text=True).strip()
+    if version != manifest.get('ubuntu_source_version'):
+        raise ValueError('Ubuntu plugin version changed; rebuild and review the private backport')
+    files = manifest.get('files', {})
+    if set(files) != {str(path) for path in REQUIRED}:
+        raise ValueError('Manifest does not cover the exact plugin, scope rules and UCM files')
+    for path in REQUIRED:
+        trusted_regular(path)
+        if digest(path) != files[str(path)]:
+            raise ValueError('Guarded file checksum mismatch: ' + str(path))
+    trusted_regular(STOCK_ALSA)
+    if digest(STOCK_ALSA) != manifest.get('original_plugin_sha256'):
+        raise ValueError('Original Ubuntu ALSA plugin changed; review the matching source/build')
+    check_plugin_tree()
+    if not LINK.is_symlink() or LINK.lstat().st_uid != 0 or LINK.resolve(strict=True) != MASTER:
+        raise ValueError('Unexpected UCM card lookup link')
+    # The root-owned target parents must not allow replacing the lookup link.
+    for directory in LINK.parents:
+        metadata = directory.stat()
+        if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise ValueError('UCM lookup directory is not exclusively root-managed')
+    with PLUGIN.open('rb') as source:
+        header = source.read(64)
+    if (header[:6] != b'\x7fELF\x02\x01'
+            or int.from_bytes(header[18:20], 'little') != 183):
+        raise ValueError('Reviewed private plugin is not an AArch64 ELF64 library')
+    trusted_regular(Path('/usr/bin/wireplumber'))
+
+
+def main():
+    try:
+        check()
+    except Exception as error:
+        print('G955N WirePlumber guard refused startup: ' + str(error), file=sys.stderr)
+        return 78
+    if sys.argv[1:] == ['--check']:
+        print('Reviewed G955N plugin and card scope verified; WirePlumber not started')
+        return 0
+    environment = dict(os.environ)
+    # Deliberately no colon-separated stock fallback: if the reviewed ALSA
+    # module cannot load, fail rather than retrying the unsafe stock module.
+    # Other plugin families use the individually checked stock directory links.
+    environment['SPA_PLUGIN_DIR'] = str(PRIVATE_ROOT)
+    os.execve('/usr/bin/wireplumber', ['/usr/bin/wireplumber', *sys.argv[1:]], environment)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

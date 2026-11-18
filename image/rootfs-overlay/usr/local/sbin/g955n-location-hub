@@ -1,0 +1,54 @@
+#!/bin/sh
+# Own-device Broadcom hub daemon. No Android init or automatic sensor streams.
+set -eu
+umask 077
+test "$(id -u)" = 0
+grep -q SM-G955N /proc/device-tree/model
+uname -r | grep -q g955n-ubuntu
+
+# Keep BSP mounts and the final daemon in the same service mount namespace.
+/usr/local/sbin/g955n-android-bsp
+
+# Calibration must be the actual EFS partition, mounted without journal replay.
+efs_node=$(readlink -f /dev/block/by-name/EFS)
+test -b "$efs_node"
+grep -qx PARTNAME=EFS "/sys/class/block/$(basename "$efs_node")/uevent"
+test "$(findmnt -n -o TARGET --target /efs)" = /efs
+test "$(readlink -f "$(findmnt -n -o SOURCE --target /efs)")" = "$efs_node"
+efs_options=$(findmnt -n -o OPTIONS --target /efs)
+printf '%s\n' "$efs_options" | grep -Eq '(^|,)ro(,|$)'
+printf '%s\n' "$efs_options" | grep -Eq '(^|,)(noload|norecovery)(,|$)'
+
+lhd=/vendor/bin/hw/lhd
+original_lhd=/android/system/vendor/bin/hw/lhd
+configuration=/android/system/vendor/etc/sensor/lhd.conf
+test "$(readlink -f "$lhd")" = "$original_lhd"
+test -x "$lhd"
+test -f "$configuration"
+test ! -L "$configuration"
+
+# Driver registration may finish after the coldplug trigger returns.
+attempt=0
+while :; do
+    if [ -c /dev/ttyBCM ] && [ -c /dev/bbd_patch ] &&
+       [ -c /dev/bbd_control ] && [ -c /dev/bbd_sensor ] &&
+       [ -w /sys/class/sec/sensorhub/mcu_power ] &&
+       [ -w /sys/class/sec/gps/GPS_PWR_EN/value ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 30 ] || { echo 'Broadcom hub interfaces unavailable' >&2; exit 1; }
+    sleep 1
+done
+if pgrep -x lhd >/dev/null; then
+    echo 'Another location-hub daemon is already running' >&2
+    exit 1
+fi
+
+# These writable cache/log paths are specified by the original configuration.
+# Neither calibration nor vendor files are copied or made writable.
+mkdir -p /data/vendor/gps /storage/emulated/0/gps/broadcom/storage
+unset LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT HYBRIS_LD_LIBRARY_PATH
+cd /
+echo 'Starting the original location-hub daemon; sensor readiness remains unqualified'
+exec "$lhd" "$configuration"

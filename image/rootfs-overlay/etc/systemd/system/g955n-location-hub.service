@@ -1,0 +1,26 @@
+[Unit]
+Description=SM-G955N original Broadcom location and sensor hub
+After=local-fs.target systemd-udev-trigger.service g955n-hardware.service
+Requires=g955n-hardware.service
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/g955n-location-hub
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+KillMode=control-group
+UMask=0077
+PrivateMounts=yes
+ProtectSystem=full
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=g955n-location-hub
+
+# Starting this service loads the MCU firmware; it does not enable SSP masks
+# or certify sensor readings. No boot-time enablement is performed by this file.
+[Install]
+WantedBy=multi-user.target
