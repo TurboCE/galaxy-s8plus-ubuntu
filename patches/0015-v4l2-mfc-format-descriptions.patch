@@ -1,0 +1,39 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] media: describe the remaining enumerated Samsung MFC formats
+
+Audit both s5p_mfc_dec_internal.h and s5p_mfc_enc_internal.h against
+v4l_fill_fmtdesc after patch 0013. All 33 distinct advertised FourCCs are
+covered except the five compressed FIMV variants and the raw RGB32X format.
+Their literal FourCC values are defined in exynos_mfc_media.h: RGBX, FIMV,
+FIM1, FIM2, FIM3 and FIM4. Add descriptions in their corresponding raw and
+compressed switch branches, preserving the compressed-format flag.
+
+This is a local metadata correction, not an upstream backport. Unknown
+formats retain their existing warning. Decoder/encoder functionality is
+not established by correctly describing the formats they enumerate.
+
+diff --git a/drivers/media/v4l2-core/v4l2-ioctl.c b/drivers/media/v4l2-core/v4l2-ioctl.c
+--- a/drivers/media/v4l2-core/v4l2-ioctl.c
++++ b/drivers/media/v4l2-core/v4l2-ioctl.c
+@@ -1148,6 +1148,8 @@
+ 	case V4L2_PIX_FMT_RGB32:	descr = "32-bit A/XRGB 8-8-8-8"; break;
+ 	case V4L2_PIX_FMT_ARGB32:	descr = "32-bit ARGB 8-8-8-8"; break;
+ 	case V4L2_PIX_FMT_XRGB32:	descr = "32-bit XRGB 8-8-8-8"; break;
++	/* V4L2_PIX_FMT_RGB32X in Samsung's exynos_mfc_media.h. */
++	case v4l2_fourcc('R', 'G', 'B', 'X'): descr = "Samsung RGBX, 32-bit"; break;
+ 	case V4L2_PIX_FMT_GREY:		descr = "8-bit Greyscale"; break;
+ 	case V4L2_PIX_FMT_Y4:		descr = "4-bit Greyscale"; break;
+ 	case V4L2_PIX_FMT_Y6:		descr = "6-bit Greyscale"; break;
+@@ -1255,6 +1257,12 @@
+ 		case V4L2_PIX_FMT_VC1_ANNEX_L:	descr = "VC-1 (SMPTE 412M Annex L)"; break;
+ 		case v4l2_fourcc('V', 'P', '9', '0'): descr = "VP9"; break;
+ 		case v4l2_fourcc('H', 'E', 'V', 'C'): descr = "HEVC"; break;
++		/* Samsung MFC's FIMV family is compressed input. */
++		case v4l2_fourcc('F', 'I', 'M', 'V'): descr = "Samsung FIMV"; break;
++		case v4l2_fourcc('F', 'I', 'M', '1'): descr = "Samsung FIMV1"; break;
++		case v4l2_fourcc('F', 'I', 'M', '2'): descr = "Samsung FIMV2"; break;
++		case v4l2_fourcc('F', 'I', 'M', '3'): descr = "Samsung FIMV3"; break;
++		case v4l2_fourcc('F', 'I', 'M', '4'): descr = "Samsung FIMV4"; break;
+ 		case V4L2_PIX_FMT_VP8:		descr = "VP8"; break;
+ 		case V4L2_PIX_FMT_CPIA1:	descr = "GSPCA CPiA YUV"; break;
+ 		case V4L2_PIX_FMT_WNVA:		descr = "WNVA"; break;

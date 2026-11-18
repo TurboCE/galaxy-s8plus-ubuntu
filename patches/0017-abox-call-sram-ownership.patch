@@ -1,0 +1,191 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] ASoC: abox: reject call PCM opens when shared SRAM is unavailable
+
+A native desktop PCM capability scan reproduced an Abox SysMMU write fault.
+Immediately before the fault RDMA4 (a call-type endpoint) requested L2 cache
+while VTS was active; vts_acquire_sram returned EBUSY, but its result was
+ignored. Firmware L2 control and subsequent PCM requests still proceeded.
+
+Do not issue L2 control after failing to acquire its shared SRAM. Report an
+unsatisfied synchronous enable request to the PCM open, and unwind the failed
+call endpoint's request/CPU boost before returning. Preserve normal endpoint
+behavior and the truthful busy error; do not disable audio or hide MMU faults.
+Use a distinct host-only CPU vote for each CALL DAI at open, failed-open
+rollback and close. Playback and capture otherwise share key 0xca12 and one
+endpoint can release the other's vote. The old kernel key has no firmware
+or PM special handling; only VSS key 0xca11 has call runtime-PM semantics.
+Ordinary per-DAI CPU votes retain their separate namespace. Also check the
+bounded L2 request table before writing the selected slot.
+
+This targets an observed resource-ownership violation. It does not establish
+the meaning of firmware fault address 0x0a400080 (the driver's WDMA4 buffer
+IOVA is 0x82400000), nor claim complete firmware/DMA teardown correctness.
+The fixed-memory build keeps PCM buffer mappings until pcm_free, so this
+fault is not proven to be a hw_free unmap-before-stop race. IPC/ACK timeout
+recovery, request-table insertion races and DMA bounds remain separate
+review items.
+
+Local correction based on the pinned Samsung driver and captured fault.
+
+diff --git a/sound/soc/samsung/abox/abox.h b/sound/soc/samsung/abox/abox.h
+--- a/sound/soc/samsung/abox/abox.h
++++ b/sound/soc/samsung/abox/abox.h
+@@ -331,6 +331,8 @@
+ 
+ #define ABOX_CPU_GEAR_CALL_VSS		(0xCA11)
+ #define ABOX_CPU_GEAR_CALL_KERNEL	(0xCA12)
++/* Host-only CALL votes, distinct from the ordinary per-DAI vote. */
++#define ABOX_CPU_GEAR_CALL_KERNEL_DAI	(0xCA120000)
+ #define ABOX_CPU_GEAR_CALL		ABOX_CPU_GEAR_CALL_VSS
+ #define ABOX_CPU_GEAR_BOOT		(0xB00D)
+ #define ABOX_CPU_GEAR_LOWER_LIMIT	(12)
+@@ -792,6 +794,18 @@
+ 			ABOX_CPU_GEAR_DAI | dai->id, gear);
+ }
+ 
++/* CALL playback and capture must not release each other's CPU vote.
++ * cpu_dai IDs are unique across ABOX RDMA and WDMA endpoints. Only the
++ * firmware VSS key (ABOX_CPU_GEAR_CALL_VSS) has special runtime-PM semantics.
++ */
++static inline int abox_request_cpu_gear_sync_call(struct device *dev,
++		struct abox_data *data, struct snd_soc_dai *dai,
++		unsigned int gear)
++{
++	return abox_request_cpu_gear_sync(dev, data,
++			ABOX_CPU_GEAR_CALL_KERNEL_DAI | dai->id, gear);
++}
++
+ /**
+  * Request LITTLE cluster clock level
+  * @param[in]	dev		pointer to struct dev which invokes this API
+
+diff --git a/sound/soc/samsung/abox/abox.c b/sound/soc/samsung/abox/abox.c
+--- a/sound/soc/samsung/abox/abox.c
++++ b/sound/soc/samsung/abox/abox.c
+@@ -4959,7 +4959,11 @@
+ 	system_msg->param1 = enable ? 1 : 0;
+ 
+ 	if (enable) {
+-		vts_acquire_sram(data->pdev_vts, 0);
++		/* L2 cache and VTS share SRAM. A failed lease must not be
++		 * followed by a firmware command using somebody else's SRAM.
++		 */
++		if (vts_acquire_sram(data->pdev_vts, 0) < 0)
++			return;
+ 
+ 		abox_request_ipc(dev, msg.ipcid, &msg, sizeof(msg), 1, 0);
+ 		wait_event_timeout(data->ipc_wait_queue,
+@@ -5017,16 +5021,16 @@
+ 			request++) {
+ 	}
+ 
+-	request->on = on;
+-	wmb(); /* value is read only when id is valid */
+-	request->id = id;
+-
+ 	if (request - data->l2c_requests >= ARRAY_SIZE(data->l2c_requests)) {
+ 		dev_err(dev, "%s: out of index. id=%#lx, on=%d\n",
+ 				__func__, (unsigned long)id, on);
+ 		return -ENOMEM;
+ 	}
+ 
++	request->on = on;
++	wmb(); /* value is read only when id is valid */
++	request->id = id;
++
+ 	schedule_work(&data->l2c_work);
+ 
+ 	return 0;
+@@ -5035,8 +5039,15 @@
+ int abox_request_l2c_sync(struct device *dev, struct abox_data *data,
+ 		void *id, bool on)
+ {
+-	abox_request_l2c(dev, data, id, on);
++	int result;
++
++	result = abox_request_l2c(dev, data, id, on);
++	if (result < 0)
++		return result;
+ 	flush_work(&data->l2c_work);
++	/* A completed work item does not imply that SRAM was acquired. */
++	if (on && !READ_ONCE(data->l2c_enabled))
++		return -EBUSY;
+ 	return 0;
+ }
+ 
+
+diff --git a/sound/soc/samsung/abox/abox_rdma.c b/sound/soc/samsung/abox/abox_rdma.c
+--- a/sound/soc/samsung/abox/abox_rdma.c
++++ b/sound/soc/samsung/abox/abox_rdma.c
+@@ -1400,11 +1400,19 @@
+ 	dev_dbg(dev, "%s[%d]\n", __func__, id);
+ 
+ 	if (data->type == PLATFORM_CALL) {
+-		abox_request_cpu_gear_sync(dev, data->abox_data,
+-				ABOX_CPU_GEAR_CALL_KERNEL, 1);
++		abox_request_cpu_gear_sync_call(dev, data->abox_data,
++				rtd->cpu_dai, 1);
+ 		result = abox_request_l2c_sync(dev, data->abox_data, dev, true);
+-		if (IS_ERR_VALUE(result))
++		if (IS_ERR_VALUE(result)) {
++			/* Cancel this failed open's vote and CPU boost. No PCM
++			 * OPEN/HW_PARAMS may reach firmware without the lease.
++			 */
++			abox_request_l2c(dev, data->abox_data, dev, false);
++			abox_request_cpu_gear_sync_call(dev, data->abox_data,
++					rtd->cpu_dai,
++					ABOX_CPU_GEAR_LOWER_LIMIT);
+ 			return result;
++		}
+ 	}
+ 	pm_runtime_get_sync(rtd->codec->dev);
+ 	abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 3);
+@@ -1456,8 +1464,8 @@
+ 	abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 12);
+ 	pm_runtime_put(rtd->codec->dev);
+ 	if (data->type == PLATFORM_CALL) {
+-		abox_request_cpu_gear_sync(dev, data->abox_data,
+-				ABOX_CPU_GEAR_CALL_KERNEL,
++		abox_request_cpu_gear_sync_call(dev, data->abox_data,
++				rtd->cpu_dai,
+ 				ABOX_CPU_GEAR_LOWER_LIMIT);
+ 		result = abox_request_l2c(dev, data->abox_data, dev, false);
+ 		if (IS_ERR_VALUE(result))
+
+diff --git a/sound/soc/samsung/abox/abox_wdma.c b/sound/soc/samsung/abox/abox_wdma.c
+--- a/sound/soc/samsung/abox/abox_wdma.c
++++ b/sound/soc/samsung/abox/abox_wdma.c
+@@ -322,11 +322,19 @@
+ 	dev_dbg(dev, "%s[%d]\n", __func__, id);
+ 
+ 	if (data->type == PLATFORM_CALL) {
+-		abox_request_cpu_gear_sync(dev, data->abox_data,
+-				ABOX_CPU_GEAR_CALL_KERNEL, 1);
++		abox_request_cpu_gear_sync_call(dev, data->abox_data,
++				rtd->cpu_dai, 1);
+ 		result = abox_request_l2c_sync(dev, data->abox_data, dev, true);
+-		if (IS_ERR_VALUE(result))
++		if (IS_ERR_VALUE(result)) {
++			/* Cancel this failed open's vote and CPU boost. No PCM
++			 * OPEN/HW_PARAMS may reach firmware without the lease.
++			 */
++			abox_request_l2c(dev, data->abox_data, dev, false);
++			abox_request_cpu_gear_sync_call(dev, data->abox_data,
++					rtd->cpu_dai,
++					ABOX_CPU_GEAR_LOWER_LIMIT);
+ 			return result;
++		}
+ 	}
+ 	pm_runtime_get_sync(rtd->codec->dev);
+ 	abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 3);
+@@ -380,8 +388,8 @@
+ 	abox_request_cpu_gear_dai(dev, data->abox_data, rtd->cpu_dai, 12);
+ 	pm_runtime_put(rtd->codec->dev);
+ 	if (data->type == PLATFORM_CALL) {
+-		abox_request_cpu_gear_sync(dev, data->abox_data,
+-				ABOX_CPU_GEAR_CALL_KERNEL,
++		abox_request_cpu_gear_sync_call(dev, data->abox_data,
++				rtd->cpu_dai,
+ 				ABOX_CPU_GEAR_LOWER_LIMIT);
+ 		result = abox_request_l2c(dev, data->abox_data, dev, false);
+ 		if (IS_ERR_VALUE(result))

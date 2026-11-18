@@ -1,0 +1,91 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] ASoC: abox: bound CPU votes before access and reject failed CALL votes
+
+The CPU gear request-table search can finish one element beyond the array.
+The old code reads that element for call/PM bookkeeping and writes its value
+and ID before checking the bounds. Reject table exhaustion before any such
+access or side effect, retaining the existing ENOMEM diagnostic and result.
+An existing ID remains updateable even when all table slots are occupied.
+
+Return enqueue failure immediately from the synchronous wrapper. CALL PCM
+open must propagate its per-endpoint CPU vote failure before requesting L2
+or sending PCM_OPEN: no vote was installed, so no rollback is needed on this
+branch. Existing L2-failure cleanup retains its endpoint-specific vote key.
+The normal successful path and ordinary per-DAI votes are unchanged.
+
+This handles a concrete out-of-bounds/error-propagation defect. It does not
+serialize concurrent request-table insertion, propagate asynchronous clock
+programming failures, or establish a fix for the captured ABOX MMU fault.
+Based on the pinned Samsung driver; applies after patches 0017 and 0018.
+
+diff --git a/sound/soc/samsung/abox/abox.c b/sound/soc/samsung/abox/abox.c
+--- a/sound/soc/samsung/abox/abox.c
++++ b/sound/soc/samsung/abox/abox.c
+@@ -3307,19 +3307,19 @@
+ 			request++) {
+ 	}
+ 
+-	abox_check_call_cpu_gear(dev, data, request->id, request->value,
+-			id, gear);
+-
+-	request->value = gear;
+-	wmb(); /* value is read only when id is valid */
+-	request->id = id;
+-
+ 	if (request - data->ca7_gear_requests >= len) {
+ 		dev_err(dev, "%s: out of index. id=%x, gear=%u\n", __func__,
+ 				id, gear);
+ 		return -ENOMEM;
+ 	}
+ 
++	abox_check_call_cpu_gear(dev, data, request->id, request->value,
++			id, gear);
++
++	request->value = gear;
++	wmb(); /* value is read only when id is valid */
++	request->id = id;
++
+ 	queue_work(system_freezable_wq, &data->change_cpu_gear_work);
+ 
+ 	return 0;
+@@ -3330,6 +3330,8 @@
+ {
+ 	int result = abox_request_cpu_gear(dev, data, id, gear);
+ 
++	if (result < 0)
++		return result;
+ 	flush_work(&data->change_cpu_gear_work);
+ 	return result;
+ }
+
+diff --git a/sound/soc/samsung/abox/abox_rdma.c b/sound/soc/samsung/abox/abox_rdma.c
+--- a/sound/soc/samsung/abox/abox_rdma.c
++++ b/sound/soc/samsung/abox/abox_rdma.c
+@@ -1401,8 +1401,10 @@
+ 	dev_dbg(dev, "%s[%d]\n", __func__, id);
+ 
+ 	if (data->type == PLATFORM_CALL) {
+-		abox_request_cpu_gear_sync_call(dev, data->abox_data,
++		result = abox_request_cpu_gear_sync_call(dev, data->abox_data,
+ 				rtd->cpu_dai, 1);
++		if (result < 0)
++			return result;
+ 		result = abox_request_l2c_sync(dev, data->abox_data, dev, true);
+ 		if (IS_ERR_VALUE(result)) {
+ 			/* Cancel this failed open's vote and CPU boost. No PCM
+
+diff --git a/sound/soc/samsung/abox/abox_wdma.c b/sound/soc/samsung/abox/abox_wdma.c
+--- a/sound/soc/samsung/abox/abox_wdma.c
++++ b/sound/soc/samsung/abox/abox_wdma.c
+@@ -323,8 +323,10 @@
+ 	dev_dbg(dev, "%s[%d]\n", __func__, id);
+ 
+ 	if (data->type == PLATFORM_CALL) {
+-		abox_request_cpu_gear_sync_call(dev, data->abox_data,
++		result = abox_request_cpu_gear_sync_call(dev, data->abox_data,
+ 				rtd->cpu_dai, 1);
++		if (result < 0)
++			return result;
+ 		result = abox_request_l2c_sync(dev, data->abox_data, dev, true);
+ 		if (IS_ERR_VALUE(result)) {
+ 			/* Cancel this failed open's vote and CPU boost. No PCM

@@ -1,0 +1,53 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] arm64: retain ENOSYS without fault dumps for native feature probes
+
+Extend the optional-rseq diagnostic handling from patch 0006 to five known
+native aarch64 feature-negotiation syscalls observed in the Ubuntu journal.
+These calls still return the original sys_ni_syscall() ENOSYS. This adds no
+syscall implementation and does not report success or feature equivalence.
+
+Fallback ownership matters: glibc 2.39 handles statx (291), clone3 (435), and
+faccessat2 (439) ENOSYS through generic stat, legacy clone, and legacy access
+paths respectively. The close_range (436) glibc syscall wrapper does NOT
+itself fall back: GLib 2.80's g_closefrom/g_fdwalk_set_cloexec callers handle
+unsupported close_range with a descriptor walk. systemd 255 sd-event handles
+epoll_pwait2 (441) ENOSYS with epoll_wait and caches lack of support. Other
+callers can still receive ENOSYS and must handle it themselves.
+
+Primary source references for the reviewed fallback behavior:
+https://github.com/bminor/glibc/blob/release/2.39/master/sysdeps/unix/sysv/linux/statx.c
+https://github.com/bminor/glibc/blob/release/2.39/master/sysdeps/unix/sysv/linux/faccessat.c
+https://github.com/bminor/glibc/blob/release/2.39/master/sysdeps/unix/sysv/linux/clone-internal.c
+https://github.com/GNOME/glib/blob/2.80.0/glib/glib-unix.c
+https://github.com/systemd/systemd/blob/v255/src/libsystemd/sd-event/sd-event.c
+
+Restrict the exception to native tasks: compat numbers have other meanings.
+Preserve diagnostics for every other unsupported syscall, as well as actual
+signal/exception/fault reporting. This classifies expected negotiation; it
+is unrelated to the ABOX fault and does not make kernel logs error-free.
+
+diff --git a/arch/arm64/kernel/traps.c b/arch/arm64/kernel/traps.c
+--- a/arch/arm64/kernel/traps.c
++++ b/arch/arm64/kernel/traps.c
+@@ -601,6 +601,21 @@
+ 	 */
+ 	if (!is_compat_task() && regs->syscallno == 293)
+ 		return sys_ni_syscall();
++
++	/* These native feature probes legitimately negotiate ENOSYS on 4.4.
++	 * Keep the unsupported result; only omit the misleading register dump.
++	 * Compat syscall numbers have different meanings.
++	 */
++	if (!is_compat_task()) {
++		switch (regs->syscallno) {
++		case 291: /* statx: glibc statx_generic fallback */
++		case 435: /* clone3: glibc legacy clone fallback */
++		case 436: /* close_range: GLib caller fd-walk fallback */
++		case 439: /* faccessat2: glibc legacy access fallback */
++		case 441: /* epoll_pwait2: systemd epoll_wait fallback */
++			return sys_ni_syscall();
++		}
++	}
+ 
+ 	/* suppress magiskd ni syscall 434 reg dump in dmesg */
+ 	if (regs->syscallno == 434)

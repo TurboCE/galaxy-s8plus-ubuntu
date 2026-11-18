@@ -1,0 +1,44 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] proc: accept invisible as the existing hidepid=2 policy
+
+Modern systemd tries hidepid=invisible. The pinned kernel accepts numeric
+hidepid=0/1/2 but rejects the named spelling. The kernel proc documentation
+specifies invisible as the name of hidepid=2, not hidepid=1 (noaccess):
+https://docs.kernel.org/filesystems/proc.html#mount-options
+
+Add only this exact spelling and select the existing value 2. Preserve
+numeric parsing/range validation, gid parsing and all access checks.
+Unknown/unsupported policies still fail. No new procfs isolation model is
+backported: this kernel still stores the policy in the PID namespace,
+so this alias retains the same scope and effects as numeric hidepid=2.
+
+Local compatibility correction; not an upstream patch backport.
+
+diff --git a/fs/proc/root.c b/fs/proc/root.c
+--- a/fs/proc/root.c
++++ b/fs/proc/root.c
+@@ -39,11 +39,12 @@
+ }
+ 
+ enum {
+-	Opt_gid, Opt_hidepid, Opt_err,
++	Opt_gid, Opt_hidepid, Opt_hidepid_invisible, Opt_err,
+ };
+ 
+ static const match_table_t tokens = {
+ 	{Opt_hidepid, "hidepid=%u"},
++	{Opt_hidepid_invisible, "hidepid=invisible"},
+ 	{Opt_gid, "gid=%u"},
+ 	{Opt_err, NULL},
+ };
+@@ -69,6 +70,10 @@
+ 			if (match_int(&args[0], &option))
+ 				return 0;
+ 			pid->pid_gid = make_kgid(current_user_ns(), option);
++			break;
++		case Opt_hidepid_invisible:
++			/* Same access policy as the existing numeric hidepid=2. */
++			pid->hide_pid = 2;
+ 			break;
+ 		case Opt_hidepid:
+ 			if (match_int(&args[0], &option))

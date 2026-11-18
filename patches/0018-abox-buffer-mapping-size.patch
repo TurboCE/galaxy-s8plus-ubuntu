@@ -1,0 +1,182 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] ASoC: abox: map only the allocated fixed PCM buffer
+
+Non-normal RDMA/WDMA endpoints request 32 KiB, while their fixed IOVA
+mappings unconditionally cover 128 KiB. ALSA can also satisfy preallocation
+with fewer bytes, or return success without allocating a buffer. Never map
+physical memory beyond the actual contiguous SNDRV_DMA_TYPE_DEV allocation.
+
+Validate the returned allocation and page alignment, propagate iommu_map
+failure and free the failed allocation. iommu_map already rolls back its
+partial mappings on error. Use the same actual length for pcm_free unmap.
+These endpoints do not use SNDRV_DMA_TYPE_DEV_SG: no SG extent is assumed
+contiguous or rounded beyond its owned length. Exynos SysMMU supports 4 KiB
+minimum pages and this target has 4 KiB PAGE_SIZE.
+
+The generic ALSA prealloc proc writer can replace an idle buffer, which is
+incompatible with a fixed IOVA lasting from pcm_new to pcm_free. Disable
+that writer for the fixed-memory path while retaining its read callback and
+other verbose PCM diagnostics. Existing ALSA buffer-size constraints and
+normal dynamic-map code paths remain unchanged.
+
+This corrects an independent mapping/ownership bug, not a demonstrated
+explanation of the captured 0x0a400080 fault. No claim of full DMA/firmware
+teardown correctness is made. Based on the pinned Samsung/ALSA source.
+
+diff --git a/sound/soc/samsung/abox/abox_rdma.c b/sound/soc/samsung/abox/abox_rdma.c
+--- a/sound/soc/samsung/abox/abox_rdma.c
++++ b/sound/soc/samsung/abox/abox_rdma.c
+@@ -25,6 +25,7 @@
+ 
+ #include <sound/soc.h>
+ #include <sound/pcm_params.h>
++#include <sound/info.h>
+ #include <sound/tlv.h>
+ 
+ #include "../../../../drivers/iommu/exynos-iommu.h"
+@@ -1509,6 +1510,7 @@
+ 	struct snd_soc_platform *platform = runtime->platform;
+ 	struct device *dev = platform->dev;
+ 	struct abox_platform_data *data = dev_get_drvdata(dev);
++	struct snd_dma_buffer *dma_buffer = &substream->dma_buffer;
+ 	int id = data->id;
+ 	size_t buffer_bytes;
+ 	int result;
+@@ -1524,17 +1526,43 @@
+ 
+ 	result = snd_pcm_lib_preallocate_pages(substream, SNDRV_DMA_TYPE_DEV,
+ 			runtime->cpu_dai->dev, buffer_bytes, buffer_bytes);
+-	if (IS_ERR_VALUE(result)) {
++	if (result < 0)
++		return result;
++#ifdef USE_FIXED_MEMORY
++	/* ALSA preallocation may return success with no buffer or a smaller
++	 * buffer. Map only the contiguous DEV allocation we actually own.
++	 */
++	if (!dma_buffer->area || !dma_buffer->bytes) {
+ 		result = -ENOMEM;
+-	} else {
++		goto free_buffer;
++	}
++	if (dma_buffer->bytes > BUFFER_BYTES_MAX ||
++			!IS_ALIGNED(dma_buffer->addr | dma_buffer->bytes, PAGE_SIZE)) {
++		result = -EINVAL;
++		goto free_buffer;
++	}
++	result = iommu_map(data->abox_data->iommu_domain, IOVA_RDMA_BUFFER(id),
++			dma_buffer->addr, dma_buffer->bytes, 0);
++	if (result < 0) {
++		dev_err(dev, "fixed DMA buffer iommu map failed: %d\n", result);
++		goto free_buffer;
++	}
++#ifdef CONFIG_SND_VERBOSE_PROCFS
++	/* Fixed IOVA mappings live until pcm_free. Do not let the generic
++	 * prealloc writer replace/free the backing allocation meanwhile.
++	 * Leave its read callback and other PCM diagnostics available.
++	 */
++	if (substream->proc_prealloc_entry)
++		substream->proc_prealloc_entry->c.text.write = NULL;
++#endif
++#endif
++	return 0;
++
+ #ifdef USE_FIXED_MEMORY
+-		iommu_map(data->abox_data->iommu_domain, IOVA_RDMA_BUFFER(id),
+-				substream->dma_buffer.addr,
+-				BUFFER_BYTES_MAX, 0);
+-#endif
+-	}
+-
++free_buffer:
++	snd_pcm_lib_preallocate_free(substream);
+ 	return result;
++#endif
+ }
+ 
+ static void abox_rdma_free(struct snd_pcm *pcm)
+@@ -1547,8 +1575,9 @@
+ 	struct abox_platform_data *data = dev_get_drvdata(dev);
+ 	int id = data->id;
+ 
+-	iommu_unmap(data->abox_data->iommu_domain, IOVA_RDMA_BUFFER(id),
+-			BUFFER_BYTES_MAX);
++	if (substream->dma_buffer.area && substream->dma_buffer.bytes)
++		iommu_unmap(data->abox_data->iommu_domain, IOVA_RDMA_BUFFER(id),
++				substream->dma_buffer.bytes);
+ #endif
+ 	snd_pcm_lib_preallocate_free_for_all(pcm);
+ }
+
+diff --git a/sound/soc/samsung/abox/abox_wdma.c b/sound/soc/samsung/abox/abox_wdma.c
+--- a/sound/soc/samsung/abox/abox_wdma.c
++++ b/sound/soc/samsung/abox/abox_wdma.c
+@@ -25,6 +25,7 @@
+ 
+ #include <sound/soc.h>
+ #include <sound/pcm_params.h>
++#include <sound/info.h>
+ 
+ #include "../../../../drivers/iommu/exynos-iommu.h"
+ #include <sound/samsung/abox.h>
+@@ -451,16 +452,43 @@
+ 
+ 	result = snd_pcm_lib_preallocate_pages(substream, SNDRV_DMA_TYPE_DEV,
+ 			runtime->cpu_dai->dev, buffer_bytes, buffer_bytes);
+-	if (IS_ERR_VALUE(result)) {
++	if (result < 0)
++		return result;
++#ifdef USE_FIXED_MEMORY
++	/* ALSA preallocation may return success with no buffer or a smaller
++	 * buffer. Map only the contiguous DEV allocation we actually own.
++	 */
++	if (!dma_buffer->area || !dma_buffer->bytes) {
+ 		result = -ENOMEM;
+-	} else {
++		goto free_buffer;
++	}
++	if (dma_buffer->bytes > BUFFER_BYTES_MAX ||
++			!IS_ALIGNED(dma_buffer->addr | dma_buffer->bytes, PAGE_SIZE)) {
++		result = -EINVAL;
++		goto free_buffer;
++	}
++	result = iommu_map(domain, IOVA_WDMA_BUFFER(id),
++			dma_buffer->addr, dma_buffer->bytes, 0);
++	if (result < 0) {
++		dev_err(dev, "fixed DMA buffer iommu map failed: %d\n", result);
++		goto free_buffer;
++	}
++#ifdef CONFIG_SND_VERBOSE_PROCFS
++	/* Fixed IOVA mappings live until pcm_free. Do not let the generic
++	 * prealloc writer replace/free the backing allocation meanwhile.
++	 * Leave its read callback and other PCM diagnostics available.
++	 */
++	if (substream->proc_prealloc_entry)
++		substream->proc_prealloc_entry->c.text.write = NULL;
++#endif
++#endif
++	return 0;
++
+ #ifdef USE_FIXED_MEMORY
+-		iommu_map(domain, IOVA_WDMA_BUFFER(id), dma_buffer->addr,
+-				BUFFER_BYTES_MAX, 0);
++free_buffer:
++	snd_pcm_lib_preallocate_free(substream);
++	return result;
+ #endif
+-	}
+-
+-	return result;
+ }
+ 
+ static void abox_wdma_free(struct snd_pcm *pcm)
+@@ -475,7 +503,9 @@
+ 	struct iommu_domain *domain = abox_data->iommu_domain;
+ 	int id = data->id;
+ 
+-	iommu_unmap(domain, IOVA_WDMA_BUFFER(id), BUFFER_BYTES_MAX);
++	if (substream->dma_buffer.area && substream->dma_buffer.bytes)
++		iommu_unmap(domain, IOVA_WDMA_BUFFER(id),
++				substream->dma_buffer.bytes);
+ #endif
+ 	snd_pcm_lib_preallocate_free_for_all(pcm);
+ }
