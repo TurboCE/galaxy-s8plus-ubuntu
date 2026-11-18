@@ -1,0 +1,32 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] media: describe the formats supported by Samsung MFC
+
+The bundled codec advertises NV12N/YUV420N/NV12N_10B (Exynos media UAPI)
+and VP9/HEVC (exynos_mfc_media.h). Its V4L2 description table predates
+these definitions. Add their actual FourCC descriptions in the correct
+raw/compressed branches, retaining warnings for truly unknown formats.
+No codec capture or decode acceptance is implied by format enumeration.
+
+diff --git a/drivers/media/v4l2-core/v4l2-ioctl.c b/drivers/media/v4l2-core/v4l2-ioctl.c
+--- a/drivers/media/v4l2-core/v4l2-ioctl.c
++++ b/drivers/media/v4l2-core/v4l2-ioctl.c
+@@ -1224,6 +1224,10 @@
+ 	case V4L2_PIX_FMT_TM6000:	descr = "A/V + VBI Mux Packet"; break;
+ 	case V4L2_PIX_FMT_CIT_YYVYUY:	descr = "GSPCA CIT YYVYUY"; break;
+ 	case V4L2_PIX_FMT_KONICA420:	descr = "GSPCA KONICA420"; break;
++	/* Samsung formats also advertised by the bundled MFC driver. */
++	case v4l2_fourcc('N', 'N', '1', '2'): descr = "Samsung NV12N"; break;
++	case v4l2_fourcc('Y', 'N', '1', '2'): descr = "Samsung YUV420N"; break;
++	case v4l2_fourcc('B', 'N', '1', '2'): descr = "Samsung NV12N, 10-bit"; break;
+ 	case V4L2_SDR_FMT_CU8:		descr = "Complex U8"; break;
+ 	case V4L2_SDR_FMT_CU16LE:	descr = "Complex U16LE"; break;
+ 	case V4L2_SDR_FMT_CS8:		descr = "Complex S8"; break;
+@@ -1249,6 +1253,8 @@
+ 		case V4L2_PIX_FMT_XVID:		descr = "Xvid"; break;
+ 		case V4L2_PIX_FMT_VC1_ANNEX_G:	descr = "VC-1 (SMPTE 412M Annex G)"; break;
+ 		case V4L2_PIX_FMT_VC1_ANNEX_L:	descr = "VC-1 (SMPTE 412M Annex L)"; break;
++		case v4l2_fourcc('V', 'P', '9', '0'): descr = "VP9"; break;
++		case v4l2_fourcc('H', 'E', 'V', 'C'): descr = "HEVC"; break;
+ 		case V4L2_PIX_FMT_VP8:		descr = "VP8"; break;
+ 		case V4L2_PIX_FMT_CPIA1:	descr = "GSPCA CPiA YUV"; break;
+ 		case V4L2_PIX_FMT_WNVA:		descr = "WNVA"; break;

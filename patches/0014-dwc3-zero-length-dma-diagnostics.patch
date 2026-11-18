@@ -1,0 +1,48 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] usb: dwc3: do not diagnose successful zero-length requests as DMA failures
+
+usb_gadget_map_request() deliberately returns success without mapping a DMA
+buffer when request.length is zero. The Samsung DWC3 diagnostics instead
+report precisely that valid state as both a DMA mapping and a TRB buffer
+error. Native ACM traffic exposes these spurious errors repeatedly.
+
+Remove those two zero-length-only diagnostics and the now-unused local.
+Do not change DMA mappings, TRB contents, request completion or error returns.
+Real mapping failures remain checked and reported by usb_gadget_map_request()
+and propagated by __dwc3_gadget_ep_queue(). Other controller error diagnostics
+and tracing remain intact.
+
+This is a local correction based on the pinned kernel's mapping contract,
+not an upstream backport or a claim of complete USB suspend/transfer acceptance.
+
+diff --git a/drivers/usb/dwc3/gadget.c b/drivers/usb/dwc3/gadget.c
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -863,7 +863,6 @@
+ 		struct dwc3_request *req, dma_addr_t dma,
+ 		unsigned length, unsigned last, unsigned chain, unsigned node)
+ {
+-	struct dwc3			*dwc = dep->dwc;
+ 	struct dwc3_trb		*trb;
+ 
+ 	dwc3_trace(trace_dwc3_gadget, "%s: req %p dma %08llx length %d%s%s",
+@@ -889,9 +888,6 @@
+ 	trb->size = DWC3_TRB_SIZE_LENGTH(length);
+ 	trb->bpl = lower_32_bits(dma);
+ 	trb->bph = upper_32_bits(dma);
+-
+-	if (!trb->bpl && !trb->bph && !req->request.length)
+-		dev_err(dwc->dev, "trb buffer error !!!\n");
+ 
+ 	switch (usb_endpoint_type(dep->endpoint.desc)) {
+ 	case USB_ENDPOINT_XFER_CONTROL:
+@@ -1208,8 +1204,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	if (!req->request.num_sgs && !req->request.dma && !req->request.length)
+-		dev_err(dwc->dev, "DMA mapping error !!!\n");
++	/* Zero-length packets intentionally have no DMA payload to map. */
+ 
+ 	list_add_tail(&req->list, &dep->request_list);
+ 

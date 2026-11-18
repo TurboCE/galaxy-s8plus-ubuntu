@@ -31,10 +31,10 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: association/DHCP/DNS/TLS HTTP 200, 254968-byte download at 2467 and 5745 MHz; reconnect/suspend pending |
-| Bluetooth | Framework dump collected privately | Discovery, pairing, audio and reconnect | Not tested |
+| Bluetooth | Framework dump collected privately | Discovery, pairing, audio and reconnect | Partial: original-address controller RAM and 9 discovered devices; temporary ROM/H4 only, firmware/pairing/audio/resume pending |
 | GPS / GNSS | Location service dump collected privately | Fresh outdoor fix with plausible coordinates and timestamps | Not tested |
-| Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Not tested |
-| Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, proximity, light and other present sensors, calibration | Not tested |
+| Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Partial: LHD/MCU initialized and 220 native IIO records each with changing payloads/increasing timestamps; controlled motion, units, axes and desktop integration pending |
+| Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, proximity, light and other present sensors, calibration | Incomplete: ambient light capture only one zero-count event; no physical response acceptance |
 | Cameras | Camera service dump collected privately | Front/rear preview, capture, video, autofocus and flash | Not tested |
 | Audio | Audio service dump collected privately | Speaker, earpiece, microphones, headphone jack and routing | Not tested |
 | Charging / battery / thermals | Power service dump collected privately | Current/voltage/temp telemetry, controlled charge and thermal limits | Not tested |
@@ -65,3 +65,8 @@ touch/on-screen keyboard. Former ISP QUERYCAP panic does not recur in the five
 explicit node probes or re-enabled WirePlumber/GDM startup. Existing V4L2 bad-caps
 and format-description WARNs remain (taint 512); no clean-kernel acceptance is
 claimed. Hardware GPU EGL probe still faults in the private compatibility prefix.
+
+Independent hardware audit also observed CPU0/CPU4 ondemand frequency changes
+and WFI/deeper CPU idle residency. This does not qualify system suspend, power
+consumption or peripheral resume. Kernel 11 still has real audio/VTS/ISP issues
+and taint 512; candidate fixes must be retested on a fresh complete boot log.
