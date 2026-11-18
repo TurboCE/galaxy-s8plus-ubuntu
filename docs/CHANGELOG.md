@@ -233,3 +233,20 @@
   private prefix. The initial EGL probe did not succeed; Android's O_NOFOLLOW
   rejected a symlinked linker config. The preparation helper now copies that
   own-device configuration from read-only SYSTEM. GPU qualification remains open.
+
+### Desktop enumeration panic isolated
+
+- Kernel 10 booted and reached native systemd, but repeatedly restarted.
+  Disabling GDM and the framebuffer presenter did not stop the restarts.
+- Captured an unambiguous previous-boot journal: WirePlumber's VIDIOC_QUERYCAP
+  reached fimc_is_ixs_video_querycap+0x24/0x64 and caused a fatal kernel exception.
+  Registration stores struct fimc_is_video; QUERYCAP incorrectly casts it to
+  struct fimc_is_core. This is separate from the earlier manual hard-reset hook.
+- Patch 0011 obtains the registered V4L2 platform parent with the correct type,
+  preserving intended device name/capability flags. The same bug exists in DIS,
+  SCC, SCP and VRA and is corrected there too. Incremental kernel/image build
+  passed. Live ioctl regression and desktop acceptance remain pending.
+- Temporarily masked WirePlumber while diagnosing and retained manual desktop
+  startup. After masking, kernel 10 remained available through a 90-second
+  checkpoint with the framebuffer presenter active; this is only isolation
+  evidence. Camera streaming and audio remain unqualified.

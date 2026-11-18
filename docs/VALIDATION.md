@@ -53,3 +53,9 @@ normal boot persistence and GNOME login remain pending. Ubuntu Desktop packages
 are installed with a temporary CPU/fbdev presentation path. This is not GPU
 qualification. Short-power-key logind shutdown is temporarily disabled after
 previous-boot journals proved it caused repeated charger-connected restarts.
+
+Desktop failure isolation: installed packages are not desktop acceptance. Kernel
+10 repeatedly panicked in fimc_is_ixs_video_querycap while WirePlumber enumerated
+camera nodes, including with GDM/presenter disabled. Patch 0011 fixes five stale
+QUERYCAP driver-data casts; build passes, hardware regression pending. Temporary
+WirePlumber masking stops that trigger and is not a camera or audio fix.

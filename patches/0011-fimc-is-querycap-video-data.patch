@@ -1,0 +1,115 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] media: fimc-is2: use registered video data in QUERYCAP
+
+video_set_drvdata stores struct fimc_is_video, not struct fimc_is_core.
+The ISP QUERYCAP cast dereferences an unrelated offset and panics when
+WirePlumber enumerates video nodes. Obtain the existing platform parent
+through the registered v4l2_device, preserving the intended name and caps.
+Fix the same stale cast in DIS, SCC, SCP and VRA as well. This does not
+implement camera streaming or the Android camera HAL.
+
+diff --git a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-isp.c b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-isp.c
+--- a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-isp.c
++++ b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-isp.c
+@@ -251,11 +251,12 @@
+ static int fimc_is_ixs_video_querycap(struct file *file, void *fh,
+ 					struct v4l2_capability *cap)
+ {
+-	struct fimc_is_core *isp = video_drvdata(file);
+-
+-	strncpy(cap->driver, isp->pdev->name, sizeof(cap->driver) - 1);
+-
+-	strncpy(cap->card, isp->pdev->name, sizeof(cap->card) - 1);
++	struct fimc_is_video *video = video_drvdata(file);
++	struct platform_device *pdev = to_platform_device(video->vd.v4l2_dev->dev);
++
++	strncpy(cap->driver, pdev->name, sizeof(cap->driver) - 1);
++
++	strncpy(cap->card, pdev->name, sizeof(cap->card) - 1);
+ 	cap->bus_info[0] = 0;
+ 	cap->version = KERNEL_VERSION(1, 0, 0);
+ 	cap->capabilities = V4L2_CAP_STREAMING
+diff --git a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-dis.c b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-dis.c
+--- a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-dis.c
++++ b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-dis.c
+@@ -250,11 +250,12 @@
+ static int fimc_is_dxs_video_querycap(struct file *file, void *fh,
+ 					struct v4l2_capability *cap)
+ {
+-	struct fimc_is_core *core = video_drvdata(file);
+-
+-	strncpy(cap->driver, core->pdev->name, sizeof(cap->driver) - 1);
+-
+-	strncpy(cap->card, core->pdev->name, sizeof(cap->card) - 1);
++	struct fimc_is_video *video = video_drvdata(file);
++	struct platform_device *pdev = to_platform_device(video->vd.v4l2_dev->dev);
++
++	strncpy(cap->driver, pdev->name, sizeof(cap->driver) - 1);
++
++	strncpy(cap->card, pdev->name, sizeof(cap->card) - 1);
+ 	cap->bus_info[0] = 0;
+ 	cap->version = KERNEL_VERSION(1, 0, 0);
+ 	cap->capabilities = V4L2_CAP_STREAMING
+diff --git a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scc.c b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scc.c
+--- a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scc.c
++++ b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scc.c
+@@ -215,12 +215,13 @@
+ static int fimc_is_scc_video_querycap(struct file *file, void *fh,
+ 						struct v4l2_capability *cap)
+ {
+-	struct fimc_is_core *isp = video_drvdata(file);
+-
+-	strncpy(cap->driver, isp->pdev->name, sizeof(cap->driver) - 1);
++	struct fimc_is_video *video = video_drvdata(file);
++	struct platform_device *pdev = to_platform_device(video->vd.v4l2_dev->dev);
++
++	strncpy(cap->driver, pdev->name, sizeof(cap->driver) - 1);
+ 
+ 	dbg("(devname : %s)\n", cap->driver);
+-	strncpy(cap->card, isp->pdev->name, sizeof(cap->card) - 1);
++	strncpy(cap->card, pdev->name, sizeof(cap->card) - 1);
+ 	cap->bus_info[0] = 0;
+ 	cap->version = KERNEL_VERSION(1, 0, 0);
+ 	cap->capabilities = V4L2_CAP_STREAMING
+diff --git a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scp.c b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scp.c
+--- a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scp.c
++++ b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-scp.c
+@@ -215,12 +215,13 @@
+ static int fimc_is_scp_video_querycap(struct file *file, void *fh,
+ 	struct v4l2_capability *cap)
+ {
+-	struct fimc_is_core *core = video_drvdata(file);
+-
+-	strncpy(cap->driver, core->pdev->name, sizeof(cap->driver) - 1);
++	struct fimc_is_video *video = video_drvdata(file);
++	struct platform_device *pdev = to_platform_device(video->vd.v4l2_dev->dev);
++
++	strncpy(cap->driver, pdev->name, sizeof(cap->driver) - 1);
+ 
+ 	dbg("%s(devname : %s)\n", __func__, cap->driver);
+-	strncpy(cap->card, core->pdev->name, sizeof(cap->card) - 1);
++	strncpy(cap->card, pdev->name, sizeof(cap->card) - 1);
+ 	cap->bus_info[0] = 0;
+ 	cap->version = KERNEL_VERSION(1, 0, 0);
+ 	cap->capabilities = V4L2_CAP_STREAMING
+diff --git a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-vra.c b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-vra.c
+--- a/drivers/media/platform/exynos/fimc-is2/fimc-is-video-vra.c
++++ b/drivers/media/platform/exynos/fimc-is2/fimc-is-video-vra.c
+@@ -207,11 +207,12 @@
+ static int fimc_is_vra_video_querycap(struct file *file, void *fh,
+ 					struct v4l2_capability *cap)
+ {
+-	struct fimc_is_core *core = video_drvdata(file);
+-
+-	strncpy(cap->driver, core->pdev->name, sizeof(cap->driver) - 1);
+-
+-	strncpy(cap->card, core->pdev->name, sizeof(cap->card) - 1);
++	struct fimc_is_video *video = video_drvdata(file);
++	struct platform_device *pdev = to_platform_device(video->vd.v4l2_dev->dev);
++
++	strncpy(cap->driver, pdev->name, sizeof(cap->driver) - 1);
++
++	strncpy(cap->card, pdev->name, sizeof(cap->card) - 1);
+ 	cap->bus_info[0] = 0;
+ 	cap->version = KERNEL_VERSION(1, 0, 0);
+ 	cap->capabilities = V4L2_CAP_STREAMING
