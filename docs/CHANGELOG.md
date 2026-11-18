@@ -147,3 +147,23 @@
   before any USERDATA write and again before replacing BOOT. It rejects rescue
   images as normal Ubuntu boot images. Prior-trial identity and incomplete
   readback rejection are covered by host tests.
+
+### Third native trial and rootfs qualification
+
+- The ABOX/USB corrected BOOT image passed full readback/protected-partition
+  checks and booted into the native initramfs. The new G955N USB serial function
+  was matched by its dedicated device serial; live DT model/kernel/mounts were
+  verified before diagnostics. No USERDATA mount or write occurred in this trial.
+- Captured live raw dmesg, taint 0, GPU/ION and ALSA device enumeration. Recovered
+  the 2 MiB Samsung prior-boot buffer after returning to recovery; it contains a
+  Linux boot marker and no Kernel panic marker. Logs still contain other errors;
+  no clean-log or peripheral functionality pass is claimed.
+- A tiny explicitly invoked ARM64 RESTART2 helper returned this native kernel
+  to working TWRP, without another manual key sequence or a partition write.
+- Signed Ubuntu package installation and offline ext4/content validation passed.
+  Added a physical USB serial bring-up login so diagnostics do not depend on
+  host network configuration. The adjusted filesystem is being regenerated and
+  requires validation again before installation.
+- Added native VT/framebuffer-console configuration and a larger kernel log
+  buffer for the next kernel build. The boot packer selects tty0 only when the
+  supplied, embedded-verified configuration actually supports it.

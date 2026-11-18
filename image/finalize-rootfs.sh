@@ -7,7 +7,7 @@ test "$(cat "$R/etc/hostname")" = g955n-ubuntu
 tar -C /source/image/rootfs-overlay -cf - . | tar -C "$R" --keep-directory-symlink -xpf -
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
 chmod 755 "$R/usr/local/sbin/g955n-grow-root"
-chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service
+chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service serial-getty@ttyGS0.service
 for group in video audio input render dialout; do
   if chroot "$R" getent group "$group" >/dev/null; then
     chroot "$R" usermod -aG "$group" ubuntu
@@ -24,7 +24,11 @@ cat "$R/etc/ssh/ssh_host_ed25519_key.pub" >> /outputs/g955n-known-hosts
 chmod 600 /outputs/g955n-known-hosts
 mkdir -p "$R/run/sshd"
 chroot "$R" /usr/sbin/sshd -t
-chroot "$R" dpkg --audit
+package_audit=$(chroot "$R" dpkg --audit)
+if [ -n "$package_audit" ]; then
+  printf '%s\n' "$package_audit" >&2
+  exit 1
+fi
 IMAGE=/outputs/g955n-rootfs.unqualified.img
 rm -f "$IMAGE"
 truncate -s 3072M "$IMAGE"

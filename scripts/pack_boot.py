@@ -90,7 +90,8 @@ def main():
         raise SystemExit('Wrong model DTB')
     dtimg = args.output.with_suffix('.dt.img')
     subprocess.run(['python3', str(ROOT / 'scripts/boot/mkdtbh.py'), str(dtb), '-o', str(dtimg)], check=True)
-    commandline = ('console=ram loglevel=7 androidboot.hardware=samsungexynos8895 '
+    console = 'tty0' if 'CONFIG_VT_CONSOLE=y' in config.decode().splitlines() else 'ram'
+    commandline = (f'console={console} log_buf_len=4M loglevel=7 androidboot.hardware=samsungexynos8895 '
                    'androidboot.selinux=permissive enforcing=0 loop.max_part=7 '
                    'firmware_class.path=/vendor/firmware systemd.unified_cgroup_hierarchy=0')
     subprocess.run(['python3', str(ROOT / 'scripts/boot/mkboot.py'), '--ref', str(stock),

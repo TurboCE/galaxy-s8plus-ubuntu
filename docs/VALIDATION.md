@@ -10,12 +10,17 @@ entries. Thus neither stock nor Ubuntu logs have been certified clean.
 Fifteen host tests pass; these are tooling checks, not hardware acceptance tests.
 BOOT-only trials recovered concrete panic logs: the initial gzip decoder mismatch
 was fixed and unpacking succeeded on the second trial. That trial then panicked
-in ABOX regcache initialization and failed USB gadget binding. Source corrections
-are under rebuild and are not yet hardware-qualified. USERDATA remains untouched.
+in ABOX regcache initialization and failed USB gadget binding. The third trial
+with the ABOX ordering and Samsung USB selection fixes reached a native shell
+over its own G955N USB serial function. Live identity/uptime/mounts and raw dmesg
+were captured, with no kernel panic and taint 0 in that capture. GPU/ION nodes,
+two ALSA cards, battery interfaces and WLAN/rmnet interfaces enumerated; these
+are not end-to-end feature passes. Initial-console and firmware errors and
+unsupported-syscall diagnostics remain. USERDATA remains untouched at this point.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | FAIL: early native audio panic; TWRP recovery available |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Partial: native kernel/USB serial shell and automatic TWRP return verified; Ubuntu userspace pending |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Not tested |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Not tested |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested |
