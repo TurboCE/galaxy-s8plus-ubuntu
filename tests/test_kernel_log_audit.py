@@ -25,3 +25,8 @@ class KernelLogAudit(unittest.TestCase):
         result = module.audit('<6>[0] Linux version 4.4.111\n<6>[1] boot completed\n')
         self.assertEqual(result['status'], 'no_findings_in_capture')
         self.assertIn('Captured log only', result['scope'])
+
+    def test_debug_and_ramoops_names_are_not_kernel_exceptions(self):
+        result = module.audit('<6>[0] Linux version 4.4.111\n<6>[1] sec_debug: GetLog support\n<6>[2] ramoops: attached buffer\n')
+        self.assertEqual(result['trace_lines'], [])
+        self.assertEqual(result['status'], 'no_findings_in_capture')

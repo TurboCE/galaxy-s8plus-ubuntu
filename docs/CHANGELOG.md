@@ -112,3 +112,32 @@
   and private SSH-key/host-key handling. No Ubuntu installation success claimed.
 - Ten host tests pass, including wrong-model rootfs and malformed/appended raw
   backup rejection. Rootfs generation/finalization and device boot remain pending.
+
+### 2026-11-19 — native kernel trials and early-boot corrections
+
+- Two explicitly guarded BOOT-only trials preserved USERDATA and the working
+  recovery. Readback matched each image; Samsung last_kmsg was recovered after
+  each failed boot. Neither trial establishes Ubuntu or peripheral acceptance.
+- First trial panicked because the supplied gzip initramfs had no compiled
+  decoder. The packer now selects legacy LZ4 from the actual build configuration;
+  the second trial successfully unpacked the initramfs.
+- The second trial exposed an ABOX audio firmware/probe race: asynchronous
+  firmware completion entered abox_enable before regmap initialization, causing
+  a NULL dereference. Patch 0003 submits the firmware request after probe state
+  and codec registration are ready. Rebuild and hardware retest are pending.
+- Samsung configfs parks symlinked USB functions in a separate list until its
+  functions attribute selects them. The bootstrap now selects cdc_ethernet/acm
+  before UDC binding and enables the Samsung gadget afterward. Runtime retest
+  remains pending; no USB networking success claimed.
+- Patch 0002 replaces the vendor's hardcoded stock /proc/config.gz with the
+  actual build configuration. Extracted IKCONFIG from the rebuilt Image is
+  byte-identical to its saved kernel.config.
+- Added early console nodes and persistent Samsung kernel-buffer logging for
+  native init, reviewed backup-chain support for repeated BOOT-only probes,
+  and guarded first-boot USERDATA filesystem growth tooling.
+- Original raw backups remain intact. After recovery reentry, EFS changes in
+  the first review were limited to six superblock metadata bytes; PARAM changes
+  were limited to 52 boot-history-like bytes. Neither was blindly overwritten.
+  Every later write still requires reviewed current protected-partition hashes.
+- Thirteen host checks pass, including real legacy-LZ4 roundtrip and corruption
+  guards. The signed Ubuntu ARM64 package installation is still in progress.

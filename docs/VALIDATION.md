@@ -1,16 +1,21 @@
 # Hardware validation
 
-Status date: 2026-11-18. Android discovery does not prove end-to-end operation.
-Ubuntu: not booted. No row may become PASS from configuration or compilation alone.
+Status date: 2026-11-19. Android discovery does not prove end-to-end operation.
+The native kernel has executed on the phone; Ubuntu userspace has not booted.
+No row may become PASS from configuration or compilation alone.
 
 Runtime capture tooling exists in scripts/collect_linux.py; it refuses an
 unexpected kernel/DT. Stock dmesg was denied and kernel logcat returned no
 entries. Thus neither stock nor Ubuntu logs have been certified clean.
-Seven host tests pass; these are tooling checks, not hardware acceptance tests.
+Thirteen host tests pass; these are tooling checks, not hardware acceptance tests.
+BOOT-only trials recovered concrete panic logs: the initial gzip decoder mismatch
+was fixed and unpacking succeeded on the second trial. That trial then panicked
+in ABOX regcache initialization and failed USB gadget binding. Source corrections
+are under rebuild and are not yet hardware-qualified. USERDATA remains untouched.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Not tested |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | FAIL: early native audio panic; TWRP recovery available |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Not tested |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Not tested |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested |

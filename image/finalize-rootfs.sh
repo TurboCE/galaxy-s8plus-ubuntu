@@ -6,7 +6,8 @@ test -x "$R/sbin/init"
 test "$(cat "$R/etc/hostname")" = g955n-ubuntu
 tar -C /source/image/rootfs-overlay -cf - . | tar -C "$R" --keep-directory-symlink -xpf -
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
-chroot "$R" systemctl enable g955n-hardware.service
+chmod 755 "$R/usr/local/sbin/g955n-grow-root"
+chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service
 for group in video audio input render dialout; do
   if chroot "$R" getent group "$group" >/dev/null; then
     chroot "$R" usermod -aG "$group" ubuntu

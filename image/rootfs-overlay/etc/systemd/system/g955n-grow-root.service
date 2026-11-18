@@ -1,0 +1,12 @@
+[Unit]
+Description=Grow native Ubuntu ext4 on SM-G955N USERDATA
+After=local-fs.target
+Before=multi-user.target
+ConditionPathExists=!/var/lib/g955n/root-grown
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/g955n-grow-root
+
+[Install]
+WantedBy=multi-user.target

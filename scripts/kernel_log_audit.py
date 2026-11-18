@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 
 PRIORITY = re.compile(r'^<(\d+)>')
-FAILURE = re.compile(r'Kernel panic|Internal error:|Unable to handle kernel|BUG:|Oops:|Call trace:|WARNING:|soft lockup|hard LOCKUP|rcu.*stall', re.I)
+FAILURE = re.compile(r'Kernel panic|Internal error:|Unable to handle kernel|\bBUG:|\bOops:|\bCall trace:|\bWARNING:|soft lockup|hard LOCKUP|\brcu\b.*stall', re.I)
 
 
 def audit(text):

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Only grow the already-installed native ext4 USERDATA filesystem.
+set -eu
+test "$(cat /etc/g955n-target)" = SM-G955N
+grep -q SM-G955N /proc/device-tree/model
+root=$(findmnt -n -o SOURCE /)
+root=$(readlink -f "$root")
+test -b "$root"
+grep -qx PARTNAME=USERDATA "/sys/class/block/$(basename "$root")/uevent"
+test "$(blkid -s LABEL -o value "$root")" = g955n-root
+resize2fs "$root"
+mkdir -p /var/lib/g955n
+touch /var/lib/g955n/root-grown

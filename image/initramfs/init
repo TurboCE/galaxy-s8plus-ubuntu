@@ -7,7 +7,15 @@ $BB mount -t proc proc /proc
 $BB mount -t sysfs sysfs /sys
 $BB mount -t devtmpfs devtmpfs /dev
 $BB mount -t tmpfs tmpfs /run
-exec >>/run/g955n-initramfs.log 2>&1
+[ -c /dev/kmsg ] || $BB mknod /dev/kmsg c 1 11
+if $BB echo '<6>g955n-init: native PID 1 entered' >/dev/kmsg; then
+    $BB mkfifo /run/g955n-log.pipe
+    $BB tee -a /run/g955n-initramfs.log </run/g955n-log.pipe >/dev/kmsg &
+    exec >/run/g955n-log.pipe 2>&1
+else
+    exec >>/run/g955n-initramfs.log 2>&1
+fi
+set -x
 echo 'SM-G955N native bootstrap starting'
 $BB cat /proc/cmdline
 
@@ -50,7 +58,6 @@ partdev() {
     return 1
 }
 
-$BB grep -q SM-G955N /proc/device-tree/model || rescue 'Unexpected DT model'
 $BB mkdir -p /sys/kernel/config
 $BB mount -t configfs configfs /sys/kernel/config || rescue 'configfs unavailable'
 G=/sys/kernel/config/usb_gadget/g955n
@@ -78,7 +85,18 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
     $BB sleep 1
 done
 [ -n "$udc" ] || rescue 'No USB device controller'
+# Samsung's UEVENT extension parks symlinked functions until this selection.
+# Names are usb_function names, not configfs instance names.
+ANDROID_USB=/sys/class/android_usb/android0
+if [ -w "$ANDROID_USB/functions" ]; then
+    echo cdc_ethernet,acm > "$ANDROID_USB/functions" || rescue 'USB function selection failed'
+fi
 echo "$udc" > "$G/UDC" || rescue 'USB gadget bind failed'
+if [ -w "$ANDROID_USB/enable" ]; then
+    echo 1 > "$ANDROID_USB/enable" || rescue 'USB gadget connect failed'
+fi
+$BB grep -q SM-G955N /sys/firmware/devicetree/base/model || rescue 'Unexpected DT model'
+if [ -f /etc/g955n-kernel-trial ]; then rescue 'Requested kernel-only trial; USERDATA untouched'; fi
 
 for attempt in 1 2 3 4 5 6 7 8 9 10; do
     rootdev=$(partdev USERDATA) && break

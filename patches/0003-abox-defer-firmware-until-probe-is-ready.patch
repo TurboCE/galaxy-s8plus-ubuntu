@@ -1,0 +1,61 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] ASoC: abox: request firmware after probe state is ready
+
+Fast initramfs firmware completion raced probe and called abox_enable()
+with a NULL regmap. Move submission after codec registration and check
+regmap errors before runtime PM. Preserve audio rather than suppressing it.
+
+diff --git a/sound/soc/samsung/abox/abox.c b/sound/soc/samsung/abox/abox.c
+--- a/sound/soc/samsung/abox/abox.c
++++ b/sound/soc/samsung/abox/abox.c
+@@ -5618,14 +5618,6 @@ static int samsung_abox_probe(struct platform_device *pdev)
+ 		return -EPROBE_DEFER;
+ 	}
+ 
+-	request_firmware_nowait(THIS_MODULE,
+-			FW_ACTION_HOTPLUG,
+-			"calliope_sram.bin",
+-			dev,
+-			GFP_KERNEL,
+-			pdev,
+-			abox_complete_sram_firmware_request);
+-
+ #ifdef EMULATOR
+ 	pmu_alive = ioremap(0x16480000, 0x10000);
+ #endif
+@@ -5644,6 +5636,9 @@ static int samsung_abox_probe(struct platform_device *pdev)
+ 			data->sfr_base,
+ 			&abox_codec_regmap_config);
+ 
++	if (IS_ERR(data->regmap))
++		return PTR_ERR(data->regmap);
++
+ 	pm_runtime_enable(dev);
+ 	pm_runtime_get(dev);
+ 
+@@ -5679,8 +5674,24 @@ static int samsung_abox_probe(struct platform_device *pdev)
+ 	atomic_notifier_chain_register(&panic_notifier_list,
+ 			&abox_panic_notifier);
+ 
+-	return snd_soc_register_codec(dev, &abox_codec, abox_dais,
++	ret = snd_soc_register_codec(dev, &abox_codec, abox_dais,
+ 			ARRAY_SIZE(abox_dais));
++	if (ret)
++		return ret;
++
++	/* Cached firmware can complete immediately. Publish it only after all
++	 * state used by abox_enable() and its child devices is initialized.
++	 */
++	ret = request_firmware_nowait(THIS_MODULE,
++			FW_ACTION_HOTPLUG,
++			"calliope_sram.bin",
++			dev,
++			GFP_KERNEL,
++			pdev,
++			abox_complete_sram_firmware_request);
++	if (ret)
++		dev_err(dev, "Failed to request SRAM firmware: %d\n", ret);
++	return 0;
+ }
+ 
+ static int samsung_abox_remove(struct platform_device *pdev)
