@@ -53,6 +53,7 @@ cat > "$R/etc/systemd/network/10-g955n-usb.network" <<'EOF'
 Name=usb0
 [Network]
 Address=192.168.55.2/24
+Address=fe80::55:ff:fe00:2/64
 DHCPServer=yes
 LinkLocalAddressing=no
 [DHCPServer]
@@ -87,9 +88,12 @@ printf '[Service]\nExecStartPre=/usr/bin/ssh-keygen -A\n' > "$R/etc/systemd/syst
 truncate -s 0 "$R/etc/machine-id"
 cleanup
 trap - EXIT
-IMAGE=/outputs/g955n-rootfs.unqualified.img
+IMAGE=/work/g955n-rootfs.next.img
+rm -f "$IMAGE"
 truncate -s 3072M "$IMAGE"
 mkfs.ext4 -F -L g955n-root -O ^metadata_csum_seed,^orphan_file,^64bit -d "$R" "$IMAGE"
 e2fsck -fn "$IMAGE"
-sha256sum "$IMAGE" /outputs/busybox-arm64-static > /outputs/SHA256SUMS
+cp --sparse=always "$IMAGE" /outputs/g955n-rootfs.next.img
+mv -f /outputs/g955n-rootfs.next.img /outputs/g955n-rootfs.unqualified.img
+sha256sum /outputs/g955n-rootfs.unqualified.img /outputs/busybox-arm64-static > /outputs/SHA256SUMS
 echo 'ROOTFS_BUILD_OK (not a phone boot or hardware qualification)'

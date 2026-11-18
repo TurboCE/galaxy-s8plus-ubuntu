@@ -1,0 +1,50 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] usb: gadget: ECM: allocate queues for Samsung u_ether
+
+This vendor tree moved queue allocation/freeing out of gether_connect/
+disconnect into function bind/unbind. RNDIS and NCM were adapted, ECM was
+not. It enumerates with carrier but neither direction can transfer a frame.
+Allocate/free its requests with matching cleanup on partial bind failure.
+
+diff --git a/drivers/usb/gadget/function/f_ecm.c b/drivers/usb/gadget/function/f_ecm.c
+--- a/drivers/usb/gadget/function/f_ecm.c
++++ b/drivers/usb/gadget/function/f_ecm.c
+@@ -686,6 +686,7 @@ ecm_bind(struct usb_configuration *c, struct usb_function *f)
+ 	struct usb_ep		*ep;
+ 
+ 	struct f_ecm_opts	*ecm_opts;
++	bool requests_allocated = false;
+ 
+ 	if (!can_support_ecm(cdev->gadget))
+ 		return -EINVAL;
+@@ -750,6 +751,12 @@ ecm_bind(struct usb_configuration *c, struct usb_function *f)
+ 		goto fail;
+ 	ecm->port.out_ep = ep;
+ 
++	/* The Samsung u_ether implementation allocates at bind, not connect. */
++	requests_allocated = true;
++	status = gether_alloc_request(&ecm->port);
++	if (status < 0)
++		goto fail;
++
+ 	/* NOTE:  a status/notification endpoint is *OPTIONAL* but we
+ 	 * don't treat it that way.  It's simpler, and some newer CDC
+ 	 * profiles (wireless handsets) no longer treat it as optional.
+@@ -806,6 +813,8 @@ ecm_bind(struct usb_configuration *c, struct usb_function *f)
+ 	return 0;
+ 
+ fail:
++	if (requests_allocated)
++		gether_free_request(&ecm->port);
+ 	if (ecm->notify_req) {
+ 		kfree(ecm->notify_req->buf);
+ 		usb_ep_free_request(ecm->notify, ecm->notify_req);
+@@ -903,6 +912,8 @@ static void ecm_unbind(struct usb_configuration *c, struct usb_function *f)
+ 
+ 	DBG(c->cdev, "ecm unbind\n");
+ 
++	gether_free_request(&ecm->port);
++
+ 	usb_free_all_descriptors(f);
+ 
+ 	kfree(ecm->notify_req->buf);

@@ -1,8 +1,10 @@
 # Galaxy S8+ SM-G955N Ubuntu port
 
 Experimental Ubuntu bring-up for the Korean Samsung Galaxy S8+ (dream2lteks,
-Exynos 8895). **No Ubuntu hardware feature is qualified yet. No installation
-image is offered.** This is a separate project from the SM-G965N port.
+Exynos 8895). **Native Ubuntu 24.04 boots; USB serial login, root filesystem
+growth and Wi-Fi 2.4/5 GHz DNS/HTTPS traffic have been observed. Most hardware
+acceptance remains incomplete. No installation image is offered.** This is a
+separate project from the SM-G965N port.
 
 The goal is parity with the phone's supported hardware: LTE data, calls/SMS and
 VoLTE, Wi-Fi (2.4/5 GHz), Bluetooth, GNSS, sensors, accelerated graphics,
@@ -18,15 +20,19 @@ G955NKSU5DZE1, Android 9, hardware revision 10, kernel 4.4.111.
 SurfaceFlinger reports ARM Mali-G71 / OpenGL ES 3.2 / r16p0-01rel0.
 Sensorservice lists LSM6DSL accelerometer/gyroscope and LPS22H barometer.
 These are Android observations, **not Ubuntu validation**. No root executable
-was found in the shell path. Partitions have not been backed up.
+was found in the shell path at that initial inspection checkpoint.
 
 Subsequent live work: the owner authorized the irreversible Knox change and
 Android app-data initialization. TWRP 3.7.0 root ADB is verified, Knox reports 1,
 and seven core partition backups have matching device/host byte counts and
 SHA256 hashes. The RECOVERY prefix matches the reviewed official image.
 TWRP lacks compiled crypto support; encrypted app-private data is not backed up.
-An updated kernel and model-specific boot image are built, not yet boot-qualified.
-Ubuntu rootfs preparation and first-boot integration are in progress.
+Native Ubuntu is now installed and has booted into systemd, with an authenticated
+Ubuntu session and no failed systemd units in the first status capture. The root
+filesystem grew to approximately 113 GiB. Wi-Fi traffic on both bands works after
+fixing inherited build-container DNS configuration. Kernel logs still contain
+findings, and GPU, audio, sensors, radios and the other acceptance items remain
+under active bring-up. No SIM is present for cellular end-to-end tests.
 
 ## Approach
 

@@ -94,6 +94,8 @@ def main():
     commandline = (f'console={console} log_buf_len=4M loglevel=7 androidboot.hardware=samsungexynos8895 '
                    'androidboot.selinux=permissive enforcing=0 loop.max_part=7 '
                    'firmware_class.path=/vendor/firmware systemd.unified_cgroup_hierarchy=0')
+    if console == 'tty0':
+        commandline += ' fbcon=map:0'
     subprocess.run(['python3', str(ROOT / 'scripts/boot/mkboot.py'), '--ref', str(stock),
                     '--kernel', str(args.kernel_dir / 'Image.unqualified'), '--dt', str(dtimg),
                     '--ramdisk', str(ramdisk), '--cmdline', commandline, '-o', str(args.output)], check=True)

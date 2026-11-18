@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Explicit BOOT-only kernel trial. Never mounts or writes USERDATA; no reboot."""
+"""Explicit BOOT-only trial/update. Never mounts or writes USERDATA; no reboot."""
 import argparse
 import datetime
 import json
 import os
 from pathlib import Path
 import subprocess
-from install_ubuntu import BASE, PROTECTED, ROOT, digest, verify_backup, verify_boot, expected_boot_hash
+from install_ubuntu import (BASE, PROTECTED, ROOT, digest, verify_backup, verify_boot,
+                            expected_boot_hash, expected_installed_boot_hash)
 
 
 def main():
@@ -15,12 +16,22 @@ def main():
     parser.add_argument('--serial', required=True)
     parser.add_argument('--boot', type=Path, required=True)
     parser.add_argument('--backup-dir', type=Path, required=True)
-    parser.add_argument('--prior-trial', type=Path, help='Allow replacement of an exactly verified prior BOOT trial')
+    predecessor = parser.add_mutually_exclusive_group()
+    predecessor.add_argument('--prior-trial', '--prior-boot-record', type=Path,
+                             help='Require exact full-partition hash from a prior BOOT-only receipt')
+    predecessor.add_argument('--prior-install', type=Path,
+                             help='Bridge a verified first-install receipt using its original BOOT image')
+    parser.add_argument('--installed-boot', type=Path)
+    parser.add_argument('--normal-boot', action='store_true',
+                        help='Explicitly update normal Ubuntu BOOT on an already labeled Ubuntu USERDATA')
     args = parser.parse_args()
     verify_boot(args.boot)
     meta = json.loads(args.boot.with_suffix('.json').read_text())
-    if meta.get('target') != 'SM-G955N' or not meta.get('kernel_trial') or meta.get('image_sha256') != digest(args.boot):
-        raise SystemExit('Requires the exact model-validated, USERDATA-free kernel trial image')
+    if (meta.get('target') != 'SM-G955N' or meta.get('kernel_trial') is not (not args.normal_boot)
+            or meta.get('image_sha256') != digest(args.boot)):
+        raise SystemExit('Boot image model/hash or explicit trial/normal mode mismatch')
+    if bool(args.prior_install) != bool(args.installed_boot):
+        raise SystemExit('--prior-install and --installed-boot must be supplied together')
     backup = json.loads((args.backup_dir / 'manifest.json').read_text())
     if not backup.get('verified') or backup.get('model') != 'SM-G955N':
         raise SystemExit('Requires verified private raw backups')
@@ -34,19 +45,25 @@ def main():
     if not backup['bootloader'].startswith('G955N'):
         raise SystemExit('Not G955N')
     expected_boot = expected_boot_hash(backup, args.prior_trial)
+    if args.prior_install:
+        verify_boot(args.installed_boot)
+        expected_boot = expected_installed_boot_hash(args.backup_dir, args.prior_install, args.installed_boot)
     for name in ('BOOT', *PROTECTED):
         info = backup['partitions'][name]
         verify_backup(args.backup_dir / (name + '.img'), info['bytes'], info['sha256'])
         expected_current = expected_boot if name == 'BOOT' else info['sha256']
         if shell('sha256sum ' + BASE + name).split()[0] != expected_current:
             raise SystemExit('Unexpected current partition contents: ' + name)
+    if args.normal_boot and shell('blkid -s LABEL -o value ' + BASE + 'USERDATA') != 'g955n-root':
+        raise SystemExit('Normal BOOT update requires the already installed G955N Ubuntu filesystem')
     if args.boot.stat().st_size > int(shell('blockdev --getsize64 ' + BASE + 'BOOT')):
         raise SystemExit('BOOT capacity exceeded')
     os.umask(0o077)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     record = ROOT / 'artifacts' / ('kernel-trial-' + stamp + '.json')
     state = dict(target='SM-G955N', bootloader=backup['bootloader'],
-                 image_sha256=meta['image_sha256'], state='preflight_passed', userdata_written=False)
+                 image_sha256=meta['image_sha256'], state='preflight_passed', userdata_written=False,
+                 kernel_trial=meta['kernel_trial'])
     record.write_text(json.dumps(state, indent=2))
     remote = '/tmp/g955n-kernel-trial.img'
     subprocess.run(adb + ['push', str(args.boot), remote], check=True, timeout=180, stdout=subprocess.DEVNULL)

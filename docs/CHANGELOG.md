@@ -167,3 +167,31 @@
 - Added native VT/framebuffer-console configuration and a larger kernel log
   buffer for the next kernel build. The boot packer selects tty0 only when the
   supplied, embedded-verified configuration actually supports it.
+
+### First Ubuntu boot and Wi-Fi traffic
+
+- Installed the offline-validated root filesystem through 48 individually
+  verified 64 MiB chunks, then verified the full 3 GiB hash before writing BOOT.
+  BOOT readback matched and RECOVERY/EFS/CPEFS/RADIO/PARAM hashes were unchanged.
+- Native Ubuntu 24.04 started systemd and a physical USB Ubuntu login. The first
+  status capture reports running with zero failed systemd units; root growth
+  completed successfully to about 113 GiB. Kernel logs are not clean.
+- Wi-Fi association and pinned-host-key SSH succeeded. Initial Internet access
+  failed because debootstrap retained Docker's private DNS address. Configured
+  NetworkManager to manage resolv.conf using DHCP DNS, and removed the inherited
+  resolver from future filesystem finalization. Actual bound-wlan DNS/TLS/HTTP
+  200 downloads of 254968 bytes passed separately at 2467 and 5745 MHz. Network
+  names, credentials and addresses remain private.
+- USB Ethernet reported carrier but RX/TX stayed at zero. Vendor u_ether moved
+  request allocation/freeing into bind/unbind, but only RNDIS/NCM were updated.
+  Patch 0004 adapts ECM too, including partial-bind cleanup; hardware test pending.
+- Found DECON's missing copyarea/imageblit callbacks before enabling fbcon on
+  the phone. Patch 0005 supplies the generic CFB operations and console mapping
+  is limited to primary fb0. This candidate is not yet booted.
+- Patch 0006 keeps real ENOSYS for glibc's optional native rseq probe without
+  misreporting it as a register-dump exception. Other unsupported calls and
+  genuine kernel faults retain diagnostics. This does not implement rseq.
+- Added explicit normal BOOT-only update gates and predecessor installation
+  readback verification; the updater still never writes USERDATA or reboots.
+- The owner reports no SIM; cellular end-to-end acceptance cannot be completed
+  on the current physical setup. Cellular software investigation remains open.

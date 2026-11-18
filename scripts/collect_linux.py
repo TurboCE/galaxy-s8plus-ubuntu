@@ -8,6 +8,7 @@ import shlex
 from pathlib import Path
 import subprocess
 from kernel_log_audit import audit
+from serial_shell import SerialShell
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKS = {
@@ -27,13 +28,16 @@ CHECKS = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--host', required=True, help='SSH host or user@host; configure host key and authentication first')
+    transport = parser.add_mutually_exclusive_group(required=True)
+    transport.add_argument('--host', help='SSH host or user@host; configure host key and authentication first')
+    transport.add_argument('--serial-port', help='Explicit G955N USB console port for bring-up without host networking')
     parser.add_argument('--identity', type=Path)
     parser.add_argument('--known-hosts', type=Path)
     parser.add_argument('--sudo', action='store_true', help='Use existing passwordless sudo for diagnostic reads')
     args = parser.parse_args()
-    if args.host.startswith('-') or any(c.isspace() for c in args.host):
+    if args.host and (args.host.startswith('-') or any(c.isspace() for c in args.host)):
         raise SystemExit('Invalid SSH destination')
+    serial = SerialShell(args.serial_port) if args.serial_port else None
 
     def run(command):
         options = []
@@ -43,6 +47,8 @@ def main():
             options += ['-o', 'UserKnownHostsFile=' + str(args.known_hosts), '-o', 'StrictHostKeyChecking=yes']
         if args.sudo:
             command = 'sudo -n -- sh -c ' + shlex.quote(command)
+        if serial:
+            return serial.run(command)
         try:
             p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
                                 *options, args.host, command], capture_output=True, text=True, timeout=40)
@@ -65,6 +71,8 @@ def main():
                   hardware_validation='Not qualified by service/node enumeration')
     (directory / 'linux.json').write_text(json.dumps(report, indent=2))
     (directory / 'dmesg.raw').write_text(kernel['stdout'])
+    if serial:
+        serial.close()
     print(directory)
 
 

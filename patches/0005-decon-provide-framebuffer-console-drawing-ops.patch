@@ -1,0 +1,23 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] fbdev: DECON: provide console copy and image operations
+
+The Android-oriented fb_ops only supplied fillrect. Native fbcon needs
+copyarea and imageblit as well; supply the existing generic CFB helpers.
+Do not bind a console with missing drawing callbacks.
+
+diff --git a/drivers/video/fbdev/exynos/dpu/decon_core.c b/drivers/video/fbdev/exynos/dpu/decon_core.c
+--- a/drivers/video/fbdev/exynos/dpu/decon_core.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_core.c
+@@ -3366,6 +3366,12 @@ static struct fb_ops decon_fb_ops = {
+ #ifdef CONFIG_FB_CFB_FILLRECT
+ 	.fb_fillrect    = cfb_fillrect,
+ #endif
++#ifdef CONFIG_FB_CFB_COPYAREA
++	.fb_copyarea    = cfb_copyarea,
++#endif
++#ifdef CONFIG_FB_CFB_IMAGEBLIT
++	.fb_imageblit   = cfb_imageblit,
++#endif
+ #ifdef CONFIG_COMPAT
+ 	.fb_compat_ioctl = decon_compat_ioctl,
+ #endif

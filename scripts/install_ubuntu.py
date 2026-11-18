@@ -43,6 +43,28 @@ def expected_boot_hash(backup, prior_trial=None):
     return expected
 
 
+def expected_installed_boot_hash(backup_dir, installation, installed_boot):
+    previous = json.loads(installation.read_text())
+    if (previous.get('target') != 'SM-G955N'
+            or previous.get('state') != 'installed_readback_verified_not_booted'
+            or previous.get('boot_sha256') != digest(installed_boot)
+            or previous.get('protected_partitions_unchanged') != list(PROTECTED)):
+        raise ValueError('Invalid predecessor installation or BOOT image')
+    if 'boot_partition_sha256' in previous:
+        expected = previous['boot_partition_sha256']
+        if not re.fullmatch(r'[0-9a-f]{64}', expected):
+            raise ValueError('Invalid full BOOT readback hash')
+        return expected
+    original = (backup_dir / 'BOOT.img').read_bytes()
+    image = installed_boot.read_bytes()
+    if len(image) > len(original):
+        raise ValueError('Predecessor BOOT exceeds original partition backup')
+    # Used once to bridge older installer receipts without a full-partition SHA.
+    # If a still-older longer image left a different tail, the live comparison
+    # fails closed. Later BOOT-only receipts already include the full hash.
+    return hashlib.sha256(image + original[len(image):]).hexdigest()
+
+
 def verify_rootfs_header(path):
     with path.open('rb') as file:
         file.seek(1024)
@@ -179,6 +201,7 @@ def main():
     shell('rm -f ' + remote + '; sync')
     chunk_file.unlink()
     state['state'] = 'installed_readback_verified_not_booted'
+    state['boot_partition_sha256'] = shell('sha256sum ' + BASE + 'BOOT').split()[0]
     state['protected_partitions_unchanged'] = list(PROTECTED)
     save()
     print('Verified installation; no reboot performed:', manifest)

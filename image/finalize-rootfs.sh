@@ -15,7 +15,14 @@ for group in video audio input render dialout; do
 done
 # Match the gadget MAC so predictable interface naming does not break USB SSH.
 sed -i 's/^Name=usb0$/MACAddress=02:55:00:00:00:02/' "$R/etc/systemd/network/10-g955n-usb.network"
+sed -i 's/^LinkLocalAddressing=ipv6$/LinkLocalAddressing=no/' "$R/etc/systemd/network/10-g955n-usb.network"
+if ! grep -q '^Address=fe80::55:ff:fe00:2/64$' "$R/etc/systemd/network/10-g955n-usb.network"; then
+  sed -i '/^Address=192.168.55.2\/24$/a Address=fe80::55:ff:fe00:2/64' "$R/etc/systemd/network/10-g955n-usb.network"
+fi
 printf '[keyfile]\nunmanaged-devices=mac:02:55:00:00:00:02\n' > "$R/etc/NetworkManager/conf.d/10-g955n-usb.conf"
+# Never ship the build container's private resolver into a physical handset.
+rm -f "$R/etc/resolv.conf"
+printf '# Managed by NetworkManager after network activation.\n' > "$R/etc/resolv.conf"
 printf 'SM-G955N\n' > "$R/etc/g955n-target"
 # Unique private build keys allow host-key pinning before the first connection.
 chroot "$R" ssh-keygen -A
@@ -29,10 +36,13 @@ if [ -n "$package_audit" ]; then
   printf '%s\n' "$package_audit" >&2
   exit 1
 fi
-IMAGE=/outputs/g955n-rootfs.unqualified.img
+IMAGE=/work/g955n-rootfs.next.img
 rm -f "$IMAGE"
 truncate -s 3072M "$IMAGE"
 mkfs.ext4 -F -L g955n-root -O ^metadata_csum_seed,^orphan_file,^64bit -d "$R" "$IMAGE"
 e2fsck -fn "$IMAGE"
-sha256sum "$IMAGE" /outputs/busybox-arm64-static > /outputs/SHA256SUMS
+# Populate ext4 on Linux storage; publish sequentially only after fsck passes.
+cp --sparse=always "$IMAGE" /outputs/g955n-rootfs.next.img
+mv -f /outputs/g955n-rootfs.next.img /outputs/g955n-rootfs.unqualified.img
+sha256sum /outputs/g955n-rootfs.unqualified.img /outputs/busybox-arm64-static > /outputs/SHA256SUMS
 echo 'ROOTFS_FINALIZE_OK (still requires hardware validation)'

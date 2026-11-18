@@ -11,6 +11,28 @@ spec.loader.exec_module(install)
 
 
 class InstallGuards(unittest.TestCase):
+    def test_initial_install_bridge_rejects_unverified_or_wrong_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original, image = b'original partition bytes', b'new boot'
+            (root / 'BOOT.img').write_bytes(original)
+            boot = root / 'normal.img'
+            boot.write_bytes(image)
+            record = root / 'install.json'
+            valid = dict(target='SM-G955N', state='installed_readback_verified_not_booted',
+                         boot_sha256=hashlib.sha256(image).hexdigest(),
+                         protected_partitions_unchanged=list(install.PROTECTED))
+            record.write_text(json.dumps(valid))
+            expected = hashlib.sha256(image + original[len(image):]).hexdigest()
+            self.assertEqual(install.expected_installed_boot_hash(root, record, boot), expected)
+            for field, value in [('target', 'SM-G965N'), ('state', 'writing_userdata'),
+                                 ('boot_sha256', 'bad'), ('protected_partitions_unchanged', [])]:
+                record.write_text(json.dumps(dict(valid, **{field: value})))
+                with self.assertRaises(ValueError):
+                    install.expected_installed_boot_hash(root, record, boot)
+            record.write_text(json.dumps(dict(valid, boot_partition_sha256='c' * 64)))
+            self.assertEqual(install.expected_installed_boot_hash(root, record, boot), 'c' * 64)
+
     def test_prior_boot_trial_requires_matching_identity_and_complete_readback(self):
         backup = dict(bootloader='G955NKSU5DZE1', partitions={'BOOT': {'sha256': 'a' * 64}})
         self.assertEqual(install.expected_boot_hash(backup), 'a' * 64)

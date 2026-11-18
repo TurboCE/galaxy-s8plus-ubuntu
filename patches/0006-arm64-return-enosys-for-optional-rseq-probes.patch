@@ -1,0 +1,26 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] arm64: do not dump registers for optional native rseq probes
+
+Every modern glibc process probes rseq and handles ENOSYS on old kernels.
+The register dump is not an exception and floods out real early-boot logs.
+Keep the truthful ENOSYS return and other unsupported-call diagnostics.
+This does not implement rseq or suppress actual kernel faults.
+
+diff --git a/arch/arm64/kernel/traps.c b/arch/arm64/kernel/traps.c
+--- a/arch/arm64/kernel/traps.c
++++ b/arch/arm64/kernel/traps.c
+@@ -594,6 +594,14 @@ asmlinkage long do_ni_syscall(struct pt_regs *regs)
+ 	}
+ #endif
+ 
++	/* Native glibc probes optional rseq (arm64 syscall 293) at startup.
++	 * Linux 4.4 has no rseq: return the real ENOSYS for its supported
++	 * userspace fallback, without misreporting negotiation as a fault.
++	 * Other unsupported calls retain the vendor diagnostics below.
++	 */
++	if (!is_compat_task() && regs->syscallno == 293)
++		return sys_ni_syscall();
++
+ 	/* suppress magiskd ni syscall 434 reg dump in dmesg */
+ 	if (regs->syscallno == 434)
+ 		return sys_ni_syscall();
