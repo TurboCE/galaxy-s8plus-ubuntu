@@ -390,6 +390,12 @@
   paths and card identity instead of mutable names. Lua syntax passes; this
   plausible explanation of residual probing is not confirmed by a new trial.
   Revised rules are not installed on the running phone.
+- Versioned a default-read-only light-calibration validator from the earlier
+  successful private diagnostic. It checks the actual EFS partition/mount,
+  reviewed version and original coefficient checksum before an explicit runtime
+  hook, then compares the entire partition and original files. The refactored
+  script passed syntax checks only; no further calibration hook or physical
+  sensor trial was run overnight.
 - Real HWM/property trials passed ready-property authentication, second-process
   reads, bounded lifetime and namespace cleanup. A no-device HWC diagnostic then
   reached real HWBinder communication but waited for graphics allocator 2.0,
