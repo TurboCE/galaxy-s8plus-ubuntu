@@ -13,7 +13,7 @@ the pinned Android 9 headers and the private libhybris prefix:
 gcc -std=gnu11 -Wall -Wextra -Werror -O2 hwc-module-probe.c \
   -I"$HOME/g955n-compat-build/android9-headers" \
   -I"$HOME/g955n-compat-install/include" \
-  -L"$HOME/g955n-compat-install/lib" -lhardware -lhybris-common \
+  -L"$HOME/g955n-compat-install/lib" -lhardware -lhybris-common -landroid-properties \
   -o hwc-module-probe
 ```
 
@@ -38,8 +38,9 @@ composer, checks the device API before interpreting the HWC2 vtable, reads
 capabilities/function availability, registers metadata callbacks, waits at most
 five seconds for hotplug and queries display configurations before closing.
 It does not create layers, set power, enable vsync, enqueue buffers or present
-frames. This mode has not
-yet been executed; metadata success must not be relabeled as display success.
+frames. It was executed in the exclusive kernel-15 interval described below,
+but timed out before returning a device. HWC2 API/configuration callbacks and
+display output remain unverified; metadata success does not establish them.
 
 The installed `libhwc2.so` is a wrapper that loads `libhwc2_compat_layer.so`, which
 is absent from the stock phone / private prefix. Merely running the upstream
@@ -57,3 +58,24 @@ Desktop integration needs a compatible accelerated compositor/backend and a
 supported EGL/GLES presentation route (or a separate native DRM/KMS/Panfrost
 port). Globally substituting the private Android EGL library into the current
 Xorg/GLX environment is not a demonstrated fix.
+
+A kernel-15 exclusive open trial (GDM/helper stopped, both restored in finally)
+timed out before returning a device. Its private strace showed over 117,000
+CLOCK_MONOTONIC reads after checking /dev/hwbinder, without opening binder or
+issuing a hardware ioctl. /dev/__properties__ was absent. Android 9's HIDL
+ServiceManagement.cpp waits indefinitely for hwservicemanager.ready; this is
+a matching dependency explanation, not a captured-callstack proof of the exact
+loop. The probe now checks the real Android property area/readiness before
+opening and returns exit 3 if unavailable. It does not fake that property.
+A real property/HWBinder service environment and subsequent bounded stack
+inspection are needed before claiming HWC initialization works.
+
+A genuine Bionic property/HWBinder runtime has since passed a bounded private
+PID/mount-namespace trial with original read-only BOOT service contexts. See
+android-runtime-notes.md for the actual ready publication and cleanup evidence.
+The --hwc-open-no-devices diagnostic has now run with all GPU/display/audio
+nodes absent, sysfs/procfs read-only, dangerous capabilities removed and NNP set.
+It passed the original property wait and reached actual HWBinder IPC, but now
+waits for the unstarted graphics allocator 2.0 HAL; /dev/ion is deliberately
+absent. The strict runtime rejected allocator autostart and HWC open timed out.
+This is a concrete dependency finding, not GPU presentation acceptance.

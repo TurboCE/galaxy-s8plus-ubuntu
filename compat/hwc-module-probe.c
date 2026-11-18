@@ -5,6 +5,7 @@
 #include <hardware/hardware.h>
 #include <hardware/hwcomposer2.h>
 #include <hybris/common/dlfcn.h>
+#include <hybris/properties/properties.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,10 @@
 #include <stdatomic.h>
 #include <inttypes.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/prctl.h>
 
 
 struct hotplug_state {
@@ -106,6 +111,28 @@ static int display_metadata(hwc2_device_t *device) {
     return 0;
 }
 
+
+static int no_device_guard(void) {
+    const char *paths[] = {"/dev/snd", "/dev/block", "/dev/mali0", "/dev/ion", "/dev/fb0",
+                           "/dev/graphics/fb0", "/dev/sw_sync", "/efs"};
+    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        if (!access(paths[i], F_OK)) {
+            fprintf(stderr, "Dependency diagnostic refused: hardware path exists: %s\n", paths[i]);
+            return 0;
+        }
+    }
+    struct statvfs sys, proc;
+    if (statvfs("/sys", &sys) || statvfs("/proc", &proc) ||
+        !(sys.f_flag & ST_RDONLY) || !(proc.f_flag & ST_RDONLY)) return 0;
+    const int removed[] = {21, 27, 17, 16, 22}; /* SYS_ADMIN, MKNOD, SYS_RAWIO, SYS_MODULE, SYS_BOOT */
+    for (size_t i = 0; i < sizeof(removed) / sizeof(removed[0]); i++) {
+        if (prctl(PR_CAPBSET_READ, removed[i], 0, 0, 0) != 0) return 0;
+    }
+    if (prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) != 1) return 0;
+    puts("dependency_guard=passed no_hardware_nodes=yes sys_proc_readonly=yes dangerous_caps_dropped=yes no_new_privs=yes");
+    return 1;
+}
+
 static int identity_ok(void) {
     struct utsname name;
     char model[256] = {0};
@@ -152,9 +179,10 @@ static int metadata(const char *id, const hw_module_t **module, const char *fall
 }
 
 int main(int argc, char **argv) {
-    int open_hwc2 = argc == 2 && !strcmp(argv[1], "--open-hwc2");
+    int no_devices = argc == 2 && !strcmp(argv[1], "--open-hwc2-no-devices");
+    int open_hwc2 = no_devices || (argc == 2 && !strcmp(argv[1], "--open-hwc2"));
     if (argc > 2 || (argc == 2 && strcmp(argv[1], "--metadata") && !open_hwc2)) {
-        fprintf(stderr, "Usage: %s [--metadata | --open-hwc2]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [--metadata | --open-hwc2 | --open-hwc2-no-devices]\n", argv[0]);
         return 2;
     }
     if (!identity_ok()) {
@@ -162,6 +190,11 @@ int main(int argc, char **argv) {
         return 2;
     }
     setvbuf(stdout, NULL, _IOLBF, 0);
+    printf("probe_namespace_pid=%ld\n", (long)getpid());
+    if (no_devices && !no_device_guard()) {
+        fputs("No-device diagnostic prerequisites not satisfied; composer not loaded\n", stderr);
+        return 2;
+    }
     const hw_module_t *gralloc = NULL, *composer = NULL;
     int failed = metadata("gralloc", &gralloc, NULL);
     failed |= metadata(HWC_HARDWARE_MODULE_ID, &composer, "/vendor/lib64/hw/hwcomposer.exynos5.so");
@@ -170,9 +203,26 @@ int main(int argc, char **argv) {
         puts("Metadata only: no device open, layer, power, buffer or present calls");
         return 0;
     }
+    /* Stock HIDL-backed composer startup depends on a real Android property
+     * area and a ready hwservicemanager. Refuse a known unbounded wait rather
+     * than inventing a ready property or bypassing service initialization. */
+    struct stat properties;
+    if (stat("/dev/__properties__", &properties) || !S_ISDIR(properties.st_mode) ||
+        access("/dev/__properties__", R_OK)) {
+        fputs("Android property area unavailable; composer open not attempted\n", stderr);
+        return 3;
+    }
+    char ready[PROP_VALUE_MAX] = {0};
+    property_get("hwservicemanager.ready", ready, "false");
+    if (strcmp(ready, "true")) {
+        fputs("Android hwservicemanager is not ready; composer open not attempted\n", stderr);
+        return 3;
+    }
     if (!composer->methods || !composer->methods->open) return 1;
     hw_device_t *raw = NULL;
+    puts("stage=composer_open");
     int error = composer->methods->open(composer, HWC_HARDWARE_COMPOSER, &raw);
+    puts("stage=composer_open_returned");
     if (error || !raw) {
         fprintf(stderr, "composer open failed: %d\n", error);
         return 1;
