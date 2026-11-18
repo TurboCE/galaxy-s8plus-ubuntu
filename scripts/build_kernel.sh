@@ -17,9 +17,19 @@ git -C "$SOURCE" archive HEAD | docker run --rm -i --network none \
 mkdir -p "$ROOT/artifacts"
 docker run --rm --network none -v "$VOLUME:/work" \
   -v "$ROOT/config:/port-config:ro" -v "$ROOT/artifacts:/artifacts" \
+  -v "$ROOT/patches:/port-patches:ro" \
   -e PORT_MODE="$MODE" -e ARCH=arm64 -e CROSS_COMPILE=aarch64-linux-gnu- \
   "$BUILDER" bash -euc '
     cd /work/src
+    for patch_file in /port-patches/*.patch; do
+      git apply --check "$patch_file"
+      git apply "$patch_file"
+    done
+    # Makefile command changes do not invalidate existing generated assembly.
+    # Remove only derived firmware assembly in this dedicated output directory.
+    if [ -d /work/out/firmware ]; then
+      find /work/out/firmware -name "*.gen.S" -delete
+    fi
     make O=/work/out HOSTCFLAGS="-O2 -fcommon" g950x_defconfig
     scripts/kconfig/merge_config.sh -m -O /work/out /work/out/.config \
       arch/arm64/configs/g955x_kor_defconfig /port-config/ubuntu-bringup.fragment
@@ -28,5 +38,6 @@ docker run --rm --network none -v "$VOLUME:/work" \
     if [ "$PORT_MODE" = image ]; then
       make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" Image dtbs
       cp /work/out/arch/arm64/boot/Image /artifacts/Image.unqualified
+      cp /work/out/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dtb /artifacts/
     fi
   '

@@ -41,6 +41,9 @@ docker build -t g955n-ubuntu-builder:24.04 -f build/Dockerfile .
 bash scripts/build_kernel.sh config
 # Experimental compilation; not an installable boot image:
 bash scripts/build_kernel.sh image
+# Only after Ubuntu boots and the SSH host key/authentication are configured:
+python3 scripts/collect_linux.py --host root@PHONE_IP
+python3 scripts/kernel_log_audit.py inventory/TIMESTAMP/dmesg.raw
 ```
 
 Collectors are read-only; outputs under inventory/ may contain personal data

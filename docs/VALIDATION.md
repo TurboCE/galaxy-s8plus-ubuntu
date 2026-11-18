@@ -3,6 +3,11 @@
 Status date: 2026-11-18. Android discovery does not prove end-to-end operation.
 Ubuntu: not booted. No row may become PASS from configuration or compilation alone.
 
+Runtime capture tooling exists in scripts/collect_linux.py; it refuses an
+unexpected kernel/DT. Stock dmesg was denied and kernel logcat returned no
+entries. Thus neither stock nor Ubuntu logs have been certified clean.
+Seven host tests pass; these are tooling checks, not hardware acceptance tests.
+
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
 | Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Not tested |

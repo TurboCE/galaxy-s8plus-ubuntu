@@ -22,3 +22,29 @@
   compatibility stack; proprietary binaries were not committed.
 - Identity guard tests: 3 passed. Python compilation, shell syntax and Git
   whitespace checks passed.
+
+## 2026-11-18 — firmware build fix and runtime diagnostics
+
+- Initial Image/DTB attempt failed because the out-of-tree firmware rule emitted
+  an objtree path for exynos8895_acpm_dvfs.fw, which is shipped in srctree.
+  Added a reviewable patch selecting the source binary when present, retaining
+  objtree paths for firmware generated from ihex. ACPM support was not disabled.
+- Restarted compilation in the isolated G955N volume. ACPM firmware assembly
+  now passes. Full build result remains pending at this checkpoint.
+- Added FHANDLE, AUTOFS4, USER_NS and tmpfs ACLs to the next configuration
+  revision for Linux user-space integration. The in-progress compiler probe
+  still uses the previous generated configuration; do not conflate them.
+- Added guarded read-only Linux/SSH capture and kernel log audit. The audit
+  distinguishes missing/partial captures, priority errors, warnings and traces.
+  It certifies neither all hardware nor long-term stability.
+- Tests: 7 passed, including denied log access, partial logs, warning/error
+  priorities and a kernel exception logged at notice priority.
+- Confirmed stock dmesg access is denied; kernel logcat produced no entries.
+  No claim of an error-free stock or Ubuntu kernel is possible from that result.
+- Matched exact KTC stock restore version through Samsung firmware service and
+  started private download. Shared storage copied (38 files, 19,522,945 bytes);
+  app-private data, EFS, CPEFS, RADIO, BOOT and RECOVERY are not backed up yet.
+- Observed Android reports block-encrypted /data, no external microSD, OEM
+  unlock allowed=1, flash.locked=0, verifiedbootstate=orange and warranty_bit=0.
+  These properties do not independently prove Download Mode flash permission.
+- No on-device settings, firmware or partitions changed.
