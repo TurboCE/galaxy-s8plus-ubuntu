@@ -1,0 +1,20 @@
+This repository contains original port orchestration and documentation.
+References are not claims of hardware validation or redistribution permission.
+
+Samsung / Linux contributors / ace2nutzer:
+  https://github.com/ace2nutzer/Samsung_dreamlte_Kernel
+  Candidate Linux kernel source; retain its GPL terms and notices when modifying.
+Abdur Rouf:
+  https://github.com/roufsweb/galaxy-s8
+  G950N native Linux boot reference, not a G955N installation image.
+tingao / exynos8895 contributors:
+  https://github.com/tingao/dream2lte-droidspaces-kernel
+  S8+ container configuration and cgroup patch reference.
+Halium / UBports / libhybris / Mesa contributors:
+  https://docs.halium.org/
+  https://docs.ubports.com/
+  https://github.com/libhybris/libhybris
+  https://docs.mesa3d.org/drivers/panfrost.html
+
+No Samsung firmware, Mali proprietary libraries, Windows/Ubuntu disk images,
+device identifiers or calibration data are distributed by this repository.

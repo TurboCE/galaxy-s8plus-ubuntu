@@ -1,0 +1,13 @@
+upstream/
+inventory/
+backups/
+artifacts/
+logs/
+out/
+__pycache__/
+*.pyc
+*.img
+*.bin
+*.zip
+*.tar*
+.DS_Store

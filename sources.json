@@ -1,0 +1,21 @@
+{
+  "target": "SM-G955N",
+  "device": "dream2lteks",
+  "sources": {
+    "kernel": {
+      "url": "https://github.com/ace2nutzer/Samsung_dreamlte_Kernel.git",
+      "commit": "54feaea9870dd0e90ceced5623e0544d965b400b",
+      "role": "Candidate kernel with Korean dream2lte device trees; not qualified"
+    },
+    "native-linux-reference": {
+      "url": "https://github.com/roufsweb/galaxy-s8.git",
+      "commit": "fe5465ce5f5b2ea7e3b0ab4857ee7624ba1afdb8",
+      "role": "G950N boot reference only; do not flash its images on G955N"
+    },
+    "container-reference": {
+      "url": "https://github.com/tingao/dream2lte-droidspaces-kernel.git",
+      "commit": "136518391ff4de680e65783b78f9df4b6517f81b",
+      "role": "G955F container patches for review, not automatically applied"
+    }
+  }
+}
