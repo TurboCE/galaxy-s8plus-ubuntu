@@ -19,3 +19,10 @@ RECOVERY as restore material. This precedes privileged raw backups; take those
 as soon as root recovery is reached. No data wipe is authorized by this exception.
 Subsequent Ubuntu installation must preserve the working recovery and all
 device-specific calibration partitions. Stop for device-side flash restrictions.
+
+The owner additionally authorized app-data initialization on 2026-11-18 after
+being told shared storage/core partitions were backed up but encrypted
+app-private data was not. Ubuntu may replace USERDATA and BOOT after image,
+identity, capacity and verified-backup checks. Preserve the now-working TWRP
+RECOVERY and the EFS/CPEFS/RADIO/calibration partitions. No repartitioning or
+bootloader changes are part of that authorization.

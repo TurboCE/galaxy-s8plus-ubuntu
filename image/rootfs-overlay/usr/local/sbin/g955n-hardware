@@ -1,0 +1,26 @@
+#!/bin/sh
+# Runtime compatibility paths for the Samsung 4.4 BSP; no EFS writes.
+set -eu
+mkdir -p /vendor/etc /data/wifi
+if [ ! -e /vendor/etc/wifi ]; then ln -s /system/etc/wifi /vendor/etc/wifi; fi
+if [ ! -e /etc/wifi ]; then ln -s /system/etc/wifi /etc/wifi; fi
+for source in /system/etc/wifi/nvram.txt*; do
+    [ -f "$source" ] || continue
+    suffix=${source#/system/etc/wifi/nvram.txt}
+    alias=/system/etc/wifi/nvram_net.txt${suffix}
+    [ -e "$alias" ] || ln -s "$(basename "$source")" "$alias"
+done
+for module in dhd bcmdhd; do
+    base=/sys/module/$module/parameters
+    if [ -w "$base/firmware_path" ]; then
+        printf /system/etc/wifi/bcmdhd_sta.bin > "$base/firmware_path"
+        printf /system/etc/wifi/nvram.txt > "$base/nvram_path"
+        echo "Configured $module firmware/NVRAM paths"
+    fi
+done
+if [ -c /dev/graphics/fb0 ] && [ ! -e /dev/fb0 ]; then ln -s /dev/graphics/fb0 /dev/fb0; fi
+for node in /dev/mali0 /dev/ion /dev/fb0 /dev/graphics/fb0; do
+    [ -c "$node" ] || continue
+    chgrp video "$node"
+    chmod 660 "$node"
+done

@@ -20,6 +20,14 @@ Sensorservice lists LSM6DSL accelerometer/gyroscope and LPS22H barometer.
 These are Android observations, **not Ubuntu validation**. No root executable
 was found in the shell path. Partitions have not been backed up.
 
+Subsequent live work: the owner authorized the irreversible Knox change and
+Android app-data initialization. TWRP 3.7.0 root ADB is verified, Knox reports 1,
+and seven core partition backups have matching device/host byte counts and
+SHA256 hashes. The RECOVERY prefix matches the reviewed official image.
+TWRP lacks compiled crypto support; encrypted app-private data is not backed up.
+An updated kernel and model-specific boot image are built, not yet boot-qualified.
+Ubuntu rootfs preparation and first-boot integration are in progress.
+
 ## Approach
 
 1. Preserve Android evidence privately and pin candidate source revisions.
@@ -53,3 +61,26 @@ Build scripts do not flash phones. Never flash G950N/G955F/G965N images here.
 See [validation](docs/VALIDATION.md), [engineering notes](docs/PORTING.md),
 [change log](docs/CHANGELOG.md), [installation review](docs/INSTALLATION_REVIEW.md),
 and [attribution](NOTICE).
+
+## Root filesystem / installation tools
+
+After read-only own-device firmware extraction into ignored inventory/vendor/:
+
+```sh
+python3 scripts/build_rootfs.py
+python3 scripts/validate_rootfs.py artifacts/rootfs/g955n-rootfs.unqualified.img
+python3 scripts/pack_boot.py --kernel-dir artifacts/build-TIMESTAMP-SUFFIX \
+  --busybox artifacts/rootfs/busybox-arm64-static --output artifacts/boot-g955n-experimental.img
+```
+
+Private output contains SSH keys, host-key pins, firmware and disk images; never
+publish it. Native USB networking uses 192.168.55.2/24 with ECM and a serial port.
+The initial image deliberately disables automatic suspend and automatic camera
+QUERYCAP until those paths are tested; neither is a root-cause fix or a feature
+qualification. Installing Mesa packages does not enable Mali acceleration by itself.
+
+scripts/install_ubuntu.py is an explicit destructive installer, separate from
+builders. It requires matching validated images, verified private backups and
+the --initialize-userdata flag. It writes/verifies USERDATA before BOOT and
+checks RECOVERY/EFS/CPEFS/RADIO/PARAM remain unchanged. It never repartitions,
+flashes a bootloader or reboots. See the installation review before using it.

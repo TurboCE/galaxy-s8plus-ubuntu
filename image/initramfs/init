@@ -1,0 +1,98 @@
+#!/bin/sh
+# SM-G955N native Linux bootstrap. No Android init or Bionic runtime.
+BB=/bin/busybox
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+$BB mkdir -p /proc /sys /dev /run /tmp /newroot /efs
+$BB mount -t proc proc /proc
+$BB mount -t sysfs sysfs /sys
+$BB mount -t devtmpfs devtmpfs /dev
+$BB mount -t tmpfs tmpfs /run
+exec >>/run/g955n-initramfs.log 2>&1
+echo 'SM-G955N native bootstrap starting'
+$BB cat /proc/cmdline
+
+rescue() {
+    echo "BOOT RESCUE: $*"
+    $BB dmesg > /run/dmesg.txt
+    $BB ip address add 192.168.55.2/24 dev usb0 2>/dev/null || true
+    $BB ip link set usb0 up 2>/dev/null || true
+    if $BB --list | $BB grep -qx udhcpd; then
+        $BB mkdir -p /var/lib/misc
+        $BB touch /var/lib/misc/udhcpd.leases
+        echo 'start 192.168.55.10' > /run/udhcpd.conf
+        echo 'end 192.168.55.40' >> /run/udhcpd.conf
+        echo 'interface usb0' >> /run/udhcpd.conf
+        echo 'option subnet 255.255.255.0' >> /run/udhcpd.conf
+        $BB udhcpd /run/udhcpd.conf || true
+    fi
+    if $BB --list | $BB grep -qx httpd; then
+        $BB httpd -p 192.168.55.2:8080 -h /run || true
+    fi
+    while :; do
+        if [ -c /dev/ttyGS0 ]; then
+            $BB setsid $BB cttyhack /bin/sh </dev/ttyGS0 >/dev/ttyGS0 2>&1
+        fi
+        $BB sleep 2
+    done
+}
+
+partdev() {
+    for entry in /sys/class/block/*/uevent; do
+        if $BB grep -qx "PARTNAME=$1" "$entry"; then
+            name=$($BB sed -n 's/^DEVNAME=//p' "$entry")
+            major=$($BB sed -n 's/^MAJOR=//p' "$entry")
+            minor=$($BB sed -n 's/^MINOR=//p' "$entry")
+            [ -b "/dev/$name" ] || $BB mknod "/dev/$name" b "$major" "$minor"
+            echo "/dev/$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
+$BB grep -q SM-G955N /proc/device-tree/model || rescue 'Unexpected DT model'
+$BB mkdir -p /sys/kernel/config
+$BB mount -t configfs configfs /sys/kernel/config || rescue 'configfs unavailable'
+G=/sys/kernel/config/usb_gadget/g955n
+$BB mkdir -p "$G"
+echo 0x1d6b > "$G/idVendor"
+echo 0x0104 > "$G/idProduct"
+echo 0x0200 > "$G/bcdUSB"
+echo 0xEF > "$G/bDeviceClass"
+echo 0x02 > "$G/bDeviceSubClass"
+echo 0x01 > "$G/bDeviceProtocol"
+$BB mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409"
+echo G955N-UBUNTU > "$G/strings/0x409/serialnumber"
+echo Samsung > "$G/strings/0x409/manufacturer"
+echo 'Galaxy S8+ Ubuntu' > "$G/strings/0x409/product"
+echo 'ECM and serial' > "$G/configs/c.1/strings/0x409/configuration"
+echo 500 > "$G/configs/c.1/MaxPower"
+$BB mkdir -p "$G/functions/ecm.usb0" "$G/functions/acm.usb0"
+echo '02:55:00:00:00:02' > "$G/functions/ecm.usb0/dev_addr"
+echo '02:55:00:00:00:01' > "$G/functions/ecm.usb0/host_addr"
+$BB ln -s "$G/functions/ecm.usb0" "$G/configs/c.1/"
+$BB ln -s "$G/functions/acm.usb0" "$G/configs/c.1/"
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    udc=$($BB ls /sys/class/udc | $BB head -n 1)
+    [ -n "$udc" ] && break
+    $BB sleep 1
+done
+[ -n "$udc" ] || rescue 'No USB device controller'
+echo "$udc" > "$G/UDC" || rescue 'USB gadget bind failed'
+
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    rootdev=$(partdev USERDATA) && break
+    $BB sleep 1
+done
+[ -n "$rootdev" ] || rescue 'USERDATA partition unavailable'
+$BB mount -t ext4 -o rw,noatime "$rootdev" /newroot || rescue 'Ubuntu root mount failed'
+[ "$($BB cat /newroot/etc/hostname)" = g955n-ubuntu ] || rescue 'Unexpected root filesystem'
+[ -x /newroot/sbin/init ] || rescue 'Ubuntu init missing'
+efsdev=$(partdev EFS) && $BB mount -t ext4 -o ro,noload "$efsdev" /efs
+$BB mkdir -p /newroot/efs /newroot/dev /newroot/proc /newroot/sys /newroot/run
+if $BB mountpoint -q /efs; then $BB mount --move /efs /newroot/efs; fi
+for item in dev proc sys run; do
+    $BB mount --move "/$item" "/newroot/$item" || rescue "Cannot move $item"
+done
+echo 'Handing PID 1 to Ubuntu systemd'
+exec $BB switch_root /newroot /sbin/init

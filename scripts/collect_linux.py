@@ -4,6 +4,7 @@ import argparse
 import datetime
 import json
 import os
+import shlex
 from pathlib import Path
 import subprocess
 from kernel_log_audit import audit
@@ -27,14 +28,24 @@ CHECKS = {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', required=True, help='SSH host or user@host; configure host key and authentication first')
+    parser.add_argument('--identity', type=Path)
+    parser.add_argument('--known-hosts', type=Path)
+    parser.add_argument('--sudo', action='store_true', help='Use existing passwordless sudo for diagnostic reads')
     args = parser.parse_args()
     if args.host.startswith('-') or any(c.isspace() for c in args.host):
         raise SystemExit('Invalid SSH destination')
 
     def run(command):
+        options = []
+        if args.identity:
+            options += ['-i', str(args.identity), '-o', 'IdentitiesOnly=yes']
+        if args.known_hosts:
+            options += ['-o', 'UserKnownHostsFile=' + str(args.known_hosts), '-o', 'StrictHostKeyChecking=yes']
+        if args.sudo:
+            command = 'sudo -n -- sh -c ' + shlex.quote(command)
         try:
             p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
-                                args.host, command], capture_output=True, text=True, timeout=40)
+                                *options, args.host, command], capture_output=True, text=True, timeout=40)
             return dict(exit_code=p.returncode, stdout=p.stdout, stderr=p.stderr)
         except subprocess.TimeoutExpired:
             return dict(exit_code=124, stdout='', stderr='Capture timed out')

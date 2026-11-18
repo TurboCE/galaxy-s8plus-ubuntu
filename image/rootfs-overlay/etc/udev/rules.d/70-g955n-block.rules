@@ -1,0 +1,1 @@
+SUBSYSTEM=="block", ENV{PARTNAME}!="", SYMLINK+="block/by-name/%E{PARTNAME}", SYMLINK+="block/platform/11120000.ufs/by-name/%E{PARTNAME}"

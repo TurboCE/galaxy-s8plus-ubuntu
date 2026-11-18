@@ -86,3 +86,29 @@
 - Started compilation of the updated FHANDLE/USER_NS configuration through the
   immutable snapshot runner in the isolated build volume while awaiting device
   mode restart. This is still a build-only operation without phone access.
+
+### Root recovery and first native image preparation
+
+- After the user's physical Download Mode restart, the RECOVERY command exited
+  0. Actual TWRP 3.7.0_9-0 root ADB, original G955N bootloader and Knox 1 were
+  independently verified. RECOVERY prefix equals the official approved SHA256.
+- First raw backup correctly failed its size guard because raw ADB exec merged
+  remote dd statistics into the file. The .part file is unverified and must not
+  be restored. Suppressed statistics on the remote side, then completed a fresh
+  backup of BOOT/RECOVERY/EFS/CPEFS/RADIO/MISC/PARAM with exact byte counts and
+  independently matching host/device SHA256 for all seven partitions.
+- Read-only SYSTEM/EFS mounts enabled own-device firmware and graphics/HAL
+  inspection. No calibration write was performed. Recovery's dmesg was captured
+  and contains priority errors/warnings/traces; it is not an Ubuntu clean-log pass.
+- TWRP reports no compiled crypto support. The owner explicitly authorized app
+  data initialization after being told encrypted app-private data was not backed up.
+- Updated native kernel/DTB compilation completed through the snapshot runner.
+  Built a 36,354,064-byte G955N boot image with native BusyBox init, ECM/serial,
+  own audio firmware and DT. Independently checked its image ID, Samsung trailer,
+  FDT model, size bound and CPIO listing. Not yet boot-qualified.
+- Started a fresh signed-archive Ubuntu noble ARM64 rootfs build in an isolated
+  container with no USB. Added offline validation and guarded USERDATA/BOOT
+  installer, per-chunk and full readback verification, protected-partition checks,
+  and private SSH-key/host-key handling. No Ubuntu installation success claimed.
+- Ten host tests pass, including wrong-model rootfs and malformed/appended raw
+  backup rejection. Rootfs generation/finalization and device boot remain pending.

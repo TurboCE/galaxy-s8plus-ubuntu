@@ -1,0 +1,12 @@
+[Unit]
+Description=SM-G955N Samsung BSP runtime paths
+After=systemd-udev-trigger.service
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/g955n-hardware
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

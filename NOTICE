@@ -18,3 +18,10 @@ Halium / UBports / libhybris / Mesa contributors:
 
 No Samsung firmware, Mali proprietary libraries, Windows/Ubuntu disk images,
 device identifiers or calibration data are distributed by this repository.
+
+Generic Samsung DTBH/Android-v0 packing helpers in scripts/boot/ are reused
+from TurboCE/galaxy-s9plus-ubuntu commit
+9a15fe0f75669779eb3ee460eccbde229167b248 (GPL-2.0-only), derived from the
+SheroAbi/galaxy-s9plus-mainline-linux project and dtbtool-exynos work credited
+there. Only source-format helpers are reused; no G965N image, device tree or
+firmware is used on G955N. The GPL-2.0 text is included in LICENSE.

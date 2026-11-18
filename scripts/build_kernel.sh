@@ -13,6 +13,10 @@ EXPECTED=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sour
 test "$(git -C "$SOURCE" rev-parse HEAD)" = "$EXPECTED"
 BUILDER=${G955N_BUILDER:-g955n-ubuntu-builder:24.04}
 VOLUME=g955n-ubuntu-build
+if [ -n "$(docker ps --filter "volume=$VOLUME" --format '{{.ID}}')" ]; then
+  echo 'Kernel build volume is already in use' >&2
+  exit 1
+fi
 docker volume create "$VOLUME" >/dev/null
 # git archive exports committed objects, avoiding macOS case-collided checkout
 # files. Both source extraction and compilation happen on a Linux filesystem.

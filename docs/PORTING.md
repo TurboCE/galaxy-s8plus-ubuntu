@@ -66,7 +66,9 @@ Panfrost is a separate strategy, not a drop-in user-space replacement for kbase.
 
 ## Device write gates
 
-No flash/format/reboot has been performed. ADB shell is unprivileged. EFS,
-RADIO and BOOT backup attempts requiring privilege have not been performed.
-Need matching stock restore materials, verified private backups and an exact
-write plan before installation. Do not modify the connected S9+ Linux device.
+The authorized initial RECOVERY bootstrap has now succeeded. TWRP 3.7.0 root
+ADB and Knox 1 were observed; the RECOVERY prefix matches its approved image.
+Seven partitions have independently matching raw device/host SHA256 and sizes.
+The user additionally authorized initializing Android app data. No Ubuntu
+BOOT/USERDATA write had occurred at this preparation checkpoint. Preserve the
+working recovery and calibration partitions. Do not modify the S9+ Linux device.
