@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 import subprocess
 from install_ubuntu import (BASE, PROTECTED, ROOT, digest, verify_backup, verify_boot,
-                            expected_boot_hash, expected_installed_boot_hash)
+                            expected_boot_hash, expected_installed_boot_hash,
+                            verify_rootfs_superblock)
 
 
 def main():
@@ -54,8 +55,10 @@ def main():
         expected_current = expected_boot if name == 'BOOT' else info['sha256']
         if shell('sha256sum ' + BASE + name).split()[0] != expected_current:
             raise SystemExit('Unexpected current partition contents: ' + name)
-    if args.normal_boot and shell('blkid -s LABEL -o value ' + BASE + 'USERDATA') != 'g955n-root':
-        raise SystemExit('Normal BOOT update requires the already installed G955N Ubuntu filesystem')
+    if args.normal_boot:
+        superblock = subprocess.check_output(adb + ['exec-out',
+            'dd if=' + BASE + 'USERDATA bs=1024 skip=1 count=1 2>/dev/null'], timeout=20)
+        verify_rootfs_superblock(superblock)
     if args.boot.stat().st_size > int(shell('blockdev --getsize64 ' + BASE + 'BOOT')):
         raise SystemExit('BOOT capacity exceeded')
     os.umask(0o077)

@@ -195,3 +195,41 @@
   readback verification; the updater still never writes USERDATA or reboots.
 - The owner reports no SIM; cellular end-to-end acceptance cannot be completed
   on the current physical setup. Cellular software investigation remains open.
+
+### Native kernel 9, physical display and desktop preparation
+
+- The next BOOT-only update preserved the installed Ubuntu filesystem. Kernel
+  9 booted with taint 0 and no failed systemd units in the initial capture.
+  Corrected ECM queues carried actual USB SSH traffic with zero RX/TX errors
+  in that capture. Wi-Fi automatically reconnected at 5745 MHz.
+- Enabled native HCI UART/H4/BCM support; registration appears in the boot log.
+  The controller has not yet been attached or paired. VTS now loads its private
+  firmware and downloads it before runtime resume; voice recognition is untested.
+- Source inspection and recorded .cmd files identified a GNU Make hash-escaping
+  incompatibility. Backported upstream 9564a8cf422d with attribution. A repeated
+  build compiled only init/version.o, rather than rebuilding all C objects.
+  Preserve matching vmlinux/System.map beside each future Image for fault analysis.
+- Repeated early poweroffs were orderly logind shutdowns on short power presses,
+  followed by Samsung's charger-connected reboot, not captured kernel panics.
+  Ignore short power/suspend/hibernate keys during bring-up. A proper phone screen
+  power handler remains necessary; this policy is not full suspend acceptance.
+- Verified owner-requested local account password using its private shadow hash
+  and an actual USB login. Manual login now replaces USB autologin. Future image
+  finalization optionally reads a private /inputs/ubuntu-password file. No secret
+  or hash is stored in versioned files; SSH password authentication stays disabled.
+- An explicit unblank/scanout probe showed physical console text confirmed by
+  the owner. Closing a userspace framebuffer fd disables the panel even while
+  fbcon owns it. Patch 0009 retains the console owner. A bounded CPU framebuffer
+  presenter handles command-mode scanout; it does not implement GPU acceleration.
+- The running command line proved that S-Boot ignored the custom boot header.
+  Patch 0010 and CMDLINE_EXTEND preserve firmware arguments, then append native
+  overrides. The resulting candidate is built but not yet boot-qualified.
+- Installed ubuntu-desktop-minimal and fbdev/libinput support on the handset;
+  dpkg audit is empty. Staged manual GDM X11 login, 2x UI scaling and an on-screen
+  keyboard. Desktop activation awaits the panel-lifetime kernel correction.
+  Future rootfs builds include these packages and use an 8 GiB staging image;
+  the base stage no longer creates a redundant image before finalization.
+- Built a pinned libhybris/Android 9 header adaptation in the handset user's
+  private prefix. The initial EGL probe did not succeed; Android's O_NOFOLLOW
+  rejected a symlinked linker config. The preparation helper now copies that
+  own-device configuration from read-only SYSTEM. GPU qualification remains open.

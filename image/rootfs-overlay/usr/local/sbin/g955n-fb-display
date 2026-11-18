@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Legacy DECON framebuffer presentation for native console/fbdev bring-up.
+
+This presents the CPU framebuffer; it is not GPU acceleration. Keep its fd open
+and request command-mode scanout when pixels change. A future HWC/DRM compositor
+must replace this service rather than compete for the same display plane.
+"""
+import fcntl
+import mmap
+import os
+from pathlib import Path
+import signal
+import struct
+import time
+import zlib
+
+if 'SM-G955N' not in Path('/proc/device-tree/model').read_text():
+    raise SystemExit('Wrong device model')
+running = True
+
+
+def stop(*_):
+    global running
+    running = False
+
+
+signal.signal(signal.SIGTERM, stop)
+signal.signal(signal.SIGINT, stop)
+fd = os.open('/dev/fb0', os.O_RDWR)
+try:
+    var, fix = bytearray(160), bytearray(80)
+    fcntl.ioctl(fd, 0x4600, var, True)  # FBIOGET_VSCREENINFO
+    fcntl.ioctl(fd, 0x4602, fix, True)  # FBIOGET_FSCREENINFO
+    width, height, virtual_width, virtual_height, x, y, bpp = struct.unpack_from('7I', var)
+    stride = struct.unpack_from('I', fix, 48)[0]
+    size = stride * height
+    capacity = struct.unpack_from('I', fix, 24)[0]
+    if (width, height, bpp) != (1440, 2960, 32) or not 0 < size <= capacity:
+        raise SystemExit('Unexpected primary framebuffer geometry')
+    struct.pack_into('II', var, 16, 0, 0)
+    fcntl.ioctl(fd, 0x4611, 0)  # FBIOBLANK / UNBLANK
+    with mmap.mmap(fd, size, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ) as pixels:
+        previous = None
+        print('Native framebuffer presentation active; GPU remains unqualified', flush=True)
+        while running:
+            checksum = zlib.crc32(pixels)
+            if checksum != previous:
+                fcntl.ioctl(fd, 0x4606, var, True)  # FBIOPAN_DISPLAY / scanout
+                previous = checksum
+            time.sleep(0.2)
+finally:
+    os.close(fd)

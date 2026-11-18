@@ -65,12 +65,15 @@ def expected_installed_boot_hash(backup_dir, installation, installed_boot):
     return hashlib.sha256(image + original[len(image):]).hexdigest()
 
 
+def verify_rootfs_superblock(sb):
+    if len(sb) != 1024 or sb[56:58] != b'\x53\xef' or sb[120:136].split(b'\0')[0] != b'g955n-root':
+        raise ValueError('Not the G955N ext4 root filesystem')
+
+
 def verify_rootfs_header(path):
     with path.open('rb') as file:
         file.seek(1024)
-        sb = file.read(1024)
-    if len(sb) != 1024 or sb[56:58] != b'\x53\xef' or sb[120:136].split(b'\0')[0] != b'g955n-root':
-        raise ValueError('Not the G955N ext4 root filesystem')
+        verify_rootfs_superblock(file.read(1024))
     if path.stat().st_size % MIB:
         raise ValueError('Rootfs length must be a whole MiB')
 

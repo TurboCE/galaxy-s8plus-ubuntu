@@ -1,0 +1,16 @@
+[Unit]
+Description=SM-G955N native framebuffer presentation
+After=systemd-udev-trigger.service g955n-hardware.service
+Before=display-manager.service
+ConditionPathExists=/dev/fb0
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/g955n-fb-display
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

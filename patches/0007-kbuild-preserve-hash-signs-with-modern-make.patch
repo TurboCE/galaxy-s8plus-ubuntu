@@ -1,0 +1,36 @@
+From: Rasmus Villemoes <linux@rasmusvillemoes.dk>
+Subject: [PATCH] Kbuild: backport hash escaping for modern Make
+
+Adapted from upstream Linux commit 9564a8cf422d:
+https://github.com/torvalds/linux/commit/9564a8cf422d
+
+GNU Make 4.3 no longer strips escaped hashes inside function arguments.
+This vendor tree records KBUILD_STR(s)=#s without escaping in .cmd files,
+so commands are truncated on reload and every invocation rebuilds all C.
+Use upstream pound substitution, retaining command-change checks.
+
+diff --git a/scripts/Kbuild.include b/scripts/Kbuild.include
+--- a/scripts/Kbuild.include
++++ b/scripts/Kbuild.include
+@@ -7,6 +7,7 @@ quote   := "
+ squote  := '
+ empty   :=
+ space   := $(empty) $(empty)
++pound   := \#
+ 
+ ###
+ # Name of target with a '.' as filename prefix. foo/bar.o => foo/.bar.o
+@@ -250,11 +251,11 @@ endif
+ 
+ # Replace >$< with >$$< to preserve $ when reloading the .cmd file
+ # (needed for make)
+-# Replace >#< with >\#< to avoid starting a comment in the .cmd file
++# Replace >#< with >$(pound)< to avoid starting a comment in the .cmd file
+ # (needed for make)
+ # Replace >'< with >'\''< to be able to enclose the whole string in '...'
+ # (needed for the shell)
+-make-cmd = $(call escsq,$(subst \#,\\\#,$(subst $$,$$$$,$(cmd_$(1)))))
++make-cmd = $(call escsq,$(subst $(pound),$$(pound),$(subst $$,$$$$,$(cmd_$(1)))))
+ 
+ # Find any prerequisites that is newer than target or that does not exist.
+ # PHONY targets skipped in both cases.

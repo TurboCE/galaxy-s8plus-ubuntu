@@ -48,6 +48,7 @@ docker run --rm --network none -v "$VOLUME:/work" \
     if [ "$PORT_MODE" = image ]; then
       make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" Image dtbs
       cp /work/out/arch/arm64/boot/Image /artifacts/Image.unqualified
+      cp /work/out/vmlinux /work/out/System.map /artifacts/
       cp /work/out/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dtb /artifacts/
     fi
   '

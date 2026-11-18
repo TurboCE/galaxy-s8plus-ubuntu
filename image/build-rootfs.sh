@@ -34,7 +34,9 @@ chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-
   systemd-sysv udev dbus openssh-server sudo busybox-static iproute2 iputils-ping \
   network-manager wpasupplicant iw bluez modemmanager gpsd gpsd-clients \
   iio-sensor-proxy alsa-utils e2fsprogs kmod ca-certificates curl tzdata \
-  libegl1 libgles2 libgbm1 libdrm2 mesa-utils weston wayland-utils
+  libegl1 libgles2 libgbm1 libdrm2 mesa-utils weston wayland-utils \
+  ubuntu-desktop-minimal xserver-xorg-video-fbdev xserver-xorg-input-libinput \
+  xserver-xorg-legacy xinit fonts-dejavu-core
 chroot "$R" useradd -m -s /bin/bash -G sudo ubuntu
 install -d -m 700 "$R/home/ubuntu/.ssh"
 install -m 600 /inputs/ssh.pub "$R/home/ubuntu/.ssh/authorized_keys"
@@ -88,12 +90,4 @@ printf '[Service]\nExecStartPre=/usr/bin/ssh-keygen -A\n' > "$R/etc/systemd/syst
 truncate -s 0 "$R/etc/machine-id"
 cleanup
 trap - EXIT
-IMAGE=/work/g955n-rootfs.next.img
-rm -f "$IMAGE"
-truncate -s 3072M "$IMAGE"
-mkfs.ext4 -F -L g955n-root -O ^metadata_csum_seed,^orphan_file,^64bit -d "$R" "$IMAGE"
-e2fsck -fn "$IMAGE"
-cp --sparse=always "$IMAGE" /outputs/g955n-rootfs.next.img
-mv -f /outputs/g955n-rootfs.next.img /outputs/g955n-rootfs.unqualified.img
-sha256sum /outputs/g955n-rootfs.unqualified.img /outputs/busybox-arm64-static > /outputs/SHA256SUMS
-echo 'ROOTFS_BUILD_OK (not a phone boot or hardware qualification)'
+echo 'ROOTFS_STAGING_OK; finalization creates and validates the complete image'

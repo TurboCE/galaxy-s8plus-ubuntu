@@ -34,6 +34,12 @@ fixing inherited build-container DNS configuration. Kernel logs still contain
 findings, and GPU, audio, sensors, radios and the other acceptance items remain
 under active bring-up. No SIM is present for cellular end-to-end tests.
 
+Ubuntu Desktop packages are now installed on the test handset. A framebuffer
+presentation path produced physical console text confirmed by the owner. GNOME
+login is being configured using temporary CPU/fbdev rendering; this is not a
+Mali acceleration pass. The owner has a private local login credential; automatic
+login is disabled and SSH remains key-only. Never put credentials in Git.
+
 ## Approach
 
 1. Preserve Android evidence privately and pin candidate source revisions.

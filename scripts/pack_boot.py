@@ -12,7 +12,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 AUDIO = ('calliope_sram.bin', 'calliope_dram.bin', 'calliope_iva.bin', 'dsm.bin',
          'AP_AUDIO_SLSI.bin', 'APBargeIn_AUDIO_SLSI.bin', 'SoundBoosterParam.bin',
-         'APBiBF_AUDIO_SLSI.bin', 'dsm_tune.bin')
+         'APBiBF_AUDIO_SLSI.bin', 'dsm_tune.bin', 'vts.bin')
 
 
 def verify_embedded_config(kernel, config):

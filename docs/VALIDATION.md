@@ -45,3 +45,11 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 
 Samsung Pay/Knox and proprietary Android apps are not Linux peripheral drivers;
 their availability cannot be guaranteed by hardware enablement.
+
+Later bring-up evidence: physical console text was confirmed by the owner during
+an explicit unblank/scanout test while keeping fb0 open. Closing the fd disables
+the panel in the Android-oriented DECON release path. A correction is built;
+normal boot persistence and GNOME login remain pending. Ubuntu Desktop packages
+are installed with a temporary CPU/fbdev presentation path. This is not GPU
+qualification. Short-power-key logind shutdown is temporarily disabled after
+previous-boot journals proved it caused repeated charger-connected restarts.

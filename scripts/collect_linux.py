@@ -33,11 +33,18 @@ def main():
     transport.add_argument('--serial-port', help='Explicit G955N USB console port for bring-up without host networking')
     parser.add_argument('--identity', type=Path)
     parser.add_argument('--known-hosts', type=Path)
+    parser.add_argument('--host-key-alias', help='Use the pinned handset key for a different verified address')
+    parser.add_argument('--console-password-file', type=Path,
+                        help='Private local credential file for manual USB console login')
     parser.add_argument('--sudo', action='store_true', help='Use existing passwordless sudo for diagnostic reads')
     args = parser.parse_args()
     if args.host and (args.host.startswith('-') or any(c.isspace() for c in args.host)):
         raise SystemExit('Invalid SSH destination')
     serial = SerialShell(args.serial_port) if args.serial_port else None
+    if args.console_password_file:
+        if not serial:
+            raise SystemExit('Console password input requires --serial-port')
+        serial.login(args.console_password_file.read_text().removesuffix('\n'))
 
     def run(command):
         options = []
@@ -45,6 +52,8 @@ def main():
             options += ['-i', str(args.identity), '-o', 'IdentitiesOnly=yes']
         if args.known_hosts:
             options += ['-o', 'UserKnownHostsFile=' + str(args.known_hosts), '-o', 'StrictHostKeyChecking=yes']
+        if args.host_key_alias:
+            options += ['-o', 'HostKeyAlias=' + args.host_key_alias]
         if args.sudo:
             command = 'sudo -n -- sh -c ' + shlex.quote(command)
         if serial:

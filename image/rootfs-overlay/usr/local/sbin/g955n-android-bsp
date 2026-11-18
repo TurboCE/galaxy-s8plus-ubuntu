@@ -1,0 +1,52 @@
+#!/bin/sh
+# Explicit runtime preparation for own-device Android ABI probes.
+# Never starts Android init, mounts calibration writable, or modifies SYSTEM.
+set -eu
+test "$(id -u)" = 0
+grep -q SM-G955N /proc/device-tree/model
+uname -r | grep -q g955n-ubuntu
+node=$(readlink -f /dev/block/by-name/SYSTEM)
+test -b "$node"
+grep -qx PARTNAME=SYSTEM "/sys/class/block/$(basename "$node")/uevent"
+mkdir -p /android/system /system/etc /vendor
+if ! mountpoint -q /android/system; then
+    mount -t ext4 -o ro,noload "$node" /android/system
+fi
+test "$(readlink -f "$(findmnt -n -o SOURCE /android/system)")" = "$node"
+findmnt -n -o OPTIONS /android/system | grep -Eq '(^|,)ro(,|$)'
+link_path() {
+    source=$1
+    target=$2
+    [ -e "$source" ] || return 0
+    if [ -L "$target" ]; then
+        test "$(readlink "$target")" = "$source"
+    elif [ -e "$target" ]; then
+        echo "Refusing to replace $target" >&2
+        exit 1
+    else
+        ln -s "$source" "$target"
+    fi
+}
+for name in bin lib lib64; do
+    link_path "/android/system/$name" "/system/$name"
+    link_path "/android/system/vendor/$name" "/vendor/$name"
+done
+for name in ld.config.txt public.libraries.txt; do
+    source=/android/system/etc/$name
+    target=/system/etc/$name
+    [ -f "$source" ] || continue
+    # Android's config reader uses O_NOFOLLOW; a symlink is rejected as ELOOP.
+    if [ -L "$target" ]; then
+        test "$(readlink "$target")" = "$source"
+        rm "$target"
+    fi
+    if [ ! -e "$target" ]; then
+        install -m 644 "$source" "$target"
+    fi
+done
+# libhybris's fallback property reader uses this path. Keep the original
+# read-only file untouched, and copy its own-device build metadata privately.
+if [ ! -e /system/build.prop ]; then
+    install -m 644 /android/system/build.prop /system/build.prop
+fi
+echo 'Own-device Android ABI paths prepared; no hardware functionality is qualified'

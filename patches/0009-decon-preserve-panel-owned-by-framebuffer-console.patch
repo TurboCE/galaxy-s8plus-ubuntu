@@ -1,0 +1,24 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] fbdev: DECON: retain an active native framebuffer console
+
+The Android close path unconditionally disables the display. Native probes
+close their fd while fbcon still owns the framebuffer, blanking the panel.
+Keep the panel for that console owner; explicit blank/shutdown is unchanged.
+
+diff --git a/drivers/video/fbdev/exynos/dpu/decon_core.c b/drivers/video/fbdev/exynos/dpu/decon_core.c
+--- a/drivers/video/fbdev/exynos/dpu/decon_core.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_core.c
+@@ -3320,6 +3320,13 @@ int decon_release(struct fb_info *info, int user)
+ 	struct decon_win *win = info->par;
+ 	struct decon_device *decon = win->decon;
+ 
++	/* A native framebuffer console is another display owner. Closing a
++	 * userspace probe must not turn off its active panel. Explicit blank
++	 * and device shutdown still perform the normal power transitions.
++	 */
++	if (IS_ENABLED(CONFIG_FRAMEBUFFER_CONSOLE) && info->fbcon_par)
++		return 0;
++
+ 	decon_info("%s + : %d\n", __func__, decon->id);
+ 
+ 	if (decon->id && decon->dt.out_type == DECON_OUT_DSI) {

@@ -16,6 +16,12 @@ CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_FONTS=y
 CONFIG_FONT_8x8=y
 CONFIG_FONT_8x16=y
+CONFIG_BT_HCIUART=y
+CONFIG_BT_HCIUART_H4=y
+CONFIG_BT_HCIUART_BCM=y
+CONFIG_CMDLINE="console=tty0 loglevel=7 log_buf_len=4M enforcing=0 androidboot.selinux=permissive systemd.unified_cgroup_hierarchy=0 fbcon=map:0 consoleblank=0 firmware_class.path=/vendor/firmware"
+CONFIG_CMDLINE_EXTEND=y
+# CONFIG_CMDLINE_FORCE is not set
 CONFIG_FHANDLE=y
 CONFIG_AUTOFS4_FS=y
 CONFIG_TMPFS_POSIX_ACL=y

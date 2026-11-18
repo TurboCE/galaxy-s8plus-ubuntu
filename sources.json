@@ -16,6 +16,47 @@
       "url": "https://github.com/tingao/dream2lte-droidspaces-kernel.git",
       "commit": "136518391ff4de680e65783b78f9df4b6517f81b",
       "role": "G955F container patches for review, not automatically applied"
+    },
+    "libhybris": {
+      "url": "https://github.com/libhybris/libhybris.git",
+      "commit": "7079712a42ea2754adf747e70c6cc75764c8596e",
+      "role": "Optional Android 9 ABI bridge investigation; not a GPU qualification"
+    },
+    "aosp-bionic": {
+      "url": "https://android.googlesource.com/platform/bionic",
+      "commit": "196632fb3c59ebbf1184d791a3e7124dd0c3f22b",
+      "role": "Android 9.0.0_r61 public headers for compatibility-layer build only",
+      "export_path": "bionic"
+    },
+    "aosp-libhardware": {
+      "url": "https://android.googlesource.com/platform/hardware/libhardware",
+      "commit": "108a9f09189786997cb7b29a09a009d85fc3c017",
+      "role": "Android 9.0.0_r61 public headers for compatibility-layer build only",
+      "export_path": "hardware/libhardware"
+    },
+    "aosp-libhardware-legacy": {
+      "url": "https://android.googlesource.com/platform/hardware/libhardware_legacy",
+      "commit": "3a032cff241f6d0692462353465a819ee3704423",
+      "role": "Android 9.0.0_r61 public headers for compatibility-layer build only",
+      "export_path": "hardware/libhardware_legacy"
+    },
+    "aosp-system-core": {
+      "url": "https://android.googlesource.com/platform/system/core",
+      "commit": "3655b3122e299c619cc42b874077e4952fb5fb21",
+      "role": "Android 9.0.0_r61 public headers for compatibility-layer build only",
+      "export_path": "system/core"
+    },
+    "aosp-system-media": {
+      "url": "https://android.googlesource.com/platform/system/media",
+      "commit": "ba90150f439f16e1717bc8972468328da4ffac76",
+      "role": "Android 9.0.0_r61 public headers for compatibility-layer build only",
+      "export_path": "system/media"
+    },
+    "aosp-frameworks-native": {
+      "url": "https://android.googlesource.com/platform/frameworks/native",
+      "commit": "76923a32ab6ea25115b65ff86ade7235ba7b3a33",
+      "role": "Android 9.0.0_r61 public headers for compatibility-layer build only",
+      "export_path": "frameworks/native"
     }
   }
 }

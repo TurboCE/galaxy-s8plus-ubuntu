@@ -27,6 +27,37 @@ class SerialShell:
         finally:
             os.close(self.fd)
 
+    def login(self, password, username='ubuntu'):
+        if username != 'ubuntu' or not password or any(c in password for c in '\r\n\0'):
+            raise ValueError('Expected the owner-provided local ubuntu credentials')
+
+        def receive(tokens, timeout):
+            result = bytearray()
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if select.select([self.fd], [], [], 0.2)[0]:
+                    chunk = os.read(self.fd, 16384)
+                    if not chunk:
+                        raise ConnectionError('USB console disconnected')
+                    result.extend(chunk)
+                    if any(token in result for token in tokens):
+                        return bytes(result)
+            raise TimeoutError('USB login prompt did not become ready')
+
+        os.write(self.fd, b'\n')
+        prompt = receive((b'login:', b'$ ', b'# '), 5)
+        if b'login:' in prompt:
+            os.write(self.fd, (username + '\n').encode())
+            receive((b'Password:',), 6)
+            # Submit only after login has disabled terminal password echo.
+            os.write(self.fd, (password + '\n').encode())
+            result = receive((b'$ ', b'# ', b'Login incorrect'), 10)
+            if b'Login incorrect' in result:
+                raise PermissionError('Local console authentication failed')
+        identity = self.run('id -un', timeout=6)
+        if identity['exit_code'] or identity['stdout'].strip() != username:
+            raise PermissionError('Local console login did not establish the expected account')
+
     def run(self, command, timeout=40):
         marker = 'G955N_' + uuid.uuid4().hex
         begin, end = marker + '_BEGIN', marker + '_END'

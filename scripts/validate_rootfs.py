@@ -33,7 +33,10 @@ def main():
         'usb_address': 'Address=192.168.55.2/24' in read('/etc/systemd/network/10-g955n-usb.network'),
         'usb_mac_match': 'MACAddress=02:55:00:00:00:02' in read('/etc/systemd/network/10-g955n-usb.network'),
         'runtime_hardware_service': 'g955n-hardware' in read('/etc/systemd/system/g955n-hardware.service'),
-        'physical_usb_console': '--autologin ubuntu' in read('/etc/systemd/system/serial-getty@ttyGS0.service.d/10-porting-console.conf'),
+        'physical_usb_console': 'ExecStart=-/sbin/agetty --noclear' in read('/etc/systemd/system/serial-getty@ttyGS0.service.d/10-porting-console.conf'),
+        'desktop_session': 'gnome-session' in read('/usr/share/xsessions/ubuntu-xorg.desktop'),
+        'manual_desktop_login': 'AutomaticLoginEnable=false' in read('/etc/gdm3/custom.conf'),
+        'fbdev_desktop': 'Driver "fbdev"' in read('/etc/X11/xorg.conf.d/10-g955n-fbdev.conf'),
     }
     features = subprocess.check_output([*command, 'dumpe2fs', '-h', target], text=True, stderr=subprocess.DEVNULL)
     feature_line = next(line for line in features.splitlines() if line.startswith('Filesystem features:'))

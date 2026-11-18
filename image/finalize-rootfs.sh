@@ -7,7 +7,22 @@ test "$(cat "$R/etc/hostname")" = g955n-ubuntu
 tar -C /source/image/rootfs-overlay -cf - . | tar -C "$R" --keep-directory-symlink -xpf -
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
 chmod 755 "$R/usr/local/sbin/g955n-grow-root"
-chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service serial-getty@ttyGS0.service
+chmod 755 "$R/usr/local/sbin/g955n-android-bsp"
+chmod 755 "$R/usr/local/sbin/g955n-fb-display"
+chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service serial-getty@ttyGS0.service
+chroot "$R" dconf update
+chroot "$R" systemctl set-default graphical.target
+if [ -s /inputs/ubuntu-password ]; then
+  python3 - <<'PY'
+from pathlib import Path
+import subprocess
+password = Path('/inputs/ubuntu-password').read_text().removesuffix('\n')
+if not password or '\n' in password or '\r' in password or '\0' in password:
+    raise SystemExit('Local password input must be a single nonempty line')
+subprocess.run(['chroot', '/work/rootfs', 'chpasswd'], input='ubuntu:' + password + '\n',
+               text=True, check=True)
+PY
+fi
 for group in video audio input render dialout; do
   if chroot "$R" getent group "$group" >/dev/null; then
     chroot "$R" usermod -aG "$group" ubuntu
@@ -38,7 +53,7 @@ if [ -n "$package_audit" ]; then
 fi
 IMAGE=/work/g955n-rootfs.next.img
 rm -f "$IMAGE"
-truncate -s 3072M "$IMAGE"
+truncate -s 8192M "$IMAGE"
 mkfs.ext4 -F -L g955n-root -O ^metadata_csum_seed,^orphan_file,^64bit -d "$R" "$IMAGE"
 e2fsck -fn "$IMAGE"
 # Populate ext4 on Linux storage; publish sequentially only after fsck passes.

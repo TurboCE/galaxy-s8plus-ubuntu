@@ -40,6 +40,7 @@ def main():
                         '-v', str(ROOT / 'inventory/vendor') + ':/firmware:ro', builder,
                         'bash', '-c', (ROOT / 'image/build-rootfs.sh').read_text()], check=True)
     subprocess.run([*common, '--network', 'none',
+                    '-v', str(inputs) + ':/inputs:ro',
                     '-v', str(ROOT / 'image') + ':/source/image:ro', builder,
                     'bash', '-c', (ROOT / 'image/finalize-rootfs.sh').read_text()], check=True)
 
