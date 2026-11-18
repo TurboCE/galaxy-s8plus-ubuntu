@@ -36,7 +36,7 @@ chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-
   iio-sensor-proxy alsa-utils e2fsprogs kmod ca-certificates curl tzdata \
   libegl1 libgles2 libgbm1 libdrm2 mesa-utils weston wayland-utils \
   ubuntu-desktop-minimal xserver-xorg-video-fbdev xserver-xorg-input-libinput \
-  xserver-xorg-legacy xinit fonts-dejavu-core
+  xserver-xorg-legacy xinit fonts-dejavu-core ibus ibus-hangul
 chroot "$R" useradd -m -s /bin/bash -G sudo ubuntu
 install -d -m 700 "$R/home/ubuntu/.ssh"
 install -m 600 /inputs/ssh.pub "$R/home/ubuntu/.ssh/authorized_keys"

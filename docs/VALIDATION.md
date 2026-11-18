@@ -25,8 +25,8 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Partial: Ubuntu/systemd/USB login and 113 GiB root observed; USB Ethernet enumerates but transfers zero frames, fix under build |
-| Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Not tested |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Partial: Ubuntu/systemd/USB login and 113 GiB root observed; kernel 9 USB SSH transferred data. Kernel 11 desktop running; repeated cold-boot/suspend qualification pending |
+| Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: owner confirmed GDM login, touch/OSK authentication and GNOME desktop on kernel 11; CPU/fbdev only, rotation/brightness/resume pending |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Not tested |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
@@ -59,3 +59,9 @@ Desktop failure isolation: installed packages are not desktop acceptance. Kernel
 camera nodes, including with GDM/presenter disabled. Patch 0011 fixes five stale
 QUERYCAP driver-data casts; build passes, hardware regression pending. Temporary
 WirePlumber masking stops that trigger and is not a camera or audio fix.
+
+Kernel 11 checkpoint: owner confirmed physical manual login and desktop using
+touch/on-screen keyboard. Former ISP QUERYCAP panic does not recur in the five
+explicit node probes or re-enabled WirePlumber/GDM startup. Existing V4L2 bad-caps
+and format-description WARNs remain (taint 512); no clean-kernel acceptance is
+claimed. Hardware GPU EGL probe still faults in the private compatibility prefix.

@@ -250,3 +250,21 @@
   startup. After masking, kernel 10 remained available through a 90-second
   checkpoint with the framebuffer presenter active; this is only isolation
   evidence. Camera streaming and audio remain unqualified.
+
+### Kernel 11 native desktop acceptance checkpoint
+
+- BOOT-only candidate readback and protected partitions were verified before
+  reboot. Original USERDATA/desktop installation was preserved. Native kernel
+  11 booted; explicit QUERYCAP on ISP0/ISP1, VRA and DIS0/DIS1 returned without
+  the former fatal exception. Re-enabled WirePlumber for both user/greeter;
+  GDM, Xorg and GNOME then ran in the same boot.
+- Owner confirmed the physical login screen, then touch/on-screen keyboard
+  password entry and the Ubuntu desktop. Manual authentication is retained.
+  Set graphical.target for subsequent boots and enabled the framebuffer helper.
+  IBus and Hangul support are installed and included in future rootfs builds.
+- This is a CPU/fbdev display checkpoint, not GPU or suspend acceptance.
+  Kernel warnings remain: camera QUERYCAP device_caps omissions and codec
+  format-description gaps taint the kernel. Audio backends are not routed.
+  Do not describe the logs as clean or camera capture as working.
+- A subsequent private libhybris EGL probe exits with SIGSEGV; GPU qualification
+  remains open. Installed Ubuntu GL libraries are not globally overridden.
