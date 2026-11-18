@@ -15,6 +15,13 @@ AUDIO = ('calliope_sram.bin', 'calliope_dram.bin', 'calliope_iva.bin', 'dsm.bin'
          'APBiBF_AUDIO_SLSI.bin', 'dsm_tune.bin')
 
 
+def verify_embedded_config(kernel, config):
+    start = kernel.index(b'IKCFG_ST') + 8
+    end = kernel.index(b'IKCFG_ED', start)
+    if gzip.decompress(kernel[start:end]) != config:
+        raise ValueError('Embedded kernel configuration differs from supplied config')
+
+
 def compress_initramfs(data, config):
     settings = config.splitlines()
     if 'CONFIG_RD_LZ4=y' in settings:
@@ -53,6 +60,8 @@ def main():
     stock = ROOT / 'backups/stock/boot.img'
     if hashlib.file_digest(stock.open('rb'), 'sha256').hexdigest() != '6de0f78b0f5f6476cf1ad91bc4871c32160769735847596c530401630e027862':
         raise SystemExit('Stock G955N reference checksum mismatch')
+    config = (args.kernel_dir / 'kernel.config').read_bytes()
+    verify_embedded_config((args.kernel_dir / 'Image.unqualified').read_bytes(), config)
     elf = args.busybox.read_bytes()
     if elf[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', elf, 18)[0] != 183:
         raise SystemExit('Busybox is not AArch64 ELF')
@@ -73,7 +82,7 @@ def main():
         for folder in ('vendor/firmware/', 'etc/firmware/'):
             entries.append((folder + name, stat.S_IFREG | 0o644, data))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    compression, compressed = compress_initramfs(newc(entries), (args.kernel_dir / 'kernel.config').read_text())
+    compression, compressed = compress_initramfs(newc(entries), config.decode())
     ramdisk = args.output.with_suffix('.ramdisk')
     ramdisk.write_bytes(compressed)
     dtb = args.kernel_dir / 'exynos8895-dream2lte_kor_10.dtb'

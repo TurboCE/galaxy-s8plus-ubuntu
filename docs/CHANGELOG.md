@@ -139,5 +139,6 @@
   the first review were limited to six superblock metadata bytes; PARAM changes
   were limited to 52 boot-history-like bytes. Neither was blindly overwritten.
   Every later write still requires reviewed current protected-partition hashes.
-- Thirteen host checks pass, including real legacy-LZ4 roundtrip and corruption
-  guards. The signed Ubuntu ARM64 package installation is still in progress.
+- Fourteen host checks pass, including real legacy-LZ4 roundtrip and corruption
+  guards. The boot packer also rejects a supplied configuration that differs
+  from the kernel's embedded configuration. The signed Ubuntu ARM64 package installation is still in progress.

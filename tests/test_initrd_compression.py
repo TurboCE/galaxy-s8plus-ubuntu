@@ -1,4 +1,5 @@
 import importlib.util
+import gzip
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +11,13 @@ spec.loader.exec_module(pack)
 
 
 class InitrdCompatibility(unittest.TestCase):
+    def test_supplied_config_must_match_the_kernel(self):
+        config = b'CONFIG_RD_LZ4=y\n'
+        kernel = b'kernel' + b'IKCFG_ST' + gzip.compress(config) + b'IKCFG_ED'
+        pack.verify_embedded_config(kernel, config)
+        with self.assertRaises(ValueError):
+            pack.verify_embedded_config(kernel, b'CONFIG_RD_GZIP=y\n')
+
     @unittest.skipUnless(shutil.which('lz4'), 'lz4 command required')
     def test_lz4_only_kernel_gets_legacy_lz4_not_gzip(self):
         data = b'070701' + b'x' * 10000

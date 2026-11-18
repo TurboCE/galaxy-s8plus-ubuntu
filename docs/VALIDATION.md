@@ -7,7 +7,7 @@ No row may become PASS from configuration or compilation alone.
 Runtime capture tooling exists in scripts/collect_linux.py; it refuses an
 unexpected kernel/DT. Stock dmesg was denied and kernel logcat returned no
 entries. Thus neither stock nor Ubuntu logs have been certified clean.
-Thirteen host tests pass; these are tooling checks, not hardware acceptance tests.
+Fourteen host tests pass; these are tooling checks, not hardware acceptance tests.
 BOOT-only trials recovered concrete panic logs: the initial gzip decoder mismatch
 was fixed and unpacking succeeded on the second trial. That trial then panicked
 in ABOX regcache initialization and failed USB gadget binding. Source corrections
