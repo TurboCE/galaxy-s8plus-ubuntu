@@ -1,0 +1,20 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] hooks: resolve Android MB_CUR_MAX through host libc
+
+Android 9 libc++ imports __ctype_get_mb_cur_max. The stock Bionic function
+uses its pthread TLS layout, which differs from glibc. Match the existing
+locale hooks and use the host libc implementation with the same size_t(void)
+ABI, rather than entering Bionic TLS or returning a hardcoded locale value.
+
+diff --git a/hybris/common/hooks.c b/hybris/common/hooks.c
+--- a/hybris/common/hooks.c
++++ b/hybris/common/hooks.c
+@@ -3314,6 +3314,8 @@
+     HOOK_DIRECT(uselocale),
+     HOOK_DIRECT(localeconv),
+     HOOK_DIRECT(setlocale),
++    /* Bionic uses incompatible pthread TLS to implement MB_CUR_MAX. */
++    HOOK_DIRECT_NO_DEBUG(__ctype_get_mb_cur_max),
+     /* sys/mman.h */
+ #if defined(LP64)
+     HOOK_DIRECT(mmap),

@@ -27,7 +27,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | --- | --- | --- | --- |
 | Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Partial: Ubuntu/systemd/USB login and 113 GiB root observed; kernel 9 USB SSH transferred data. Kernel 11 desktop running; repeated cold-boot/suspend qualification pending |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: owner confirmed GDM login, touch/OSK authentication and GNOME desktop on kernel 11; CPU/fbdev only, rotation/brightness/resume pending |
-| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Not tested |
+| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Partial: private libhybris Mali-G71 shader/readback passed 300 frames at 64x64 and 1440x2960; desktop presentation, sustained workload and resume pending |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: association/DHCP/DNS/TLS HTTP 200, 254968-byte download at 2467 and 5745 MHz; reconnect/suspend pending |

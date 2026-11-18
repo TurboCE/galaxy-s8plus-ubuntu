@@ -106,9 +106,11 @@ done
 $BB mount -t ext4 -o rw,noatime "$rootdev" /newroot || rescue 'Ubuntu root mount failed'
 [ "$($BB cat /newroot/etc/hostname)" = g955n-ubuntu ] || rescue 'Unexpected root filesystem'
 [ -x /newroot/sbin/init ] || rescue 'Ubuntu init missing'
-efsdev=$(partdev EFS) && $BB mount -t ext4 -o ro,noload "$efsdev" /efs
 $BB mkdir -p /newroot/efs /newroot/dev /newroot/proc /newroot/sys /newroot/run
-if $BB mountpoint -q /efs; then $BB mount --move /efs /newroot/efs; fi
+# This static BusyBox has no mountpoint applet. Mount directly under the new
+# root so calibration remains available after switch_root. Never replay EFS.
+efsdev=$(partdev EFS) || rescue 'EFS partition unavailable'
+$BB mount -t ext4 -o ro,noload "$efsdev" /newroot/efs || rescue 'Read-only EFS mount failed'
 for item in dev proc sys run; do
     $BB mount --move "/$item" "/newroot/$item" || rescue "Cannot move $item"
 done

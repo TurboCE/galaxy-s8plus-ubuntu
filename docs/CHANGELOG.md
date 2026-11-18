@@ -268,3 +268,23 @@
   Do not describe the logs as clean or camera capture as working.
 - A subsequent private libhybris EGL probe exits with SIGSEGV; GPU qualification
   remains open. Installed Ubuntu GL libraries are not globally overridden.
+
+### Mali offscreen rendering and calibration mount correction
+
+- Located the EGL SIGSEGV at stock Bionic __ctype_get_mb_cur_max, whose TLS
+  accesses conflict with glibc. A local libhybris locale hook uses the matching
+  host-libc function. Native rebuild passed and EGL now enumerates 27 configs.
+- Added a model-guarded shader/readback probe. ARM/Mali-G71/GLES 3.2 r16p0
+  completed 300 alternating verified frames at both 64x64 and 1440x2960, exit 0.
+  The full-size run took 0.677 seconds. GNOME remains CPU/fbdev; this is not
+  desktop acceleration, continuous workload or suspend acceptance.
+- Public source exporter now applies compatibility patches and records their
+  hashes. Re-export passed. Original vendor libraries stay private and read-only.
+- Found `mountpoint: applet not found` in initramfs: EFS mounted read-only before
+  switch_root but was not moved, leaving Ubuntu /efs empty. Mount EFS directly
+  under the new root with ro,noload and fail closed on errors. This source fix
+  awaits the next BOOT update. The live filesystem is mounted read-only after
+  checking its EFS partition identity; calibration remains unmodified.
+- Stock Bluetooth vendor library identifies ttySAC1. A bounded ROM/H4 bring-up
+  receives real controller responses; original Bluetooth address was restored
+  from read-only EFS into controller RAM. Firmware adaptation/pairing remain open.

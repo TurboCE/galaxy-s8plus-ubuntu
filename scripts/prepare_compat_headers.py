@@ -3,7 +3,7 @@
 
 No handset access, upstream firmware redistribution, flashing or installation.
 """
-import gzip
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -41,14 +41,20 @@ def main():
             archive.stdout.close()
         if archive.wait() != 0:
             raise SystemExit('Source archive export failed: ' + name)
+    patch_dir = ROOT / 'compat/patches'
+    patch_files = sorted(patch_dir.glob('*.patch'))
+    selected['libhybris']['local_patches'] = [
+        dict(file=str(path.relative_to(ROOT)), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+        for path in patch_files]
     subprocess.run(['docker', 'run', '--rm', '--network', 'none', '-v', volume + ':/work',
-                    '-v', str(output) + ':/outputs', builder, 'sh', '-ec',
+                    '-v', str(output) + ':/outputs',
+                    '-v', str(patch_dir) + ':/compat-patches:ro', builder, 'sh', '-ec',
                     'sh /work/libhybris/utils/extract-headers.sh -v 9.0.0 /work/aosp /work/android9-headers; '
                     'test -f /work/android9-headers/android-version.h; '
-                    'tar -C /work -czf /outputs/android9-headers.tar.gz android9-headers'], check=True)
-    repo = ROOT / 'upstream/libhybris.git'
-    blob = subprocess.check_output(['git', '-C', str(repo), 'archive', '--prefix=libhybris/', sources['libhybris']['commit']])
-    (output / 'libhybris-source.tar.gz').write_bytes(gzip.compress(blob, mtime=0))
+                    'tar -C /work -czf /outputs/android9-headers.tar.gz android9-headers; '
+                    'cd /work/libhybris; '
+                    'for p in /compat-patches/*.patch; do git apply --check "$p"; git apply "$p"; done; '
+                    'tar -C /work -czf /outputs/libhybris-source.tar.gz libhybris'], check=True)
     (output / 'sources.json').write_text(json.dumps(selected, indent=2))
     print(output)
 
