@@ -71,3 +71,18 @@
   SHA256 verified. These are restore materials, not raw backups of this phone.
 - Prepared docs/INSTALLATION_REVIEW.md for privileged recovery bootstrap.
   Knox is still reported as 0. No flashing, format or data wipe performed.
+
+### Authorized recovery bootstrap
+
+- Owner authorized the permanent Knox change after its effect and the initial
+  TWRP recovery bootstrap were explained. Recorded the narrow RECOVERY exception
+  in AGENTS.md. No /data formatting authorization is inferred.
+- Entered Download Mode from the verified SM-G955N ADB target. Read-only live
+  PIT acquisition succeeded; all 30 entries match the Korean stock CSC PIT.
+  Verified RECOVERY ID 8 and 46 MiB capacity versus 40,546,304-byte TWRP payload.
+- First explicit RECOVERY attempt with samloader 2.2.0 failed in the initial
+  ODIN handshake, before any payload/session. Device remains in Download Mode;
+  requested a physical mode restart and any on-screen error text. No blind retry.
+- Started compilation of the updated FHANDLE/USER_NS configuration through the
+  immutable snapshot runner in the isolated build volume while awaiting device
+  mode restart. This is still a build-only operation without phone access.

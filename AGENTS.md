@@ -10,3 +10,12 @@ backups with hashes, and the exact authorized write targets. Preserve RECOVERY,
 EFS, RADIO, bootloaders and calibration. Never downgrade or relock bootloaders.
 Retain upstream attribution and licenses. Review redistribution before publishing binaries.
 5G NR is unsupported hardware; 5 GHz Wi-Fi is a separate validation target.
+
+Owner-approved exception, 2026-11-18: after the initial recovery bootstrap and
+irreversible Knox effect were explained, the owner authorized proceeding with
+the Knox change. The initial reviewed TWRP RECOVERY bootstrap is permitted
+after identity/live-PIT/image verification, using the verified matching stock
+RECOVERY as restore material. This precedes privileged raw backups; take those
+as soon as root recovery is reached. No data wipe is authorized by this exception.
+Subsequent Ubuntu installation must preserve the working recovery and all
+device-specific calibration partitions. Stop for device-side flash restrictions.

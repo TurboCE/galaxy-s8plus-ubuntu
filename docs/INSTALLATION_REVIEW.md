@@ -1,7 +1,9 @@
 # Initial privileged-access review — not an installer
 
-No device write is currently approved by this document. The user authorized
-porting and Git updates; this review identifies a separate irreversible step.
+After recovery bootstrap and irreversible Knox effects were explained, the
+owner explicitly authorized proceeding with the permanent Knox change on
+2026-11-18. This authorizes the reviewed initial recovery bootstrap, not data
+formatting. General porting and Git updates are also authorized.
 
 ## Preparation completed
 
@@ -51,3 +53,12 @@ https://docs.samsungknox.com/admin/knox-platform-for-enterprise/faqs/faq-1150137
 Full hardware parity is still unproven. No Ubuntu boot, LTE call, GPU runtime,
 GNSS fix, sensor motion, Bluetooth pairing, Wi-Fi traffic or suspend test has
 passed. There is no readable Ubuntu kernel log to audit yet.
+
+## First live attempt
+
+Read-only live PIT retrieval succeeded. All 30 entries match the exact Korean
+stock CSC PIT; RECOVERY is ID 8, 48,234,496 bytes. The reviewed TWRP image fits.
+The first samloader 2.2.0 RECOVERY attempt then failed during ODIN handshake,
+before any session or payload write. It did not establish flashing success.
+The user was asked to re-enter Download Mode and report any on-screen errors;
+no automatic write retry or device restriction workaround was attempted.
