@@ -385,6 +385,9 @@
   functions passed ASan/UBSan full-table, existing-ID and failure-path checks;
   the combined candidate rebuilt successfully. Concurrent insertion and
   asynchronous clock-programming error propagation remain separate work.
+  A separate fresh Linux extraction of the pinned kernel accepted all 19 active
+  patches in order with strict added-line whitespace checks. The excluded
+  hidepid proposal is not part of this build or qualification.
 - Source review found that WirePlumber renames duplicate device objects before
   applying policy. Candidate primary/debug-card rules now match verified bus
   paths and card identity instead of mutable names. Lua syntax passes; this
@@ -394,8 +397,13 @@
   successful private diagnostic. It checks the actual EFS partition/mount,
   reviewed version and original coefficient checksum before an explicit runtime
   hook, then compares the entire partition and original files. The refactored
-  script passed syntax checks only; no further calibration hook or physical
-  sensor trial was run overnight.
+  script passed syntax checks and its default read-only mode on kernel 15
+  (version/checksum valid, runtime initialization false). No further calibration
+  hook or physical sensor trial was run overnight.
+- Independent review tightened calibration parsing to the stock driver's
+  bounded records, signed/unsigned integer ranges and checksum order, with
+  value-redacted parse failures. Offline malformed-record checks and the revised
+  default read-only validation both passed; runtime-hook acceptance is unchanged.
 - Real HWM/property trials passed ready-property authentication, second-process
   reads, bounded lifetime and namespace cleanup. A no-device HWC diagnostic then
   reached real HWBinder communication but waited for graphics allocator 2.0,
