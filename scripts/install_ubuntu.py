@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import subprocess
 
@@ -26,6 +27,20 @@ def verify_backup(path, size, expected):
         raise ValueError('Backup is incomplete or contains appended diagnostics: ' + path.name)
     if digest(path) != expected:
         raise ValueError('Backup checksum mismatch: ' + path.name)
+
+
+def expected_boot_hash(backup, prior_trial=None):
+    if prior_trial is None:
+        return backup['partitions']['BOOT']['sha256']
+    previous = json.loads(prior_trial.read_text())
+    expected = previous.get('boot_partition_sha256', '')
+    if (previous.get('target') != 'SM-G955N'
+            or previous.get('bootloader') != backup['bootloader']
+            or previous.get('state') != 'boot_only_readback_verified_not_booted'
+            or previous.get('userdata_written') is not False
+            or not re.fullmatch(r'[0-9a-f]{64}', expected)):
+        raise ValueError('Invalid prior BOOT trial record')
+    return expected
 
 
 def verify_rootfs_header(path):
@@ -68,6 +83,8 @@ def main():
     parser.add_argument('--boot', type=Path, required=True)
     parser.add_argument('--rootfs', type=Path, required=True)
     parser.add_argument('--backup-dir', type=Path, required=True)
+    parser.add_argument('--prior-trial', type=Path,
+                        help='Require exact readback hash of a previously installed BOOT-only trial')
     parser.add_argument('--initialize-userdata', action='store_true', required=True,
                         help='Explicitly permit destruction of Android app data on USERDATA')
     args = parser.parse_args()
@@ -78,12 +95,15 @@ def main():
     for meta in (boot_meta, root_meta):
         if meta.get('target') != 'SM-G955N':
             raise SystemExit('Image validation belongs to another model')
+    if boot_meta.get('kernel_trial') is not False:
+        raise SystemExit('Installation requires a normal Ubuntu boot image, not a rescue trial')
     boot_hash, root_hash = digest(args.boot), digest(args.rootfs)
     if boot_meta['image_sha256'] != boot_hash or root_meta['image_sha256'] != root_hash or not root_meta.get('fsck_clean'):
         raise SystemExit('Image validation/hash mismatch')
     backup = json.loads((args.backup_dir / 'manifest.json').read_text())
     if not backup.get('verified') or backup.get('model') != 'SM-G955N':
         raise SystemExit('Requires a verified G955N raw backup manifest')
+    expected_boot = expected_boot_hash(backup, args.prior_trial)
     for name in ('BOOT', *PROTECTED):
         item = backup['partitions'][name]
         verify_backup(args.backup_dir / (name + '.img'), item['bytes'], item['sha256'])
@@ -102,6 +122,8 @@ def main():
     for name in PROTECTED:
         if shell('sha256sum ' + BASE + name).split()[0] != backup['partitions'][name]['sha256']:
             raise SystemExit('Protected partition changed since backup: ' + name)
+    if shell('sha256sum ' + BASE + 'BOOT').split()[0] != expected_boot:
+        raise SystemExit('Unexpected BOOT contents; USERDATA has not been written')
     mounts = shell('cat /proc/mounts')
     if any('/dev/block/dm-' in line or ' /data ' in line or '/dev/block/sda24 ' in line for line in mounts.splitlines()):
         raise SystemExit('USERDATA or decrypted Android data is mounted; no write permitted')
@@ -143,7 +165,7 @@ def main():
         raise SystemExit('Full USERDATA image hash mismatch; BOOT not written')
     state['state'] = 'userdata_fully_verified'
     save()
-    if shell('sha256sum ' + BASE + 'BOOT').split()[0] != backup['partitions']['BOOT']['sha256']:
+    if shell('sha256sum ' + BASE + 'BOOT').split()[0] != expected_boot:
         raise SystemExit('BOOT changed unexpectedly; refusing overwrite')
     subprocess.run(adb + ['push', str(args.boot), remote], check=True, timeout=180, stdout=subprocess.DEVNULL)
     if shell('sha256sum ' + remote).split()[0] != boot_hash:

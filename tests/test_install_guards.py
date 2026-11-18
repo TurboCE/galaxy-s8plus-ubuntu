@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,23 @@ spec.loader.exec_module(install)
 
 
 class InstallGuards(unittest.TestCase):
+    def test_prior_boot_trial_requires_matching_identity_and_complete_readback(self):
+        backup = dict(bootloader='G955NKSU5DZE1', partitions={'BOOT': {'sha256': 'a' * 64}})
+        self.assertEqual(install.expected_boot_hash(backup), 'a' * 64)
+        valid = dict(target='SM-G955N', bootloader=backup['bootloader'],
+                     state='boot_only_readback_verified_not_booted',
+                     userdata_written=False, boot_partition_sha256='b' * 64)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'trial.json'
+            path.write_text(json.dumps(valid))
+            self.assertEqual(install.expected_boot_hash(backup, path), 'b' * 64)
+            for field, value in [('target', 'SM-G965N'), ('bootloader', 'G955F'),
+                                 ('state', 'preflight_passed'), ('userdata_written', True),
+                                 ('boot_partition_sha256', 'truncated')]:
+                path.write_text(json.dumps(dict(valid, **{field: value})))
+                with self.assertRaises(ValueError):
+                    install.expected_boot_hash(backup, path)
+
     def test_dd_stderr_and_interrupted_backups_rejected(self):
         good = bytes(4096)
         with tempfile.TemporaryDirectory() as directory:

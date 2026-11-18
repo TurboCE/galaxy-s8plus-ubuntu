@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
-from install_ubuntu import BASE, PROTECTED, ROOT, digest, verify_backup, verify_boot
+from install_ubuntu import BASE, PROTECTED, ROOT, digest, verify_backup, verify_boot, expected_boot_hash
 
 
 def main():
@@ -33,14 +33,7 @@ def main():
         raise SystemExit('Recovery root/model identity mismatch')
     if not backup['bootloader'].startswith('G955N'):
         raise SystemExit('Not G955N')
-    expected_boot = backup['partitions']['BOOT']['sha256']
-    if args.prior_trial:
-        previous = json.loads(args.prior_trial.read_text())
-        if (previous.get('target') != 'SM-G955N' or previous.get('bootloader') != backup['bootloader']
-                or previous.get('state') != 'boot_only_readback_verified_not_booted'
-                or previous.get('userdata_written') is not False):
-            raise SystemExit('Invalid prior trial record')
-        expected_boot = previous['boot_partition_sha256']
+    expected_boot = expected_boot_hash(backup, args.prior_trial)
     for name in ('BOOT', *PROTECTED):
         info = backup['partitions'][name]
         verify_backup(args.backup_dir / (name + '.img'), info['bytes'], info['sha256'])
