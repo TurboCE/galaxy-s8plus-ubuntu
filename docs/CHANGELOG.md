@@ -12,3 +12,13 @@
 - Added explicit model/device/bootloader guard and tests rejecting other models.
 - Started Korean kernel source acquisition and graphics ABI investigation.
 - Full Ubuntu hardware validation remains pending.
+- Generated and checked the Korean S8+ Ubuntu bring-up configuration in an
+  isolated case-sensitive Linux volume. Preserved r16p0 Mali selection and
+  revision-10 Korean DT selection. Build does not access USB.
+- Started the first Image/DTB compilation with GCC 13 as a compatibility probe;
+  this is not a hardware-qualified kernel or an installation image.
+- Privately extracted stock 64-bit Mali/gralloc/HWC and inspected ELF
+  dependencies. Confirmed nativewindow/ION/Bionic dependencies requiring a
+  compatibility stack; proprietary binaries were not committed.
+- Identity guard tests: 3 passed. Python compilation, shell syntax and Git
+  whitespace checks passed.

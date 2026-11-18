@@ -37,6 +37,10 @@ was found in the shell path. Partitions have not been backed up.
 python3 scripts/fetch_sources.py
 python3 scripts/collect_device.py --adb /path/to/adb --serial DEVICE_SERIAL
 python3 -m unittest discover -s tests -v
+docker build -t g955n-ubuntu-builder:24.04 -f build/Dockerfile .
+bash scripts/build_kernel.sh config
+# Experimental compilation; not an installable boot image:
+bash scripts/build_kernel.sh image
 ```
 
 Collectors are read-only; outputs under inventory/ may contain personal data

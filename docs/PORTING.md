@@ -1,5 +1,36 @@
 # Engineering notes
 
+## First configuration run
+
+Generated on a case-sensitive Linux Docker volume using the pinned kernel.
+The actual upstream build script merges g950x_defconfig + g955x_kor_defconfig;
+the port follows that combination then applies config/ubuntu-bringup.fragment.
+Result retains MALI_TMIX_R16P0, CAMERA_DREAM2 and WLAN_REGION_CODE=200,
+selecting dream2lte_kor_10.dtb.
+Configuration SHA256: 673bedfb85a22640b9a043854acaaf28fd170127f00def16704d1584fff61661.
+Configuration generation succeeded; compilation and hardware boot are separate.
+First builder was the existing s9-g965n-builder:24.04.3 image
+(sha256:f969dadedd09d3a2469549a204bb1ff45c42b2569931d6d3cdc086b00b379637),
+used in a new isolated container with a G955N-only volume, without USB access.
+The supplied Dockerfile documents a standalone builder for subsequent work.
+
+macOS checkout has case-colliding Linux filenames. The builder uses git archive
+from pinned committed objects and extracts into Linux storage. fetch_sources.py
+conservatively refuses dirty existing checkouts, including such collisions;
+use case-sensitive storage for source modifications. Build output is private.
+
+## Graphics dependency audit
+
+Read-only extraction and ELF inspection of the connected phone's 64-bit EGL,
+gralloc and HWC libraries completed. Binaries remain private and Git-ignored.
+Mali requires Android libnativewindow, libcutils, liblog and libion_exynos,
+in addition to Bionic libc/libm/libdl and other dependencies. HWC additionally
+requires libexynosdisplay, libmpp, allocator/mapper 2.0, libGrallocWrapper and
+libExynosHWCService. This confirms that copying libGLES_mali.so into a glibc
+rootfs alone is insufficient. The candidate kernel includes b_r16p0 with
+MALI_RELEASE_NAME r16p0-01rel0, matching the observed version string; this is
+a compatibility lead, not proof of full ABI or hardware compatibility.
+
 ## Native boot reference audit
 
 roufsweb/galaxy-s8 targets **G950N**, not G955N. Its public guide identifies
