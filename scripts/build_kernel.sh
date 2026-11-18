@@ -2,9 +2,13 @@
 # Build only. No USB, privileged container, device mount or flash operations.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ "${G955N_SCRIPT_SNAPSHOT:-0}" != 1 ]; then
+  exec python3 "$ROOT/scripts/run_build.py" "$@"
+fi
 MODE=${1:-config}
 case "$MODE" in config|image) ;; *) echo 'Usage: build_kernel.sh [config|image]' >&2; exit 2 ;; esac
 SOURCE="$ROOT/upstream/kernel"
+if [ -d "$ROOT/upstream/kernel.git" ]; then SOURCE="$ROOT/upstream/kernel.git"; fi
 EXPECTED=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sources"]["kernel"]["commit"])' "$ROOT/sources.json")
 test "$(git -C "$SOURCE" rev-parse HEAD)" = "$EXPECTED"
 BUILDER=${G955N_BUILDER:-g955n-ubuntu-builder:24.04}
@@ -15,8 +19,10 @@ docker volume create "$VOLUME" >/dev/null
 git -C "$SOURCE" archive HEAD | docker run --rm -i --network none \
   -v "$VOLUME:/work" "$BUILDER" sh -ec 'mkdir -p /work/src; tar -x -C /work/src'
 mkdir -p "$ROOT/artifacts"
+OUTPUT=$(mktemp -d "$ROOT/artifacts/build-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
+echo "Artifacts: $OUTPUT"
 docker run --rm --network none -v "$VOLUME:/work" \
-  -v "$ROOT/config:/port-config:ro" -v "$ROOT/artifacts:/artifacts" \
+  -v "$ROOT/config:/port-config:ro" -v "$OUTPUT:/artifacts" \
   -v "$ROOT/patches:/port-patches:ro" \
   -e PORT_MODE="$MODE" -e ARCH=arm64 -e CROSS_COMPILE=aarch64-linux-gnu- \
   "$BUILDER" bash -euc '

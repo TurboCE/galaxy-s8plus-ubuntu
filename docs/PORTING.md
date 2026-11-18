@@ -16,8 +16,10 @@ The supplied Dockerfile documents a standalone builder for subsequent work.
 
 macOS checkout has case-colliding Linux filenames. The builder uses git archive
 from pinned committed objects and extracts into Linux storage. fetch_sources.py
-conservatively refuses dirty existing checkouts, including such collisions;
-use case-sensitive storage for source modifications. Build output is private.
+now uses bare *.git repositories so fetching does not create case-collided
+working files; existing checkouts are left untouched. The builder prefers the
+bare pinned source when present. Use case-sensitive storage for source edits.
+Build output is private.
 
 ## Graphics dependency audit
 

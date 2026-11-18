@@ -51,4 +51,5 @@ and must remain private. Source references and exact commits are in sources.json
 Build scripts do not flash phones. Never flash G950N/G955F/G965N images here.
 
 See [validation](docs/VALIDATION.md), [engineering notes](docs/PORTING.md),
-[change log](docs/CHANGELOG.md), and [attribution](NOTICE).
+[change log](docs/CHANGELOG.md), [installation review](docs/INSTALLATION_REVIEW.md),
+and [attribution](NOTICE).

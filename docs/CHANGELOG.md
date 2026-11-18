@@ -48,3 +48,26 @@
   unlock allowed=1, flash.locked=0, verifiedbootstate=orange and warranty_bit=0.
   These properties do not independently prove Download Mode flash permission.
 - No on-device settings, firmware or partitions changed.
+
+### Completed build and recovery preparation checkpoint
+
+- Patched kernel compile/link produced an AArch64 vmlinux and a 31 MiB raw
+  Image, plus a valid revision-10 DTB explicitly containing SM-G955N.
+  Raw Image SHA256: ad2963a665a78deca0284b2600a173e0517c36caff1f64f26fa3b73b9c90d2b6.
+  DTB SHA256: b21e37a3033246439e65be6603392fdee172aeb349f7705d09f8517a3a6ef106.
+  These use the initial generated configuration hash recorded in PORTING.md,
+  not the later FHANDLE/USER_NS configuration revision. Neither is boot-qualified.
+- The outer runner failed after compilation because its file was edited while
+  Bash was executing it. Added an immutable Python snapshot launcher and
+  per-run artifact directories to avoid mixed configurations/results. A redundant
+  confirmation build was stopped; already-completed artifacts were exported
+  and independently checked as ELF64/AArch64 and FDT with SM-G955N identity.
+- Updated configuration generation through the snapshot runner completed.
+- Source fetching now uses bare repositories on macOS. All three source HEADs
+  were fetched and verified against sources.json, without overwriting existing
+  working checkouts with case-collided Linux filenames.
+- Exact Samsung restore ZIP CRC and AP MD5 verification passed; private stock
+  BOOT/RECOVERY images and stock CSC PIT extracted. Official TWRP download
+  SHA256 verified. These are restore materials, not raw backups of this phone.
+- Prepared docs/INSTALLATION_REVIEW.md for privileged recovery bootstrap.
+  Knox is still reported as 0. No flashing, format or data wipe performed.
