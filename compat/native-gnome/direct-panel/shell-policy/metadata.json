@@ -1,0 +1,7 @@
+{
+  "uuid": "g955n-direct-panel@local",
+  "name": "Galaxy S8+ direct display",
+  "description": "Keep fullscreen X11 windows in the GNOME buffer sent to the built-in panel",
+  "shell-version": ["46"],
+  "session-modes": ["ubuntu", "user"]
+}

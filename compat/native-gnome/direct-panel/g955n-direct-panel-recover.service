@@ -1,6 +1,6 @@
 [Unit]
-Description=Restore normal GNOME output after an interrupted SM-G955N direct output trial
-Before=gdm.service gdm3.service display-manager.service
+Description=Prepare or restore the SM-G955N GNOME direct output path
+Before=g955n-fb-display.service gdm.service gdm3.service display-manager.service
 ConditionPathExists=/var/lib/g955n/direct-panel-trial
 RequiresMountsFor=/opt/g955n-native-gpu /var/lib/g955n
 

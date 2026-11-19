@@ -147,3 +147,42 @@ A separate direct-output test repeated DPMS off/on 18 times. Every cycle
 resuspended and reactivated DECON, then advanced its timeline by 141–181
 points in the same GNOME process and boot. Taint stayed 0 and normal output
 was restored when the test ended.
+
+### Default GNOME output on the SM-G955N
+
+The controller can install the same reviewed EGL module for subsequent
+ordinary GNOME logins with `--candidate PATH --sha256 HASH --enable-default`.
+GDM keeps the framebuffer presenter until the owner GNOME Shell takes the
+panel lease. The boot service recreates the lease on kernel32 only after
+verifying the installed library, manifest and session launcher against the
+persistent install record. A changed module, incompatible kernel or
+interrupted trial brings back the saved original output files. The installed
+controller also accepts `--restore` to return to the original path.
+
+A controlled reboot with the default set brought up GDM and recreated the
+verified lease. Replayed contact events on the actual `sec_touchscreen` evdev
+device selected the account, opened the GDM password field, entered the
+credential through GNOME's screen keyboard, and reached the actual PAM owner
+session. This exercises GNOME's touchscreen input path from evdev onward.
+It does not measure the digitizer hardware or physical touch latency.
+
+Eight subsequent DPMS off/on cycles on that login resumed the same
+GNOME Shell and advanced the DECON timeline by 170–180 points each.
+The boot ID was constant and kernel taint stayed 0.
+
+For the persistent install, copy the two files from
+`compat/native-gnome/direct-panel/shell-policy/` into
+`/opt/g955n-native-gpu/direct-shell/gnome-shell/extensions/g955n-direct-panel@local/`
+as root-owned files first. The controller makes a private copy of the
+installed Ubuntu GNOME mode and appends the shell extension. The ordinary
+Ubuntu theme, session and enabled extensions are retained. The default
+configuration validates the private mode and both extension files at boot.
+
+Mutter can normally unredirect an opaque fullscreen X11 client after
+sustained full-window damage. That removes its output from the GNOME
+overlay that this port sends to DECON. The small shell extension
+inhibits this bypass in the direct session. The real device reproduced
+152 samples with an empty GNOME overlay in the fullscreen fixture
+before the extension. After installation and a clean boot, the same
+fixture stayed fullscreen with zero empty overlay samples and the
+DECON timeline advanced by 170 points.
