@@ -34,21 +34,22 @@ fixing inherited build-container DNS configuration. Kernel logs still contain
 findings, and GPU, audio, sensors, radios and the other acceptance items remain
 under active bring-up. No SIM is present for cellular end-to-end tests.
 
-Ubuntu Desktop packages are now installed on the test handset. A framebuffer
-presentation path produced physical console text confirmed by the owner. GNOME
-login and manual on-screen-keyboard authentication reached the desktop using
-temporary CPU/fbdev rendering. GNOME remains llvmpipe and sluggish; this is not a
-Mali acceleration pass. The owner has a private local login credential; automatic
-login is disabled and SSH remains key-only. Never put credentials in Git.
+Ubuntu Desktop is installed. On 2026-11-19 the owner manually authenticated
+through GDM into the ordinary Ubuntu GNOME46 session with **Mali-G71 GLES/EGL
+hardware rendering and composition**. The actual GNOME process loads the
+private EGL bridge and Exynos gralloc, with no swrast driver. Three native
+client/overlay pixel and stable-calendar trials passed. The X11 presentation
+still uses CPU copies and a separate60Hz panel commit pump; this is not a
+zero-copy or measured60FPS claim. See the [native GNOME setup](compat/native-gnome/README.md).
+Automatic login is disabled; credentials and device artifacts remain private.
+The GDM account-row touch workaround and other hardware acceptance remain open.
 
-Current recovery status (2026-11-19): kernel 22 failed sustained operation with
-three unexpected resets. The complete known-working kernel-15 BOOT was restored
-and verified, preserving USERDATA and recovery/calibration partitions. Ubuntu,
-GDM and Wi-Fi returned, but existing kernel warnings remain. The experimental
-faster presenter is quarantined and disabled by default. Private HWC2/wlroots
-compositor candidates cross-link; they have never run on the handset. See the
-[kernel investigation](docs/kernel22-stability-investigation.md) and
-[graphics build boundary](compat/compositor-build/README.md).
+Current kernel is24 with persistent framebuffer ownership and baseline fixes.
+It remained on the same boot with taint0 and no new kernel fault signatures
+through final native-GNOME trials. Historical kernel22 failed sustained
+operation and remains quarantined; old warnings and full cold-boot/suspend
+qualification are not declared resolved. Recovery/calibration partitions were
+preserved. See the [kernel investigation](docs/kernel22-stability-investigation.md).
 
 ## Approach
 

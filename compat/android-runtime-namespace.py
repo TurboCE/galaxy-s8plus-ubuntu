@@ -41,7 +41,7 @@ def bind_readonly(source, destination):
 
 
 def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
-                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False, native_system_bus=False, touch_input=False):
+                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False, native_system_bus=False, touch_input=False, shared_properties=None):
     libc = ctypes.CDLL(None, use_errno=True)
     # If the outer supervisor disappears, killing namespace PID 1 also kills
     # all of its descendants and releases their private mounts.
@@ -53,6 +53,7 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
         raise SystemExit('Child did not enter a fresh PID namespace')
     if libc.unshare(0x00020000):  # CLONE_NEWNS, only this child changes mounts.
         raise OSError(ctypes.get_errno(), 'Unable to create private mount namespace')
+    shared_fd = os.open(shared_properties, os.O_PATH | os.O_DIRECTORY) if shared_properties else None
     touch_database = None
     if touch_input:
         node = Path('/dev/input/event0').stat()
@@ -166,6 +167,9 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
     properties = root / 'dev/__properties__'
     properties.mkdir(mode=0o711)
     properties.chmod(0o711)
+    if shared_fd is not None:
+        subprocess.run(['mount','--no-canonicalize','--bind',f'/proc/self/fd/{shared_fd}',str(properties)],check=True,pass_fds=(shared_fd,))
+        os.close(shared_fd)
     (root / 'dev/socket').mkdir(mode=0o755)
     (root / 'dev/socket').chmod(0o755)
     path = properties / 'property_info'
@@ -259,7 +263,15 @@ def main():
     parser.add_argument('--include-system-bus', action='store_true',
                         help='Expose the actual native system bus only to a reviewed GNOME display trial')
     parser.add_argument('--include-touch-input',action='store_true',help='Only the verified sec_touchscreen event0 for a GNOME display/input trial')
+    parser.add_argument('--shared-properties-dir',type=Path,help='Exact root-owned RAM backing for the separately reviewed native GUI bridge')
     args = parser.parse_args()
+    if args.shared_properties_dir:
+        area=args.shared_properties_dir
+        if not (args.run_trial and args.include_ion_device and args.include_mali_device and args.include_composer_ipc and not args.include_display_devices) or area!=Path('/run/g955n-native-property-source/properties'):
+            parser.error('Shared properties require the fixed explicit headless native-GUI scope')
+        st=area.lstat();parent=area.parent.lstat()
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid!=0 or stat.S_IMODE(st.st_mode)!=0o711 or not stat.S_ISDIR(parent.st_mode) or parent.st_uid!=0 or stat.S_IMODE(parent.st_mode)!=0o700 or any(area.iterdir()):
+            parser.error('Shared property backing must be fresh, private and root-owned')
     if args.include_touch_input and not (args.run_trial and args.include_display_devices and args.include_composer_ipc and args.include_system_bus):
         parser.error('Touch input requires the explicit GNOME display/system-bus scope')
     if args.include_system_bus and not (args.run_trial and args.include_display_devices and args.include_composer_ipc):
@@ -367,7 +379,7 @@ def main():
     if not pid:
         try:
             prepare_child(runtime, info_bytes, system, devices, library_dirs, args.seconds,
-                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc, args.include_system_bus, args.include_touch_input)
+                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc, args.include_system_bus, args.include_touch_input, args.shared_properties_dir)
         except BaseException as error:
             print('Private namespace setup failed: ' + str(error), flush=True)
             os._exit(1)

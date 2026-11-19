@@ -1,0 +1,14 @@
+--- a/hybris/common/legacy_properties/cache.c
++++ b/hybris/common/legacy_properties/cache.c
+@@ -97,7 +97,10 @@
+ static void cache_update()
+ {
+ 	struct stat st;
+-	FILE *f = fopen("/system/build.prop", "r");
++	/* Native Linux has no Android init to combine SYSTEM/vendor/boot props.
++	 * The launcher may select an own-device, root-generated static snapshot. */
++	const char *path = getenv("HYBRIS_PROPERTY_FILE");
++	FILE *f = fopen(path && *path ? path : "/system/build.prop", "r");
+ 
+ 	if (!f)
+ 		return;

@@ -11,6 +11,7 @@ import subprocess
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--work',type=Path,default=Path('/work'))
 p.add_argument('--output',type=Path,required=True)
+p.add_argument('--destination',choices=['/home/ubuntu/g955n-compositor','/opt/g955n-native-gpu'],default='/home/ubuntu/g955n-compositor')
 p.add_argument('--include-x11',action='store_true',help='Include the separately built private X11 candidate')
 a=p.parse_args()
 if a.work != Path('/work') or a.output.exists():raise SystemExit('Use dedicated /work and fresh output')
@@ -59,7 +60,7 @@ android=a.output/'android';android.mkdir()
 src=a.work/'hwc2-android9/libhwc2_compat_layer.so'
 shutil.copy2(src,android/src.name)
 elf['android/'+src.name]={'sha256':hashlib.sha256(src.read_bytes()).hexdigest(),'abi':'Bionic Android9; private Android loader path only'}
-base='/home/ubuntu/g955n-compositor'
+base=a.destination
 env={'LD_LIBRARY_PATH':base+'/lib','HYBRIS_EGLPLATFORM':'hwcomposer','HYBRIS_ANDROID_SDK_VERSION':'28',
      'HYBRIS_EGLPLATFORM_DIR':base+'/lib/libhybris','HYBRIS_LINKER_DIR':base+'/lib/libhybris/linker',
      'HYBRIS_LD_LIBRARY_PATH':base+'/android:/system/lib64:/vendor/lib64',

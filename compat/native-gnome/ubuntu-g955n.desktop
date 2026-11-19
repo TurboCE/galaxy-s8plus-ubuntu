@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Ubuntu (Galaxy S8+ GPU)
+Comment=Ubuntu GNOME using the SM-G955N Mali-G71 X11 bridge
+Exec=/opt/g955n-native-gpu/session.py --session
+TryExec=/opt/g955n-native-gpu/session.py
+Type=Application
+DesktopNames=ubuntu;GNOME;
+X-GDM-SessionRegisters=true

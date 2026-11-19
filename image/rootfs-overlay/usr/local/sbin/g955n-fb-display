@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Legacy DECON framebuffer presentation for native console/fbdev bring-up.
 
-This presents the CPU framebuffer; it is not GPU acceleration. Keep its fd open
-and request command-mode scanout when pixels change. A future HWC/DRM compositor
+This commits the fbdev framebuffer to the command-mode panel; rendering may
+come from CPU or the private Mali X11 bridge. It does not itself render with
+the GPU. Keep its fd open. A future HWC/DRM compositor
 must replace this service rather than compete for the same display plane.
 """
 import fcntl
@@ -41,7 +42,37 @@ try:
     struct.pack_into('II', var, 16, 0, 0)
     fcntl.ioctl(fd, 0x4611, 0)  # FBIOBLANK / UNBLANK
     with mmap.mmap(fd, size, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ) as pixels:
-        if os.environ.get('G955N_FB_XDAMAGE') != '1':
+        if os.environ.get('G955N_FB_PAN_HZ') == '60':
+            # The proven S8 X11 path needs regular DECON commits. Do not scan
+            # all 17 MB of write-combined framebuffer memory on the hot path.
+            # An ioctl count is not a measured rendering/panel FPS result.
+            next_pan = time.monotonic()
+            stats_at = next_pan
+            next_blank_check = 0.0
+            blanked = False
+            pans = 0
+            print('Native X11 panel commit pump active: requested 60 Hz', flush=True)
+            while running:
+                now = time.monotonic()
+                if now >= next_blank_check:
+                    try:
+                        blanked = Path('/sys/class/graphics/fb0/blank').read_text().strip() in {'1','2','3','4'}
+                    except OSError:
+                        blanked = False
+                    next_blank_check = now + 1.0
+                if blanked:
+                    time.sleep(0.25)
+                    next_pan = time.monotonic()
+                    continue
+                fcntl.ioctl(fd, 0x4606, var, True)
+                pans += 1
+                next_pan = max(next_pan + 1.0 / 60.0, time.monotonic())
+                time.sleep(max(0.001, next_pan - time.monotonic()))
+                if now - stats_at >= 30:
+                    print('Panel commit interval: requests=%d seconds=%.1f; not measured rendered FPS' % (pans, now-stats_at), flush=True)
+                    stats_at = now
+                    pans = 0
+        elif os.environ.get('G955N_FB_XDAMAGE') != '1':
             # Keep the previously working baseline until the later kernel
             # corruption is diagnosed. The faster path is explicit opt-in.
             previous = None

@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=repair,text=True,check=True)
     if sha(target)!=sha(repaired):raise SystemExit('Unreviewed repaired X11 source: '+name)
   else:target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
-for number in ['0014','0015','0018','0019']:
+for number in ['0014','0015','0018','0019','0021','0022','0023']:
  patch=next((scripts/'patches').glob(number+'-*.patch'))
  command=['patch','--fuzz=0','-p1','--batch','--silent','-d',str(hybris)]
  if subprocess.run([*command,'--forward','--dry-run'],input=patch.read_bytes()).returncode==0:
@@ -75,5 +75,5 @@ if 'AArch64' not in header or '(TEXTREL)' in dynamic:raise SystemExit('Unexpecte
 probe=build/'x11-pixel-probe'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=gnu11','-O2','-g','-Wall','-Wextra','-Werror',str(scripts/'x11-pixel-probe.c'),
  '-I'+str(prefix/'include'),'-L'+str(prefix/'lib'),'-Wl,-rpath-link,'+str(prefix/'lib'),'-lX11','-lEGL','-lGLESv2','-ldl','-o',str(probe)],check=True)
-record={'pixel_probe_sha256':sha(probe),'pixel_probe_source_sha256':sha(scripts/'x11-pixel-probe.c'),'source':pin,'adaptation_sha256':sha(next((scripts/'patches').glob('0013-*.patch'))),'core_integration_sha256':sha(next((scripts/'patches').glob('0014-*.patch'))),'submission_order_sha256':sha(next((scripts/'patches').glob('0019-*.patch'))),'buffer_age_sha256':sha(next((scripts/'patches').glob('0018-*.patch'))),'gralloc_ownership_sha256':sha(next((scripts/'patches').glob('0015-*.patch'))),'source_hashes':{name:sha(hybris/relative/name) for name in names},'binary_sha256':sha(binary),'status':'built only; not executed; XPutImage transfer; no DRIHybris/SHM'}
+record={'pixel_probe_sha256':sha(probe),'pixel_probe_source_sha256':sha(scripts/'x11-pixel-probe.c'),'source':pin,'adaptation_sha256':sha(next((scripts/'patches').glob('0013-*.patch'))),'core_integration_sha256':sha(next((scripts/'patches').glob('0014-*.patch'))),'submission_order_sha256':sha(next((scripts/'patches').glob('0019-*.patch'))),'buffer_age_sha256':sha(next((scripts/'patches').glob('0018-*.patch'))),'gralloc_ownership_sha256':sha(next((scripts/'patches').glob('0015-*.patch'))),'gralloc_lifetime_sha256':sha(next((scripts/'patches').glob('0023-*.patch'))),'native_property_snapshot_sha256':sha(next((scripts/'patches').glob('0022-*.patch'))),'legacy_property_hooks_sha256':sha(next((scripts/'patches').glob('0021-*.patch'))),'source_hashes':{name:sha(hybris/relative/name) for name in names},'binary_sha256':sha(binary),'status':'built only; not executed; XPutImage transfer; no DRIHybris/SHM'}
 (build/'build.json').write_text(json.dumps(record,indent=2)+'\n');print(json.dumps(record,indent=2))

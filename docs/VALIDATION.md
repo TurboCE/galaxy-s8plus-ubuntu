@@ -7,7 +7,7 @@ No row may become PASS from configuration or compilation alone.
 Runtime capture tooling exists in scripts/collect_linux.py; it refuses an
 unexpected kernel/DT. Stock dmesg was denied and kernel logcat returned no
 entries. Thus neither stock nor Ubuntu logs have been certified clean.
-Twenty-eight host tests pass; these are tooling checks, not hardware acceptance tests.
+Fifty-one host tests pass at the native-GNOME checkpoint; these are tooling checks, not hardware acceptance tests.
 BOOT-only trials recovered concrete panic logs: the initial gzip decoder mismatch
 was fixed and unpacking succeeded on the second trial. That trial then panicked
 in ABOX regcache initialization and failed USB gadget binding. The third trial
@@ -26,8 +26,8 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
 | Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Kernel24 with baseline fixes, bounded panic history and persistent native framebuffer ownership now boots; live build-id/config/DT match, initial WARNING/panic counts 0 and taint0. Prior kernel22 remains failed; cold-boot/suspend qualification and old corruption root cause pending |
-| Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: manual OSK login/desktop confirmed. Desktop remains llvmpipe and sluggish. Experimental damage-driven presenter is quarantined after kernel-22 failures; original presenter restored. Rotation/brightness/resume and account touch activation pending |
-| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Partial: private libhybris Mali-G71 shader/readback passed 10000 frames at 1440x2960 in 21.989 seconds; native shared buffer passed three distinct full-frame Mali/mapper/CPU checks after fixing CPU ownership sync. Private HWC2/wlroots/tinywl staged and loader dependencies resolved, no compositor executed. Buffer/fence/presentation, thermal qualification and resume pending |
+| Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: normal GDM/manual login reaches GPU GNOME at1440x2960; owner confirms desktop. Three overlay/color and stable-calendar trials pass;60Hz panel commits observed (not renderedFPS). CPU greeter account-row still needs Return; touch latency, rotation/brightness/resume acceptance pending |
+| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | PASS for normal GNOME GLES/EGL rendering/composition: actual shell Mali-G71, private EGL/Exynos gralloc, no swrast; three real client/overlay and stable-popup trials, same shell/boot and taint0. XPutImage CPU transfer remains; broad API/app performance and long-term stability unqualified |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: three explicit disconnect/reconnect cycles per band, each with bound-interface TLS HTTP 200 and 254968-byte download at 2467/5745 MHz; original profile restored, same boot. Full suspend/resume pending |
@@ -386,3 +386,21 @@ Validation:42 host scope guards passed. Private evidence:
 compositor-build/panel-host-gnome-proc-result.json and preceding setup failures.
 The ordinary native X server is independently confirmed at1440x2960/depth24;
 its direct X11 EGL route remains an additional integration option to verify.
+
+## Ordinary GPU GNOME login checkpoint — 2026-11-19
+
+The owner authenticated manually through GDM into Ubuntu GNOME46; the installed
+session was ubuntu-g955n, ordinary UID/GID1000, native seat0/X11, with real PAM.
+Actual GNOME renderer: Mali-G71. The process maps the private EGL library,
+libGLES_mali and gralloc.exynos5; swrast is absent. No global Android properties
+or Android graphics daemon is needed. Three consecutive six-color client/overlay
+and20-sample calendar-stability trials passed with the same shell/boot, taint0
+and no new kernel fault signatures during the passing interval. The original
+real GNOME GLES helper, including teardown, exits0 after the gralloc-lifetime fix.
+Panel commit intervals reached1798–1800 requests/30s; do not interpret these as
+measured rendering FPS. Presentation remains XPutImage/CPU copying. Physical
+smoothness, long-term suspend/cold-boot and broad application/API tests remain
+separate. The CPU GDM greeter still needed a Return key to reveal its password
+prompt. Earlier failed checks/kernel-userland fault messages are retained and
+not filtered from history. Private evidence: artifacts/native-gpu/*-probe.log,
+*-gles-preflight.log, real-session-keyboard-check.log and target session JSONs.

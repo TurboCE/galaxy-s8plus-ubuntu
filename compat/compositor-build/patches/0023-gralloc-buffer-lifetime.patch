@@ -1,0 +1,54 @@
+--- a/hybris/gralloc/gralloc.c
++++ b/hybris/gralloc/gralloc.c
+@@ -104,6 +104,10 @@
+ 
+ #define NO_GRALLOC { fprintf(stderr, "%s:%d: called gralloc method without gralloc loaded\n", __func__, __LINE__); assert(NULL); }
+ 
++/* Android EGL may release native windows from an exit callback registered
++ * before gralloc. Keep the device/DSO alive until its last buffer reference. */
++static int live_buffer_references;
++static int deferred_deinitialize;
+ void hybris_gralloc_deinitialize(void);
+ 
+ void hybris_gralloc_initialize(int framebuffer)
+@@ -168,6 +172,11 @@
+ 
+ void hybris_gralloc_deinitialize(void)
+ {
++    if (__atomic_load_n(&live_buffer_references, __ATOMIC_ACQUIRE) > 0) {
++        __atomic_store_n(&deferred_deinitialize, 1, __ATOMIC_RELEASE);
++        return;
++    }
++    __atomic_store_n(&deferred_deinitialize, 0, __ATOMIC_RELEASE);
+     if (framebuffer_device) framebuffer_close(framebuffer_device);
+     framebuffer_device = NULL;
+ 
+@@ -271,6 +280,10 @@
+         }
+     ) else NO_GRALLOC
+ 
++    if (ret == 0 && __atomic_load_n(&live_buffer_references, __ATOMIC_ACQUIRE) > 0 &&
++        __atomic_sub_fetch(&live_buffer_references, 1, __ATOMIC_ACQ_REL) == 0 &&
++        __atomic_load_n(&deferred_deinitialize, __ATOMIC_ACQUIRE))
++        hybris_gralloc_deinitialize();
+     return ret;
+ }
+ 
+@@ -305,6 +318,8 @@
+         ret = gralloc0_module->registerBuffer(gralloc0_module, handle);
+     ) else NO_GRALLOC
+ 
++    if (ret == 0)
++        __atomic_add_fetch(&live_buffer_references, 1, __ATOMIC_ACQ_REL);
+     return ret;
+ }
+ 
+@@ -341,6 +356,8 @@
+                                     handle_ptr, (int*)stride_ptr);
+     ) else NO_GRALLOC
+ 
++    if (ret == 0)
++        __atomic_add_fetch(&live_buffer_references, 1, __ATOMIC_ACQ_REL);
+     return ret;
+ }
+ 

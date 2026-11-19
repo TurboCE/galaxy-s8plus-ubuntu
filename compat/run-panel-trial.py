@@ -8,6 +8,7 @@ No flashing, partition write, global GL replacement or automatic login.
 import argparse
 import base64
 import socket
+import shutil
 import ctypes
 import fcntl
 import hashlib
@@ -58,7 +59,7 @@ def build_id():
 def review(path,sha):
  if digest(path)!=sha:raise RuntimeError('Review digest changed')
  data=json.loads(path.read_text())
- if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s','exclusive-hwc-panel-host-gnome20s') or set(data.get('files',{}))!=FILES:
+ if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s','exclusive-hwc-panel-host-gnome20s','native-x11-pixels-8s','native-host-x11-pixels-8s') or set(data.get('files',{}))!=FILES:
   raise RuntimeError('Wrong/incomplete exclusive panel scope')
  for name,expected in data['files'].items():
   p=BASE/name
@@ -75,7 +76,7 @@ def review(path,sha):
   if not p.is_symlink() or str(p.readlink())!=target or not p.resolve().is_relative_to(PREFIX) or not p.exists():raise RuntimeError('Changed/escaping compositor link')
  if data.get('popup_probe') and (not data.get('composite_probe') or data.get('client_probe')!='gnome-x11'):raise RuntimeError('Popup proof requires the fixed GNOME composite fixture')
  if data.get('client_probe'):
-  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe','gtk4-zenity':Path('/usr/bin/zenity'),'x11-pixels':BASE/'x11-pixel-probe','gnome-x11':Path('/usr/bin/gnome-shell')}
+  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe','gtk4-zenity':Path('/usr/bin/zenity'),'x11-pixels':BASE/'x11-pixel-probe','gnome-x11':Path('/usr/bin/gnome-shell'),'native-x11-pixels':BASE/'x11-pixel-probe'}
   client_path=clients.get(data['client_probe'])
   if client_path is None or digest(client_path)!=data.get('client_probe_sha256'):raise RuntimeError('Changed client fixture')
   package['client_probe']=True
@@ -107,7 +108,13 @@ def review(path,sha):
  if data.get('gnome_geometry'):
   if data.get('client_probe')!='gnome-x11' or data['gnome_geometry']!='720x1480':raise RuntimeError('Unsupported GNOME geometry')
   package['gnome_geometry']=data['gnome_geometry']
- package['observation_seconds']=8 if data.get('scope')=='exclusive-hwc-panel-8s' else 60 if data.get('scope')=='exclusive-hwc-panel-gnome60s' else 20
+ if data.get('scope') in ('native-x11-pixels-8s','native-host-x11-pixels-8s'):
+  if data.get('client_probe')!='native-x11-pixels' or not package.get('features',{}).get('private_x11_candidate') or digest(Path('/usr/lib/xorg/Xorg'))!=data.get('native_xorg_sha256'):raise RuntimeError('Native X11 requires its fixed transport/fixture')
+  if type(data.get('native_xorg_pid')) is not int or data['native_xorg_pid']<=1 or not re.fullmatch(r'[0-9]+',data.get('native_xorg_starttime','')):raise RuntimeError('Native X server process pin missing')
+  if any(data.get(k) for k in ('diagnostic_debugger','diagnostic_trace','client_debugger','client_preload_sha256')):raise RuntimeError('Native X scope excludes diagnostic interposition')
+  package['native_x11']=True
+  package['native_host_client']=data['scope']=='native-host-x11-pixels-8s'
+ package['observation_seconds']=8 if data.get('scope') in ('exclusive-hwc-panel-8s','native-x11-pixels-8s','native-host-x11-pixels-8s') else 60 if data.get('scope')=='exclusive-hwc-panel-gnome60s' else 20
  return data,package
 
 def android_processes():
@@ -122,8 +129,22 @@ def android_processes():
 def save_state(data):
  temp=STATE.with_suffix('.new');temp.write_text(json.dumps(data));temp.chmod(0o600);temp.replace(STATE)
 
+def cleanup_shared_property_source(saved):
+ source=Path('/run/g955n-native-property-source')
+ expected=saved.get('shared_property_source')
+ if not expected:return True
+ if Path('/run/g955n-native-gpu-lease.json').exists():raise RuntimeError('Native property mirror is still leased')
+ if saved.get('namespace_pid') and Path('/proc',str(saved['namespace_pid'])).exists():raise RuntimeError('Property writer still alive')
+ if source.exists():
+  st=source.lstat()
+  if not stat.S_ISDIR(st.st_mode) or st.st_uid!=0 or [st.st_dev,st.st_ino]!=expected:raise RuntimeError('Shared property backing identity changed')
+  shutil.rmtree(source)
+ return not source.exists()
+
 def restore():
  boot=identity()
+ lease=Path('/run/g955n-native-gpu-lease.json')
+ if lease.exists():SourceFileLoader('native_lease_restore',str(BASE/'host-pid-gui.py')).load_module().restore_native_lease(skip_other_owner=True)
  if not STATE.exists():return
  st=STATE.stat()
  if st.st_uid!=0 or stat.S_IMODE(st.st_mode)!=0o600 or STATE.is_symlink():raise RuntimeError('Untrusted restore record')
@@ -131,6 +152,7 @@ def restore():
  if saved['boot_id']!=boot:raise RuntimeError('Restore belongs to another boot')
  if saved.get('restored'):return
  if saved.get('namespace_pid') and Path('/proc',str(saved['namespace_pid'])).exists():raise RuntimeError('Private display namespace is still alive; refusing parallel owners')
+ cleanup_shared_property_source(saved)
  remaining=android_processes()
  if remaining:raise RuntimeError('Refusing parallel display owners; remaining Android/compositor tasks: '+str(remaining))
  if saved.get('tty'):
@@ -170,7 +192,107 @@ def panel_guard(boot,touch=False):
   if not stat.S_ISCHR(node.st_mode) or (node.st_uid,node.st_gid,stat.S_IMODE(node.st_mode))!=(0,0,0o600) or Path('/sys/class/input/event0/dev').read_text().strip()!=f'{os.major(node.st_rdev)}:{os.minor(node.st_rdev)}' or not os.statvfs('/run/udev').f_flag&os.ST_RDONLY:raise RuntimeError('Touchscreen/metadata provenance failed')
  return legacy
 
+def native_xorg_identity(data):
+ pid=data.get('native_xorg_pid')
+ if type(pid) is not int or pid<=1:raise RuntimeError('Reviewed native X server PID missing')
+ root=Path('/proc',str(pid));args=root.joinpath('cmdline').read_bytes().split(b'\0')
+ if root.joinpath('comm').read_text().strip()!='Xorg' or root.joinpath('exe').resolve()!=Path('/usr/lib/xorg/Xorg'):raise RuntimeError('Native X server identity differs')
+ start=root.joinpath('stat').read_text().rsplit(')',1)[1].split()[19]
+ if start!=data.get('native_xorg_starttime'):raise RuntimeError('Native X server restarted')
+ if b'-auth' not in args:raise RuntimeError('Native X server authority absent')
+ source=Path(args[args.index(b'-auth')+1].decode())
+ if str(source) not in ('/run/user/105/gdm/Xauthority','/run/user/1000/gdm/Xauthority'):raise RuntimeError('Unexpected native authority location')
+ st=source.lstat()
+ if not stat.S_ISREG(st.st_mode) or st.st_uid not in (105,1000) or (stat.S_IMODE(st.st_mode)&0o077) or not (st.st_mode&stat.S_IRUSR) or not 1<=st.st_size<=16384:raise RuntimeError('Untrusted native X authority')
+ return {'pid':pid,'starttime':start,'authority_path':str(source),'authority_inode':[st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns]}
+
+def stage_native_authority(data):
+ native=native_xorg_identity(data);source=Path(native['authority_path'])
+ fd=os.open(source,os.O_RDONLY|os.O_NOFOLLOW)
+ try:
+  st=os.fstat(fd)
+  if [st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns]!=native['authority_inode']:raise RuntimeError('Native authority changed before staging')
+  payload=os.read(fd,16385)
+ finally:os.close(fd)
+ if len(payload)!=st.st_size:raise RuntimeError('Incomplete native authority')
+ target=BASE/'native-Xauthority';fd=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+ try:
+  os.fchown(fd,1000,1000);os.fchmod(fd,0o600);os.write(fd,payload);st=os.fstat(fd)
+ finally:os.close(fd)
+ return native,(st.st_dev,st.st_ino)
+
+def native_x11_inner(boot,package):
+ legacy=SourceFileLoader('native_x11_legacy',str(BASE/'allocator-cpu-buffer-trial.py')).load_module()
+ proof=legacy.guard(boot,gpu=True)
+ if os.getcwd()!='/' or (os.stat('.').st_dev,os.stat('.').st_ino)!=(os.stat('/').st_dev,os.stat('/').st_ino):raise RuntimeError('Headless private CWD missing')
+ ctypes.CDLL(None).prctl(36,1,0,0,0)
+ inherited={int(p.name) for p in Path('/proc').glob('[0-9]*') if p.is_dir()}
+ host_gui=None
+ if package.get('native_host_client'):
+  if not isinstance(package.get('host_gui_fd'),int):raise RuntimeError('Missing native host channel')
+  host_gui=SourceFileLoader('native_x11_host_gui',str(BASE/'host-pid-gui.py')).load_module()
+  host_socket=socket.socket(fileno=package['host_gui_fd']);host_socket.settimeout(4)
+ parent=os.getpid();processes=[];handles=[];report={'native_x11_passed':False,'panel_presented':False,'native_input_and_display_services_untouched':True,'guard':proof}
+ def launch(command,name,service=False,env=None):
+  log=tempfile.TemporaryFile(dir='/run');handles.append(log)
+  if name=='client' and host_gui:
+   try:process=host_gui.RemoteGui(host_socket,env,log)
+   except Exception:
+    report['host_gui_setup_stdout']=legacy.read_log(log);raise
+   report['native_host_process_proof']=process.proof
+   processes.append((name,process,log));return process
+  process=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')},
+   start_new_session=True,close_fds=True,cwd='/',preexec_fn=lambda:legacy.setup_child(parent,service,128*1024*1024 if name=='client' else legacy.MAX_TRACE))
+  processes.append((name,process,log));return process
+ try:
+  manager=launch(['/system/bin/servicemanager'],'standard_manager');ready=False;until=time.monotonic()+4
+  while manager.poll() is None and time.monotonic()<until:
+   p=subprocess.run(['/system/bin/service','list'],capture_output=True,text=True,timeout=1)
+   if p.returncode==0 and 'Found ' in p.stdout:ready=True;break
+   time.sleep(.05)
+  if not ready:raise RuntimeError('Real standard manager not ready')
+  allocator=launch([COMMANDS[2]],'allocator',True);ready=False;until=time.monotonic()+5
+  descriptor='android.hardware.graphics.allocator@2.0::IAllocator/default'
+  while allocator.poll() is None and time.monotonic()<until:
+   p=subprocess.run([str(BASE/'headless-buffer-probe'),'--list-services-gles',boot],capture_output=True,text=True,timeout=2,env={**os.environ,'LD_LIBRARY_PATH':'/system/lib64:/vendor/lib64'})
+   report['allocator_registration']=p.stdout
+   if p.returncode==0 and 'live_service='+descriptor+'\n' in p.stdout and 'service_registration='+descriptor+' namespace_pid='+str(allocator.pid)+'\n' in p.stdout:ready=True;break
+   time.sleep(.05)
+  if not ready:raise RuntimeError('Real allocator registration failed')
+  env={'HOME':'/home/ubuntu','USER':'ubuntu','LOGNAME':'ubuntu','LANG':'C.UTF-8','PATH':'/usr/bin:/bin',**package['process_private_environment'],
+   'DISPLAY':':0','XAUTHORITY':str(BASE/'native-Xauthority'),'HYBRIS_EGLPLATFORM':'x11','HYBRIS_X11_DISABLE_SHM':'1','HYBRIS_EGL_REPORT_RENDERER':'1','G955N_ANDROID_PRIVATE_RUNTIME':'1'}
+  if package.get('native_host_client'):
+   env.pop('G955N_ANDROID_PRIVATE_RUNTIME',None);env['G955N_NATIVE_COMPAT_RUNTIME']='1'
+  client=launch([str(BASE/'x11-pixel-probe'),'--run-native-x11-pixel-trial',boot],'client',True,env)
+  report['client_exit']=client.wait(timeout=12)
+ except Exception as error:report['exception']=repr(error)
+ finally:
+  report['cleanup']={}
+  for name,process,log in reversed(processes):
+   report['cleanup'][name]=process.stop() if getattr(process,'is_remote',False) else legacy.stop_group(process);report[name+'_stdout']=legacy.read_log(log)
+  for sig in (signal.SIGTERM,signal.SIGKILL):
+   for p in Path('/proc').glob('[0-9]*'):
+    if int(p.name) not in inherited:
+     try:os.kill(int(p.name),sig)
+     except ProcessLookupError:pass
+   time.sleep(.1)
+  until=time.monotonic()+1
+  while time.monotonic()<until:
+   try:
+    pid,_=os.waitpid(-1,os.WNOHANG)
+    if not pid:time.sleep(.02)
+   except ChildProcessError:break
+  report['remaining_private_pids']=sorted(int(p.name) for p in Path('/proc').glob('[0-9]*') if int(p.name) not in inherited)
+  report['cleanup_passed']=not report['remaining_private_pids'] and all(info.get('native_compat_restored',True) and not info.get('remaining') for info in report['cleanup'].values()) and all(p.poll() is not None for _,p,_ in processes)
+  report['logs_complete']=all(os.fstat(log.fileno()).st_size<legacy.MAX_TRACE for log in handles)
+  for log in handles:log.close()
+ text=report.get('client_stdout','')
+ report['native_x11_passed']=bool(report.get('client_exit')==0 and 'Mali-G71' in text and 'G955N_X11_PIXEL_PASS frames=48 resize=passed repeated_egl=passed teardown=passed' in text and report['cleanup_passed'] and report['logs_complete'])
+ return report
+
+
 def inner(boot,package):
+ if package.get('native_x11'):return native_x11_inner(boot,package)
  inherited=set(android_processes())
  if len(inherited)!=1:raise RuntimeError('Expected only the supervised hardware manager')
  legacy=panel_guard(boot,package.get('touch_input'));ctypes.CDLL(None).prctl(36,1,0,0,0)
@@ -401,20 +523,27 @@ def execute(path,sha):
   return snapshot
  before=panel_snapshot();cursor=logs.cursor();result={'expected_mount_lifecycle':'Only greeter runtime /run/user/gdm-uid excluded from mount hash; display services intentionally restart','before':before,'kernel_before':logs.boot_state(),'desktop_qualified':False}
  saved={'boot_id':boot,'services':{u:active(u) for u in ('gdm.service','g955n-fb-display.service')},'restored':False};save_state(saved)
- process=None;raw=bytearray();child=None
+ process=None;raw=bytearray();child=None;authority_inode=None
  try:
-  run('systemctl','stop','gdm.service',timeout=25);run('systemctl','stop','g955n-fb-display.service',timeout=10)
-  tty=Path('/sys/class/tty/tty0/active').read_text().strip()
-  if not re.fullmatch(r'tty[1-9][0-9]*',tty):raise RuntimeError('Unexpected active VT')
-  fd=os.open('/dev/'+tty,os.O_RDWR|os.O_NOCTTY)
-  try:
-   mode=bytearray(4);fcntl.ioctl(fd,0x4b3b,mode,True);saved.update(tty='/dev/'+tty,tty_mode=struct.unpack('I',mode)[0]);save_state(saved);fcntl.ioctl(fd,0x4b3a,1)
-  finally:os.close(fd)
+  if not package.get('native_x11'):
+   run('systemctl','stop','gdm.service',timeout=25);run('systemctl','stop','g955n-fb-display.service',timeout=10)
+  if not package.get('native_x11'):
+   tty=Path('/sys/class/tty/tty0/active').read_text().strip()
+   if not re.fullmatch(r'tty[1-9][0-9]*',tty):raise RuntimeError('Unexpected active VT')
+   fd=os.open('/dev/'+tty,os.O_RDWR|os.O_NOCTTY)
+   try:
+    mode=bytearray(4);fcntl.ioctl(fd,0x4b3b,mode,True);saved.update(tty='/dev/'+tty,tty_mode=struct.unpack('I',mode)[0]);save_state(saved);fcntl.ioctl(fd,0x4b3a,1)
+   finally:os.close(fd)
   before=panel_snapshot();result['namespace_before']=before
   result['display_irq_before']=display_irqs()
+  if package.get('native_x11'):result['native_xorg_before'],authority_inode=stage_native_authority(data)
+  if package.get('native_host_client'):
+   source=Path('/run/g955n-native-property-source');source.mkdir(mode=0o700);source.chmod(0o700)
+   st=source.stat();saved['shared_property_source']=[st.st_dev,st.st_ino];save_state(saved)
+   area=source/'properties';area.mkdir(mode=0o711);area.chmod(0o711)
   process=subprocess.Popen(['python3',str(BASE/'android-runtime-namespace.py'),'--run-trial','--runtime',str(BASE/'android-property-runtime'),
    '--property-info',str(BASE/'property_info'),'--stock-contexts',str(BASE/'android-stock-service-contexts'),'--seconds',str(package['observation_seconds']+20),
-   '--include-display-devices','--include-composer-ipc',*(['--include-system-bus'] if package.get('native_system_bus') else []),*(['--include-touch-input'] if package.get('touch_input') else [])],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
+   *(['--include-ion-device','--include-mali-device'] if package.get('native_x11') else ['--include-display-devices']),'--include-composer-ipc',*(['--include-system-bus'] if package.get('native_system_bus') else []),*(['--include-touch-input'] if package.get('touch_input') else []),*(['--shared-properties-dir','/run/g955n-native-property-source/properties'] if package.get('native_host_client') else [])],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
   os.set_blocking(process.stdout.fileno(),False);watch=selectors.DefaultSelector();watch.register(process.stdout,selectors.EVENT_READ);invoked=False;deadline=time.monotonic()+package['observation_seconds']+35
   while time.monotonic()<deadline:
    for key,_ in watch.select(.1):
@@ -432,7 +561,7 @@ def execute(path,sha):
     cmd=['nsenter','--target',child,'--mount','--pid','--root','--wdns=/','/usr/bin/setpriv','--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot','--inh-caps=-all','--ambient-caps=-all','--no-new-privs',
      '/usr/bin/env','-i','HOME=/home/ubuntu','PATH=/usr/sbin:/usr/bin:/sbin:/bin','G955N_ANDROID_PRIVATE_RUNTIME=1','G955N_PARENT_PID_NS='+os.readlink('/proc/self/ns/pid'),'G955N_PARENT_MOUNT_NS='+os.readlink('/proc/self/ns/mnt'),
      '/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--inner','--reviewed-manifest',str(path),'--manifest-sha256',sha]
-    if package.get('host_pid_client'):
+    if package.get('host_pid_client') or package.get('native_host_client'):
      broker=SourceFileLoader('panel_outer_host_gui',str(BASE/'host-pid-gui.py')).load_module()
      p,cleanup=broker.run_inner(cmd,package['observation_seconds']+8,child,path,sha);result['host_gui_cleanup']=cleanup
     else:p=subprocess.run(cmd,capture_output=True,text=True,timeout=package['observation_seconds']+8)
@@ -450,14 +579,29 @@ def execute(path,sha):
    process.terminate()
    try:process.wait(timeout=5)
    except subprocess.TimeoutExpired:process.kill();process.wait(timeout=3)
+  if package.get('native_host_client'):
+   try:result['shared_property_source_cleaned']=cleanup_shared_property_source(saved)
+   except Exception as error:result['shared_property_cleanup_error']=repr(error)
   result['runtime_stdout']=raw.decode(errors='replace');result['after']=panel_snapshot();result['kernel_after']=logs.boot_state()
   try:result['kernel_delta']=logs.kernel_delta(cursor)
   except Exception as error:result['kernel_collection_error']=repr(error);result['kernel_delta']={'complete':False,'fault_signatures':[]}
+  if package.get('native_x11'):
+   try:
+    result['native_xorg_after']=native_xorg_identity(data);result['native_xorg_unchanged']=result['native_xorg_after']==result.get('native_xorg_before')
+   except Exception as error:result['native_xorg_recheck_error']=repr(error)
+   result['authority_cleanup_passed']=authority_inode is None
+   if authority_inode is not None:
+    authority=BASE/'native-Xauthority'
+    try:
+     st=authority.lstat()
+     if (st.st_dev,st.st_ino)!=authority_inode or not stat.S_ISREG(st.st_mode):raise RuntimeError('Staged authority changed')
+     authority.unlink();result['authority_cleanup_passed']=True
+    except Exception as error:result['authority_cleanup_error']=repr(error)
   result['parent_state_unchanged']=result['after']==before
   if child:result['namespace_child_gone']=not Path('/proc',child).exists()
   try:restore();result['display_restored']=json.loads(STATE.read_text()).get('restored')
   except Exception as error:result['restore_error']=repr(error)
-  result['passed']=bool(result.get('panel',{}).get('panel_presented') and result.get('display_irq_progressed') and result.get('display_restored') and result.get('namespace_child_gone') and result['parent_state_unchanged'] and result['kernel_after']['boot_id']==boot and result['kernel_after']['taint']==0 and not result['kernel_delta']['fault_signatures'] and result['kernel_delta']['complete'])
+  result['passed']=bool((result.get('panel',{}).get('native_x11_passed') and result.get('native_xorg_unchanged') and result.get('authority_cleanup_passed') and (not package.get('native_host_client') or result.get('shared_property_source_cleaned')) if package.get('native_x11') else result.get('panel',{}).get('panel_presented') and result.get('display_irq_progressed')) and result.get('display_restored') and result.get('namespace_child_gone') and result['parent_state_unchanged'] and result['kernel_after']['boot_id']==boot and result['kernel_after']['taint']==0 and not result['kernel_delta']['fault_signatures'] and result['kernel_delta']['complete'])
   directory=Path('/var/lib/g955n/panel-trials');directory.mkdir(parents=True,exist_ok=True,mode=0o700)
   output=directory/(boot+'-'+str(time.time_ns())+'.json');output.write_text(json.dumps(result,indent=2));output.chmod(0o600)
   print(json.dumps(result,indent=2),flush=True)
@@ -477,10 +621,10 @@ def main():
    '--property=ExecStopPost=/usr/bin/python3 '+str(BASE/'run-panel-trial.py')+' --restore','/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--run','--reviewed-manifest',str(a.reviewed_manifest),'--manifest-sha256',a.manifest_sha256]).returncode
  if a.inner:
   data,package=review(a.reviewed_manifest,a.manifest_sha256);identity(data['boot_id'])
-  if bool(package.get('host_pid_client'))!=(a.host_gui_fd is not None):raise RuntimeError('Unexpected host GUI channel')
+  if bool(package.get('host_pid_client') or package.get('native_host_client'))!=(a.host_gui_fd is not None):raise RuntimeError('Unexpected host GUI channel')
   package['host_gui_fd']=a.host_gui_fd
   package['diagnostic_debugger']=data.get('diagnostic_debugger') is True
   package['diagnostic_trace']=data.get('diagnostic_trace') is True
-  report=inner(data['boot_id'],package);print(json.dumps(report,indent=2));return 0 if report['panel_presented'] else 1
+  report=inner(data['boot_id'],package);print(json.dumps(report,indent=2));return 0 if report.get('native_x11_passed') or report.get('panel_presented') else 1
  return 0 if execute(a.reviewed_manifest,a.manifest_sha256) else 1
 if __name__=='__main__':raise SystemExit(main())

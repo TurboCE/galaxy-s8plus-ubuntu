@@ -89,4 +89,21 @@ class PanelReviewGuard(unittest.TestCase):
   with self.assertRaisesRegex(RuntimeError,'Host GUI requires'):self.gnome_review('exclusive-hwc-panel-host-gnome20s',False,True)
  def test_host_scope_accepts_reviewed_input_and_client(self):
   _,package=self.gnome_review('exclusive-hwc-panel-host-gnome20s',True,True);self.assertTrue(package['host_pid_client']);self.assertEqual(package['observation_seconds'],20)
+ def native_review(self,process_pin=True,diagnostic=False):
+  package=json.loads(self.package.read_text());package['features']={'private_x11_candidate':True};self.package.write_text(json.dumps(package))
+  client=MODULE.BASE/'x11-pixel-probe';client.write_bytes(b'fixed native pixel fixture')
+  self.data.update(scope='native-x11-pixels-8s',client_probe='native-x11-pixels',client_probe_sha256=sha(client),native_xorg_sha256='a'*64,compositor_manifest_sha256=sha(self.package))
+  if process_pin:self.data.update(native_xorg_pid=123,native_xorg_starttime='456')
+  if diagnostic:self.data['client_debugger']=True
+  self.write();original=MODULE.digest
+  with patch.object(MODULE,'digest',side_effect=lambda p:'a'*64 if str(p)=='/usr/lib/xorg/Xorg' else original(p)):return self.verify()
+ def test_native_x_requires_fixed_fixture(self):
+  self.data['scope']='native-x11-pixels-8s';self.write()
+  with self.assertRaisesRegex(RuntimeError,'Native X11 requires'):self.verify()
+ def test_native_x_requires_pinned_server_process(self):
+  with self.assertRaisesRegex(RuntimeError,'process pin'):self.native_review(False)
+ def test_native_x_rejects_interposed_qualification(self):
+  with self.assertRaisesRegex(RuntimeError,'excludes diagnostic'):self.native_review(True,True)
+ def test_native_x_review_keeps_headless_scope(self):
+  _,package=self.native_review();self.assertTrue(package['native_x11']);self.assertFalse(package['native_system_bus']);self.assertEqual(package['observation_seconds'],8)
 if __name__=='__main__':unittest.main()

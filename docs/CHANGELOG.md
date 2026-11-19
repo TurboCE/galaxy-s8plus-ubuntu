@@ -921,3 +921,57 @@ Validation:42 host scope guards passed. Private evidence:
 compositor-build/panel-host-gnome-proc-result.json and preceding setup failures.
 The ordinary native X server is independently confirmed at1440x2960/depth24;
 its direct X11 EGL route remains an additional integration option to verify.
+
+### 2026-11-19 — ordinary GDM login now uses Mali-accelerated Ubuntu GNOME
+
+Applied the pinned S8 project's legacy Android9 property-hook setting (patch21)
+and adapted the static property cache (patch22) to read an own-device snapshot
+of SYSTEM, vendor and complete actual boot metadata. The old cache's1023-byte
+cmdline limit missed the hardware field, while SYSTEM-only metadata lacked the
+vendor board platform. This selected gralloc.default and failed allocation or
+pixel checks; the corrected native route selects gralloc.exynos5. It works as
+the ordinary ubuntu user with existing video/ION/Mali permissions, no Android
+manager/allocator, global shared-property mount or Binder permission expansion.
+Prior successful bounded native-X11/shared-property trials are retained as
+separate review scopes with authority/lease cleanup guards, not production needs.
+Unused indefinite Android-service experiments were removed before this commit.
+
+The genuine GNOME GLES helper exposed a separate shutdown SIGSEGV after reporting
+Mali: gralloc's exit callback closed its device/unloaded its DSO before late EGL
+native-window releases. Patch23 accounts for outstanding buffer references and
+defers teardown. Real GNOME helper now exits0; repeated native EGL/resize/release
+checks pass. An actual-code sanitizer test covers late buffers and failed-release
+ownership, rejecting the early-close counterfactual. This does not suppress or
+convert failing renderer checks into success.
+
+Installed a root-owned private prefix/session wrapper and a separate Ubuntu GPU
+session desktop entry; GDM/account defaults now choose it with automatic login
+disabled. The owner manually entered their private credential and confirmed the
+normal desktop. The actual native GNOME shell reports Mali-G71, maps private EGL
+and the Exynos/Mali drivers, and does not map swrast. Stock session acceleration
+checks remain enabled; stale GDM/software X cache atoms are deleted, never forged.
+The CPU session remains installed as a recovery choice. Its switching/logout
+fallback is not newly claimed hardware-qualified.
+
+The normal compositor passed three real six-color client/overlay trials and
+three20-sample stable-calendar trials through the installed keyboard binding.
+Pointer-coordinate/instant-click assumptions in the earlier popup fixture failed
+and are not reported as GPU failures or passing popup results. Physical touch
+acceptance is separate. Same GNOME PID, same boot, taint0 and no new kernel fault
+signatures were verified in the passing interval. Earlier diagnostic SIGSEGVs
+remain in historical logs; no all-history-clean claim is made.
+
+The previous presenter checked the whole framebuffer every200ms. Added an
+explicit opt-in60Hz panel commit pump, based on the public S8 X11 configuration,
+without full-frame CRC reads on its hot path. Samsung's empty fb0/blank read is
+unknown, not a blanked display. Live intervals report1798–1800 commits/30seconds;
+these are ioctl counts, not measured rendered/panel FPS. Runtime-only activation
+preceded persistent configuration. GPU composition still transfers through CPU
+XPutImage/pixman; no zero-copy DRI/KMS claim. No kernel/partition flash was needed.
+
+Validation:51 host tests; actual gralloc lifetime/ownership sanitizer checks;
+private native pixel/resize/reinit/teardown, stock GNOME GLES-helper exit0 and
+normal GDM/PAM GPU-GNOME trials. Raw evidence remains ignored under
+artifacts/native-gpu and /var/lib/g955n/native-gpu. Original CPU GDM account-row
+touch activation still needed one Return; optional calendar/bolt/DBusMenu service
+warnings and long-term power/other hardware acceptance remain open.

@@ -1,0 +1,38 @@
+--- a/hybris/common/hooks.c
++++ b/hybris/common/hooks.c
+@@ -3519,6 +3519,17 @@
+     return sdk_version;
+ }
+ 
++/* Opt-in Samsung Android 9 property hooks, adapted from mur44ev's
++ * postmarketos-samsung-s8-gpu e0e971b8 (MIT reference).
++ * Keep normal Android 8+ behavior unless the launcher explicitly opts in. */
++static int use_legacy_properties(int sdk_version)
++{
++    static int forced = -1;
++    if (forced < 0)
++        forced = getenv("HYBRIS_FORCE_LEGACY_PROPERTIES") != NULL;
++    return sdk_version < 27 || forced;
++}
++
+ #define HOOKS_SIZE(hooks) \
+     (sizeof(hooks) / sizeof(hooks[0]))
+ 
+@@ -3582,7 +3593,7 @@
+     // make sure to skip the property hooks only when o.so is actually loaded
+     // since for testing and we sometimes set things like 99 as sdk version.
+     // The o linker is loaded when sdk_version >= 27 and exists.
+-    if (!found && sdk_version < 27)
++    if (!found && use_legacy_properties(sdk_version))
+         found = bsearch(&key, hooks_properties, HOOKS_SIZE(hooks_properties), sizeof(hooks_properties[0]), hook_cmp);
+ 
+     if (!found)
+@@ -3766,7 +3777,7 @@
+     ENSURE_LINKER_IS_LOADED();
+ 
+     // do not use hybris properties for older linkers
+-    if (get_android_sdk_version() < 27) {
++    if (use_legacy_properties(get_android_sdk_version())) {
+         if (!strcmp(symbol, "property_list")) {
+             return my_property_list;
+         }
