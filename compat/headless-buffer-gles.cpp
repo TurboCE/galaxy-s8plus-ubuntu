@@ -15,7 +15,7 @@
 #include <new>
 #include <unistd.h>
 #define EGL_FUNCTIONS(X) X(eglGetDisplay) X(eglInitialize) X(eglBindAPI) X(eglChooseConfig) X(eglCreatePbufferSurface) X(eglCreateContext) X(eglMakeCurrent) X(eglGetProcAddress) X(eglQueryString) X(eglGetError) X(eglDestroyContext) X(eglDestroySurface) X(eglTerminate)
-#define GL_FUNCTIONS(X) X(glGetString) X(glGetError) X(glGenTextures) X(glBindTexture) X(glTexParameteri) X(glDeleteTextures) X(glGenFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D) X(glCheckFramebufferStatus) X(glDeleteFramebuffers) X(glCreateShader) X(glShaderSource) X(glCompileShader) X(glGetShaderiv) X(glDeleteShader) X(glCreateProgram) X(glAttachShader) X(glBindAttribLocation) X(glLinkProgram) X(glGetProgramiv) X(glUseProgram) X(glDeleteProgram) X(glGenBuffers) X(glBindBuffer) X(glBufferData) X(glDeleteBuffers) X(glVertexAttribPointer) X(glEnableVertexAttribArray) X(glGetUniformLocation) X(glUniform4f) X(glViewport) X(glDrawArrays) X(glFinish) X(glReadPixels)
+#define GL_FUNCTIONS(X) X(glGetString) X(glGetError) X(glGenTextures) X(glBindTexture) X(glTexParameteri) X(glDeleteTextures) X(glGenFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D) X(glCheckFramebufferStatus) X(glDeleteFramebuffers) X(glCreateShader) X(glShaderSource) X(glCompileShader) X(glGetShaderiv) X(glDeleteShader) X(glCreateProgram) X(glAttachShader) X(glBindAttribLocation) X(glLinkProgram) X(glGetProgramiv) X(glUseProgram) X(glDeleteProgram) X(glGenBuffers) X(glBindBuffer) X(glBufferData) X(glDeleteBuffers) X(glVertexAttribPointer) X(glEnableVertexAttribArray) X(glGetUniformLocation) X(glUniform4fv) X(glGetUniformfv) X(glClearColor) X(glClear) X(glViewport) X(glDrawArrays) X(glFinish) X(glFlush) X(glReadPixels)
 struct Api {
 #define FIELD(name) decltype(&name) name=nullptr;
     EGL_FUNCTIONS(FIELD) GL_FUNCTIONS(FIELD)
@@ -32,8 +32,8 @@ static GLuint make_shader(Api &a,GLenum type,const char *text){
     GLint ok=0;a.glGetShaderiv(shader,GL_COMPILE_STATUS,&ok);
     if(!ok){a.glDeleteShader(shader);return 0;}return shader;
 }
-extern "C" int g955n_test_native_buffer(const native_handle_t *handle,uint32_t width,uint32_t height,uint32_t stride,uint64_t usage){
-    if(!handle||width!=64||height!=64||stride<width||stride>4096)return 2;
+extern "C" int g955n_test_native_buffer(const native_handle_t *handle,uint32_t width,uint32_t height,uint32_t stride,uint64_t usage,int (*verifyCpu)(void *,uint32_t),void *cookie){
+    if(!handle||!verifyCpu||!cookie||width!=64||height!=64||stride<width||stride>4096)return 2;
     void *driver=dlopen("/vendor/lib64/egl/libGLES_mali.so",RTLD_NOW|RTLD_LOCAL);
     if(!driver){fprintf(stderr,"Mali driver load failed: %s\n",dlerror());return 3;}
     Api a;
@@ -43,7 +43,10 @@ extern "C" int g955n_test_native_buffer(const native_handle_t *handle,uint32_t w
     auto createImage=reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(a.eglGetProcAddress("eglCreateImageKHR"));
     auto destroyImage=reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(a.eglGetProcAddress("eglDestroyImageKHR"));
     auto imageTarget=reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(a.eglGetProcAddress("glEGLImageTargetTexture2DOES"));
-    if(!createImage||!destroyImage||!imageTarget)return 5;
+    auto createSync=reinterpret_cast<PFNEGLCREATESYNCKHRPROC>(a.eglGetProcAddress("eglCreateSyncKHR"));
+    auto waitSync=reinterpret_cast<PFNEGLCLIENTWAITSYNCKHRPROC>(a.eglGetProcAddress("eglClientWaitSyncKHR"));
+    auto destroySync=reinterpret_cast<PFNEGLDESTROYSYNCKHRPROC>(a.eglGetProcAddress("eglDestroySyncKHR"));
+    if(!createImage||!destroyImage||!imageTarget||!createSync||!waitSync||!destroySync)return 5;
     auto *native=new(std::nothrow)TrackedBuffer;
     if(!native)return 6;
     auto &b=native->buffer;
@@ -53,7 +56,7 @@ extern "C" int g955n_test_native_buffer(const native_handle_t *handle,uint32_t w
     memset(b.reserved,0,sizeof(b.reserved));memset(b.reserved_proc,0,sizeof(b.reserved_proc));
     EGLDisplay display=EGL_NO_DISPLAY;EGLContext context=EGL_NO_CONTEXT;EGLSurface surface=EGL_NO_SURFACE;EGLImageKHR image=EGL_NO_IMAGE_KHR;
     GLuint texture=0,fbo=0,vertex=0,fragment=0,program=0,vbo=0;
-    int result=7;bool initialized=false,current=false;
+    int result=7;bool initialized=false,current=false;const char *stage="display";
     do{
         display=a.eglGetDisplay(EGL_DEFAULT_DISPLAY);
         EGLint major=0,minor=0;
@@ -70,35 +73,78 @@ extern "C" int g955n_test_native_buffer(const native_handle_t *handle,uint32_t w
         context=a.eglCreateContext(display,config,EGL_NO_CONTEXT,version);
         if(surface==EGL_NO_SURFACE||context==EGL_NO_CONTEXT||!a.eglMakeCurrent(display,surface,surface,context))break;
         current=true;
+
         const char *renderer=reinterpret_cast<const char *>(a.glGetString(GL_RENDERER));
         printf("native_buffer_GL_RENDERER=%s\n",renderer ? renderer:"null");
         if(!renderer||!strstr(renderer,"Mali")||strstr(renderer,"llvmpipe"))break;
+        stage="egl-image-native-buffer";
         const EGLint imageAttrs[]={EGL_IMAGE_PRESERVED_KHR,EGL_TRUE,EGL_NONE};
         image=createImage(display,EGL_NO_CONTEXT,EGL_NATIVE_BUFFER_ANDROID,reinterpret_cast<EGLClientBuffer>(&b),imageAttrs);
         if(image==EGL_NO_IMAGE_KHR)break;
+        stage="texture-and-fbo";
         a.glGenTextures(1,&texture);a.glBindTexture(GL_TEXTURE_2D,texture);
         a.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);a.glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
         imageTarget(GL_TEXTURE_2D,reinterpret_cast<GLeglImageOES>(image));
         a.glGenFramebuffers(1,&fbo);a.glBindFramebuffer(GL_FRAMEBUFFER,fbo);a.glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,texture,0);
         if(a.glGetError()!=GL_NO_ERROR||a.glCheckFramebufferStatus(GL_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE)break;
+        stage="compile-shaders";
         vertex=make_shader(a,GL_VERTEX_SHADER,"attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}");
         fragment=make_shader(a,GL_FRAGMENT_SHADER,"precision mediump float;uniform vec4 color;void main(){gl_FragColor=color;}");
         if(!vertex||!fragment)break;
+        stage="link-program";
         program=a.glCreateProgram();a.glAttachShader(program,vertex);a.glAttachShader(program,fragment);a.glBindAttribLocation(program,0,"p");a.glLinkProgram(program);
         GLint linked=0;a.glGetProgramiv(program,GL_LINK_STATUS,&linked);if(!linked)break;
         a.glUseProgram(program);GLfloat vertices[]={-1,-1,3,-1,-1,3};
         a.glGenBuffers(1,&vbo);a.glBindBuffer(GL_ARRAY_BUFFER,vbo);a.glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STATIC_DRAW);
         a.glVertexAttribPointer(0,2,GL_FLOAT,GL_FALSE,0,nullptr);a.glEnableVertexAttribArray(0);a.glViewport(0,0,width,height);
         GLint color=a.glGetUniformLocation(program,"color");
+        stage="draw-readback";
         bool verified=true;
         for(int frame=0;frame<3;++frame){
-            const int red=frame==1 ? 191:64;
-            a.glUniform4f(color,frame==1 ? .75f:.25f,.5f,.75f,1.f);a.glDrawArrays(GL_TRIANGLES,0,3);a.glFinish();
-            unsigned char pixel[4]={};a.glReadPixels(width/2,height/2,1,1,GL_RGBA,GL_UNSIGNED_BYTE,pixel);
-            if(a.glGetError()!=GL_NO_ERROR||abs(pixel[0]-red)>2||abs(pixel[1]-128)>2||abs(pixel[2]-191)>2||pixel[3]!=255){verified=false;break;}
+            const int red=frame==0 ? 64:frame==1 ? 128:191;
+            const GLfloat colorValue[]={frame==0 ? .25f:frame==1 ? .5f:.75f,.5f,.75f,1.f};
+            a.glUniform4fv(color,1,colorValue);
+            a.glClearColor(0.f,0.f,0.f,1.f);a.glClear(GL_COLOR_BUFFER_BIT);
+            a.glDrawArrays(GL_TRIANGLES,0,3);
+            const EGLint fenceAttrs[]={EGL_NONE};
+            EGLSyncKHR fence=createSync(display,EGL_SYNC_FENCE_KHR,fenceAttrs);
+            if(fence==EGL_NO_SYNC_KHR){verified=false;break;}
+            a.glFlush();
+            EGLint fenceStatus=waitSync(display,fence,EGL_SYNC_FLUSH_COMMANDS_BIT_KHR,1000000000ULL);
+            bool fenceDestroyed=destroySync(display,fence);
+            printf("native_buffer_fence_frame=%d status=0x%x destroyed=%s\n",frame,fenceStatus,fenceDestroyed ? "yes":"no");
+            if(fenceStatus!=EGL_CONDITION_SATISFIED_KHR||!fenceDestroyed){
+                fprintf(stderr,"GPU fence ownership/completion uncertain; process teardown required\n");
+                _exit(20);
+            }
+            a.glFinish();
+            if(verifyCpu(cookie,red)!=0){
+                fprintf(stderr,"mapper_CPU_frame_verification_failed frame=%d\n",frame);
+                verified=false;break;
+            }
+            printf("mapper_CPU_frame_verified=%d\n",frame);
+            // Verify the live program state as well as rendered pixels. This
+            // synchronized query is retained: no-query trials on this BSP read
+            // stale later frames despite successful finish/fence completion.
+            GLfloat actualColor[4]={};a.glGetUniformfv(program,color,actualColor);
+            bool uniform_ok=true;
+            for(int c=0;c<4;++c)if(actualColor[c]!=colorValue[c])uniform_ok=false;
+            printf("native_buffer_uniform_verified=%s\n",uniform_ok ? "yes":"no");
+            if(!uniform_ok){verified=false;break;}
+            alignas(64) unsigned char framePixels[64*64*4]={};a.glReadPixels(0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,framePixels);
+            a.glFinish();
+            unsigned char *pixel=framePixels+(height/2*width+width/2)*4;
+            GLenum error=a.glGetError();
+            printf("native_buffer_frame=%d rgba=%u,%u,%u,%u gl_error=0x%x\n",frame,pixel[0],pixel[1],pixel[2],pixel[3],error);
+            bool pixels_ok=true;size_t bad_pixels=0,first_bad=0;
+            for(size_t offset=0;offset<sizeof(framePixels);offset+=4)
+                if(abs(framePixels[offset]-red)>2||abs(framePixels[offset+1]-128)>2||abs(framePixels[offset+2]-191)>2||framePixels[offset+3]!=255){pixels_ok=false;if(!bad_pixels)first_bad=offset;++bad_pixels;}
+            if(!pixels_ok)printf("native_buffer_bad_pixels=%zu first_xy=%zu,%zu first_rgba=%u,%u,%u,%u\n",bad_pixels,(first_bad/4)%width,(first_bad/4)/width,framePixels[first_bad],framePixels[first_bad+1],framePixels[first_bad+2],framePixels[first_bad+3]);
+            if(error!=GL_NO_ERROR||!pixels_ok){verified=false;break;}
         }
         if(verified)result=0;
     }while(false);
+    if(result)fprintf(stderr,"native_buffer_failure_stage=%s egl_error=0x%x gl_error=0x%x\n",stage,a.eglGetError(),current ? a.glGetError():0);
     if(current){
         a.glFinish();
         if(vbo)a.glDeleteBuffers(1,&vbo);if(program)a.glDeleteProgram(program);

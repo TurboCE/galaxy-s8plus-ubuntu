@@ -1,5 +1,10 @@
 # Reviewed headless buffer test, before any display integration
 
+Current results supersede the preparation-only status below: see
+[the actual buffer investigation](../docs/graphics-buffer-investigation.md).
+CPU and per-frame mapper-synchronized Mali native-buffer checks have passed;
+physical HWC presentation and desktop acceleration remain pending.
+
 GNOME currently uses llvmpipe/CPU framebuffer presentation. A Mali pbuffer pass
 or allocator registration does not make GNOME accelerated. The next small gate
 is one real gralloc/ION native buffer, then a headless GPU import of that same
@@ -183,3 +188,32 @@ trial or staging occurred. All handset staging and hardware trials are on hold
 while the parent investigates prior-boot evidence. Preparation remains offline;
 any earlier-boot review manifest must refuse the new boot and is not silently
 retargeted. Independent controller review is not yet complete.
+
+## Coordinated kernel-15 follow-up
+
+The recovered kernel's existing MFC WARN sets taint512 at desktop startup. The
+review manifest now pins an explicit exact expected_taint (only 0 or 512), in
+addition to boot UUID and every executed file. This is not an error-free baseline
+claim: the kernel cursor delta still rejects every new WARNING/trace/Oops/panic
+and the final taint must equal the exact initial value. Wrong/missing/type-invalid
+taint values and a CPU manifest reused for GLES activation are refused.
+
+One actual CPU-only 64x64 buffer allocation/import/write/read/free lifecycle
+passed on the recovered kernel. Actual registered allocator PID, traces/maps,
+registration disappearance, all process cleanup and host state restoration
+passed. The 51-second runtime retained the same boot ID/taint, with no new kernel
+fault signature in the complete journal delta. This proves native-buffer CPU
+access only, not desktop acceleration. Evidence remains private.
+
+The optional --gles-buffer outer/inner scope additionally pins the lazy plugin
+and permits only a private Mali node, still no display/audio/block/video devices.
+CPU default scope remains separate; its manifest cannot be reused for GLES.
+The first real GPU attempt obtained Mali-G71 and a native gralloc buffer, but
+failed subsequent rendering/readback (exit10, plugin7). Cleanup and complete
+kernel delta passed without faults. Failure-stage diagnostics are being added;
+this failure is not counted as a GPU-buffer or desktop pass.
+
+The explicit composer mode additionally supervises the original standard Binder
+service manager. The host Binder baseline must be empty and host inode identity
+unchanged. Temporary service registration and retained passthrough metadata are
+separate; metadata PID -1 is not proof of a live remote composer.

@@ -86,6 +86,7 @@ static bool wait_fence(const hidl_handle &fence) {
 }
 struct BufferOwner {
     sp<IMapper> mapper;
+    uint32_t stride=0;
     hidl_handle raw;
     void *imported = nullptr;
     bool locked = false, closed = false, clean = true, unsafe = false;
@@ -118,7 +119,7 @@ struct BufferOwner {
     }
     ~BufferOwner(){close();}
 };
-static bool cpu_roundtrip(BufferOwner &owner,uint32_t stride,bool write,bool gpu_result) {
+static bool cpu_roundtrip(BufferOwner &owner,uint32_t stride,bool write,bool gpu_result,uint32_t gpu_red=191) {
     void *data=nullptr;
     Error error=Error::BAD_BUFFER;
     uint64_t cpu=static_cast<uint64_t>(write ? BufferUsage::CPU_WRITE_OFTEN : BufferUsage::CPU_READ_OFTEN);
@@ -131,12 +132,16 @@ static bool cpu_roundtrip(BufferOwner &owner,uint32_t stride,bool write,bool gpu
     bool good=true;
     for (uint32_t y=0;y<side;++y) for(uint32_t x=0;x<side;++x) {
         unsigned char *p=bytes+(static_cast<size_t>(y)*stride+x)*4;
-        const unsigned char expected[4]={static_cast<unsigned char>(gpu_result ? 64 : 17),
+        const unsigned char expected[4]={static_cast<unsigned char>(gpu_result ? gpu_red : 17),
                                         static_cast<unsigned char>(gpu_result ? 128 : 33),
                                         static_cast<unsigned char>(gpu_result ? 191 : 65),255};
         for(int c=0;c<4;++c) if(write) p[c]=expected[c]; else if(abs(p[c]-expected[c])>(gpu_result ? 2 : 0)) good=false;
     }
     return owner.unlock() && good;
+}
+
+static int verify_gpu_frame(void *cookie,uint32_t red) {
+    return cpu_roundtrip(*static_cast<BufferOwner *>(cookie),static_cast<BufferOwner *>(cookie)->stride,false,true,red) ? 0:1;
 }
 
 static int registration_query(int expected_pid,bool absence_only) {
@@ -191,6 +196,7 @@ static int run(int expected_pid,bool gpu,const char *plugin,BufferOwner &owner) 
     auto allocation=allocator->allocate(descriptor,1,[&](Error e,uint32_t s,const hidl_vec<hidl_handle> &buffers){error=e;stride=s;if(e==Error::NONE&&buffers.size()==1){owner.raw=buffers[0];one=true;}});
     printf("allocate_error=%d stride=%u one_buffer=%s\n",static_cast<int>(error),stride,one ? "yes":"no");
     if (!allocation.isOk() || error != Error::NONE || !one || stride<side || stride>4096 || !owner.raw.getNativeHandle()) return 6;
+    owner.stride=stride;
     printf("owned_raw_handle_fds=%d ints=%d\n",owner.raw.getNativeHandle()->numFds,owner.raw.getNativeHandle()->numInts);
     void *candidate=nullptr;
     bool import_callback=false;
@@ -205,9 +211,9 @@ static int run(int expected_pid,bool gpu,const char *plugin,BufferOwner &owner) 
     if(gpu) {
         void *library=dlopen(plugin,RTLD_NOW|RTLD_LOCAL);
         if (!library) {fprintf(stderr,"plugin_load_failed=%s\n",dlerror());return 9;}
-        using Test=int (*)(const native_handle_t *,uint32_t,uint32_t,uint32_t,uint64_t);
+        using Test=int (*)(const native_handle_t *,uint32_t,uint32_t,uint32_t,uint64_t,int (*)(void *,uint32_t),void *);
         auto test=reinterpret_cast<Test>(dlsym(library,"g955n_test_native_buffer"));
-        int result=test ? test(static_cast<const native_handle_t *>(owner.imported),side,side,stride,usage) : 1;
+        int result=test ? test(static_cast<const native_handle_t *>(owner.imported),side,side,stride,usage,verify_gpu_frame,&owner) : 1;
         // Do not dlclose a successfully loaded vendor EGL driver while it may
         // retain internal thread/TLS destructors. Process exit owns that module.
         if(result || !cpu_roundtrip(owner,stride,false,true)) return 10;
@@ -216,13 +222,26 @@ static int run(int expected_pid,bool gpu,const char *plugin,BufferOwner &owner) 
     return 0;
 }
 int main(int argc,char **argv) {
-    const bool absent=argc==3&&!strcmp(argv[1],"--expect-allocator-absent");
-    const bool query=argc==4&&!strcmp(argv[1],"--registration-only");
-    if(absent){if(!guard(0,argv[2],false))return 2;alarm(5);return registration_query(0,true);}
+    if(argc==3&&!strcmp(argv[1],"--list-services-gles")) {
+        if(!guard(0,argv[2],true))return 2;
+        alarm(5);setvbuf(stdout,nullptr,_IONBF,0);
+        auto manager=android::hardware::defaultServiceManager();
+        if(!manager)return 5;
+        auto alive=manager->list([](const auto &names){for(const auto &name:names)printf("live_service=%s\n",name.c_str());});
+        if(!alive.isOk())return 5;
+        auto listing=manager->debugDump([](const auto &entries){
+            for(const auto &entry:entries)printf("service_registration=%s/%s namespace_pid=%d\n",entry.interfaceName.c_str(),entry.instanceName.c_str(),entry.pid);
+        });
+        return listing.isOk() ? 0:5;
+    }
+    const bool gpu_query=argc>=2&&(!strcmp(argv[1],"--expect-allocator-absent-gles")||!strcmp(argv[1],"--registration-only-gles"));
+    const bool absent=argc==3&&(!strcmp(argv[1],"--expect-allocator-absent")||gpu_query);
+    const bool query=argc==4&&(!strcmp(argv[1],"--registration-only")||gpu_query);
+    if(absent){if(!guard(0,argv[2],gpu_query))return 2;alarm(5);return registration_query(0,true);}
     const bool gpu=argc==5&&!strcmp(argv[1],"--gles-native-buffer");
     if(!(query || gpu || (argc==4&&!strcmp(argv[1],"--allocate-only")))) return 2;
     char *end=nullptr; errno=0;long pid=strtol(argv[2],&end,10);
-    if(errno||!end||*end||pid<=1||pid>2147483647||!guard(static_cast<int>(pid),argv[3],gpu)) return 2;
+    if(errno||!end||*end||pid<=1||pid>2147483647||!guard(static_cast<int>(pid),argv[3],gpu||gpu_query)) return 2;
     // Explicit only; no ABI-selftest path loads mapper/ION/Mali or starts HALs.
     setvbuf(stdout,nullptr,_IONBF,0);
     if(query){alarm(5);return registration_query(static_cast<int>(pid),false);}

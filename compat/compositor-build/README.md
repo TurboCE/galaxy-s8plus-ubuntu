@@ -180,3 +180,15 @@ process-private Hybris/Android search paths, and exclusive display ownership.
 That is a reviewed future experiment, not a command these scripts run. A shell,
 accelerated GTK/Qt clients, touch, suspend and eventual GNOME interoperation
 remain untested. Current GNOME remains installed and unchanged.
+
+## Private runtime packaging follow-up
+
+`package-prefix.py` reads the build volume and packages the selected compositor,
+plugins, recursively required private Linux libraries and Bionic HWC2 layer. It
+never runs them or contacts a handset. Intermediate symlink targets must be
+copied as well as final ELFs; the first native loader check exposed that omission
+and it was corrected. The staged HOME prefix then passed native loader-only
+dependency resolution. This executes no compositor constructors or backend.
+Manifest variables override the build prefix for EGL/linker/plugin searches;
+global Ubuntu GL libraries remain unchanged. Physical display ownership and
+restoration supervision are still prerequisites for execution.

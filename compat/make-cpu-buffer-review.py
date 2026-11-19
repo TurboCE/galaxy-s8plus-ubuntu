@@ -13,7 +13,13 @@ def main():
     parser.add_argument('--build-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expected-boot-id', required=True)
+    parser.add_argument('--expected-taint', type=int, choices=(0, 512), default=0,
+                        help='Exact baseline; 512 only for separately reviewed existing WARN, never ignore new log faults')
+    parser.add_argument('--gles-buffer', action='store_true', help='Separate explicit Mali/native-buffer scope, no display')
+    parser.add_argument('--composer-no-display', action='store_true')
     args = parser.parse_args()
+    if args.composer_no_display and not args.gles_buffer:
+        parser.error('Composer scope requires explicit GLES')
     if not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', args.expected_boot_id):
         parser.error('An exact reviewed boot UUID is required')
     root = args.build_dir.resolve(strict=True)
@@ -22,12 +28,12 @@ def main():
         parser.error('Use private staging output')
     module = SourceFileLoader('cpu_review', str(Path(__file__).with_name('run-cpu-buffer-trial.py'))).load_module()
     files = {}
-    for name in sorted(module.REVIEW_FILES):
+    for name in sorted(module.REVIEW_FILES | ({'headless-buffer-gles.so'} if args.gles_buffer else set())):
         path = root / name
         if not path.is_file() or path.resolve() != path:
             raise SystemExit('Missing/indirect staged file: ' + name)
         files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
-    payload = json.dumps(dict(target='SM-G955N', scope='cpu-buffer-64x64-no-display', expected_boot_id=args.expected_boot_id, files=files), indent=2) + '\n'
+    payload = json.dumps(dict(target='SM-G955N', scope='gles-composer-no-display' if args.composer_no_display else 'gles-buffer-64x64-no-display' if args.gles_buffer else 'cpu-buffer-64x64-no-display', expected_boot_id=args.expected_boot_id, expected_taint=args.expected_taint, files=files), indent=2) + '\n'
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(payload)
     print('Review manifest only:', output)

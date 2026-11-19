@@ -56,3 +56,15 @@ verified fault.
 Full function/event tracing is absent from the current configuration. Enabling
 it requires a separately reviewed diagnostic build. Public records omit device
 identifiers and raw addresses; complete dumps remain private.
+
+## Actual compiled-code comparison
+
+Compared the saved kernel-15 and kernel-22 vmlinux disassembly, normalizing
+absolute code addresses, not register/immediate operands. The 12 present tested
+functions have identical normalized instruction sequences: arm_smccc_smc,
+exynos_smc, cpu_suspend, __cpu_suspend_enter, cpu_resume, cpu_do_suspend/resume,
+process_one_work, worker_thread, scheduler_tick, rcu_read_unlock_special and
+_raw_spin_lock. __cpu_suspend was not a present disassembly symbol and is not
+counted. This narrows direct changes in these particular functions; it does not
+exclude corruption by other code, layout/timing effects or firmware behavior.
+The saved private JSON retains instruction counts and differences.

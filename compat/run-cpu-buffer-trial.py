@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Reviewed opt-in CPU-only ION trial; default/help never activates hardware.
+"""Reviewed explicit CPU/GLES ION scope; default/help never activates hardware.
 
 A canonical read-only BSP must already exist. Does not flash/reboot, change GDM,
-create a display device or enable GLES. All original-service activity is in the
+create a display device. GLES requires a distinct reviewed scope and plugin. All original-service activity is in the
 existing bounded private PID/mount runtime with an explicit ION-only device.
 """
 import argparse
@@ -24,13 +24,18 @@ REVIEW_FILES = {'run-cpu-buffer-trial.py', 'allocator-cpu-buffer-trial.py',
 FAULT = re.compile(r'Kernel panic|Internal error:|Unable to handle kernel|\bBUG:|\bOops:|\bWARNING:|Call trace:|SysMMU.*fault|soft lockup|hard LOCKUP|\brcu\b.*stall', re.I)
 
 
-def verify_review(build, manifest, expected, boot):
+def verify_review(build, manifest, expected, boot, gpu=False, composer=False):
+    if composer and not gpu:
+        raise RuntimeError("Composer scope requires explicit GLES")
+    required = REVIEW_FILES | ({"headless-buffer-gles.so"} if gpu else set())
+    scope = "gles-composer-no-display" if composer else "gles-buffer-64x64-no-display" if gpu else "cpu-buffer-64x64-no-display"
     payload = manifest.read_bytes()
     if hashlib.sha256(payload).hexdigest() != expected:
         raise RuntimeError('Review-manifest hash mismatch')
     data = json.loads(payload)
-    if (data.get('target') != 'SM-G955N' or data.get('scope') != 'cpu-buffer-64x64-no-display' or
-            data.get('expected_boot_id') != boot or set(data.get('files', {})) != REVIEW_FILES):
+    if (data.get('target') != 'SM-G955N' or data.get('scope') != scope or
+            data.get('expected_boot_id') != boot or type(data.get('expected_taint')) is not int or
+            data['expected_taint'] not in (0, 512) or set(data.get('files', {})) != required):
         raise RuntimeError('Wrong or incomplete reviewed scope')
     for name, digest in data['files'].items():
         path = build / name
@@ -97,7 +102,7 @@ def process_proof(namespace_pid, root_pid, command):
     return result
 
 
-def run_inner(child, build, boot, hashes, runtime, runtime_log):
+def run_inner(child, build, boot, hashes, runtime, runtime_log, gpu=False, composer=False):
     raw = Path('/proc', child, 'environ').read_bytes().split(b'\0')
     env = dict(item.decode().split('=', 1) for item in raw if item.startswith(b'G955N_') and b'=' in item)
     expected = dict(G955N_ANDROID_PRIVATE_RUNTIME='1', G955N_PARENT_PID_NS=os.readlink('/proc/self/ns/pid'),
@@ -109,11 +114,15 @@ def run_inner(child, build, boot, hashes, runtime, runtime_log):
                '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs', '/usr/bin/env', '-i',
                'HOME=/home/ubuntu', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'ANDROID_ROOT=/system', 'ANDROID_DATA=/data',
                *[k + '=' + v for k, v in expected.items()], '/usr/bin/python3',
-               str(build / 'allocator-cpu-buffer-trial.py'), '--cpu-buffer', '--probe', str(build / 'headless-buffer-probe'),
+               str(build / 'allocator-cpu-buffer-trial.py'), '--gles-buffer' if gpu else '--cpu-buffer', '--probe', str(build / 'headless-buffer-probe'),
                '--probe-sha256', hashes['headless-buffer-probe'], '--expected-boot-id', boot]
+    if gpu:
+        command += ['--plugin', str(build/'headless-buffer-gles.so'), '--plugin-sha256', hashes['headless-buffer-gles.so']]
+    if composer:
+        command.append('--composer-no-display')
     process = None
     output = bytearray()
-    report = dict(rendering_qualified=False, gpu_tested=False)
+    report = dict(rendering_qualified=False, gpu_tested=gpu)
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                    bufsize=0, start_new_session=True)
@@ -176,21 +185,28 @@ def run_inner(child, build, boot, hashes, runtime, runtime_log):
 
 
 def run(build, boot, seconds, review):
+    gpu = review['scope'] in ('gles-buffer-64x64-no-display','gles-composer-no-display')
+    composer = review['scope'] == 'gles-composer-no-display'
     baseline = SourceFileLoader('runtime_evidence', str(build / 'run-property-trial.py')).load_module()
     before = baseline.snapshot()
     before['allocators'] = host_allocator_pids()
     if before['properties_exist'] or before['managers'] or before['allocators']:
         raise RuntimeError('Existing global runtime detected; refusing interference')
+    if composer:
+        binder=Path('/sys/kernel/debug/binder/state').read_text()
+        if binder.strip() != 'binder state:':
+            raise RuntimeError('Composer requires an empty host Binder baseline')
+        before['host_binder_inode'] = tuple((lambda n:(n.st_uid,n.st_gid,n.st_mode,n.st_rdev,n.st_ino))(Path('/dev/binder').stat()))
     state = boot_state()
-    if state['boot_id'] != boot or review.get('expected_boot_id') != boot or state['taint'] != 0:
-        raise RuntimeError('Requires the exact reviewed boot with an untainted baseline')
+    if state['boot_id'] != boot or review.get('expected_boot_id') != boot or state['taint'] != review['expected_taint']:
+        raise RuntimeError('Requires the exact reviewed boot and exact explicitly pinned taint baseline')
     journal_cursor = cursor()
     # Recheck the reviewed bytes immediately before launching the namespace.
     for name, digest in review['files'].items():
         if hashlib.sha256((build / name).read_bytes()).hexdigest() != digest:
             raise RuntimeError('Reviewed source changed before activation')
     result = dict(before=before, kernel_before=state, kernel_cursor_before=journal_cursor,
-                  reviewed_files=review['files'], cpu_only=True, gpu_tested=False, rendering_qualified=False)
+                  reviewed_files=review['files'], cpu_only=not gpu, gpu_tested=gpu, rendering_qualified=False)
     process = None; child = None
     log = bytearray(); collected = False
     started = time.monotonic()
@@ -198,7 +214,7 @@ def run(build, boot, seconds, review):
         process = subprocess.Popen(['python3', str(build / 'android-runtime-namespace.py'), '--run-trial',
                                     '--runtime', str(build / 'android-property-runtime'), '--property-info', str(build / 'property_info'),
                                     '--stock-contexts', str(build / 'android-stock-service-contexts'), '--seconds', str(seconds),
-                                    '--include-ion-device'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+                                    '--include-ion-device', *(['--include-mali-device'] if gpu else []), *(['--include-composer-ipc'] if composer else [])], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
         os.set_blocking(process.stdout.fileno(), False)
         watch = selectors.DefaultSelector(); watch.register(process.stdout, selectors.EVENT_READ)
         deadline = time.monotonic() + seconds + 20
@@ -225,7 +241,7 @@ def run(build, boot, seconds, review):
                 client = evidence['independent_property_client']
                 if int(ready[1]) != int(ready[2]) or client['exit_code'] or 'value=true ' not in client['stdout']:
                     raise RuntimeError('Actual credential-checked/shared readiness failed')
-                result['cpu_buffer_diagnostic'] = run_inner(child, build, boot, review['files'], process, log)
+                result['cpu_buffer_diagnostic'] = run_inner(child, build, boot, review['files'], process, log, gpu=gpu, composer=composer)
             if process.poll() is not None and not watch.get_map():
                 break
         result['exit_code'] = process.poll()
@@ -249,7 +265,10 @@ def run(build, boot, seconds, review):
             result['namespace_child_gone'] = not Path('/proc', child).exists()
         result['after'] = baseline.snapshot()
         result['after']['allocators'] = host_allocator_pids()
-        result['parent_state_unchanged'] = before == result['after']
+        if composer:
+            result['after']['host_binder_inode'] = tuple((lambda n:(n.st_uid,n.st_gid,n.st_mode,n.st_rdev,n.st_ino))(Path('/dev/binder').stat()))
+            result['standard_binder_empty_after'] = Path('/sys/kernel/debug/binder/state').read_text().strip() == 'binder state:'
+        result['parent_state_unchanged'] = before == result['after'] and (not composer or result.get('standard_binder_empty_after'))
         result['kernel_after'] = boot_state()
         try:
             result['kernel_delta'] = kernel_delta(journal_cursor)
@@ -265,10 +284,11 @@ def run(build, boot, seconds, review):
         diagnostic = result.get('cpu_buffer_diagnostic', {})
         delta = result.get('kernel_delta', {})
         result['passed'] = bool(result['property_runtime_passed'] and diagnostic.get('exit_code') == 0 and
-            diagnostic.get('lifecycle', {}).get('cpu_buffer_passed') and diagnostic.get('allocator_host_processes') and
+            diagnostic.get('lifecycle', {}).get('gpu_buffer_passed' if gpu else 'cpu_buffer_passed') and diagnostic.get('allocator_host_processes') and
             diagnostic.get('allocator_host_pids_gone') and diagnostic.get('launcher_reaped') and
             result['kernel_after']['boot_id'] == boot and result['kernel_after']['taint'] == state['taint'] and
-            delta.get('complete') and not delta.get('fault_signatures'))
+            delta.get('complete') and not delta.get('fault_signatures') and
+            (not composer or diagnostic.get('lifecycle', {}).get('composer_no_display', {}).get('cleanup_passed')))
     return result
 
 
@@ -278,7 +298,7 @@ def selftest():
         for name in REVIEW_FILES:
             (root/name).write_bytes(name.encode())
         boot = '11111111-1111-1111-1111-111111111111'
-        data = dict(target='SM-G955N', scope='cpu-buffer-64x64-no-display', expected_boot_id=boot,
+        data = dict(target='SM-G955N', scope='cpu-buffer-64x64-no-display', expected_boot_id=boot, expected_taint=512,
                     files={n:hashlib.sha256((root/n).read_bytes()).hexdigest() for n in REVIEW_FILES})
         manifest = root/'review.json'; manifest.write_text(json.dumps(data))
         expected = hashlib.sha256(manifest.read_bytes()).hexdigest()
@@ -289,6 +309,26 @@ def selftest():
             pass
         else:
             raise AssertionError('Review accepted on a different boot')
+        for rejected in (None, 1, 513, True, '512'):
+            changed = dict(data, expected_taint=rejected)
+            manifest.write_text(json.dumps(changed))
+            changed_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            try:
+                verify_review(root, manifest, changed_hash, boot)
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError('Invalid taint baseline accepted')
+        manifest.write_text(json.dumps(data))
+        expected = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        assert FAULT.search('WARNING: a new warning despite unchanged taint')
+        assert FAULT.search('Unable to handle kernel NULL pointer dereference')
+        try:
+            verify_review(root, manifest, expected, boot, gpu=True)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('CPU review used for GPU activation')
         (root/'headless-buffer-probe').write_bytes(b'changed')
         try:
             verify_review(root, manifest, expected, boot)
@@ -309,7 +349,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--cpu-buffer', action='store_true')
+    mode.add_argument('--gles-buffer', action='store_true')
     mode.add_argument('--selftest', action='store_true')
+    parser.add_argument('--composer-no-display', action='store_true')
     parser.add_argument('--build-dir', type=Path, default=Path('/home/ubuntu/g955n-compat-build'))
     parser.add_argument('--reviewed-manifest', type=Path)
     parser.add_argument('--manifest-sha256')
@@ -318,16 +360,16 @@ def main():
     args = parser.parse_args()
     if args.selftest:
         selftest(); return 0
-    if not args.cpu_buffer:
+    if not args.cpu_buffer and not args.gles_buffer:
         parser.print_help(); return 0
-    if (os.geteuid() or not 40 <= args.seconds <= 60 or
+    if (os.geteuid() or not 25 <= args.seconds <= 60 or
             not re.fullmatch(r'[0-9a-f]{64}', args.manifest_sha256 or '') or
             not re.fullmatch(r'[0-9a-f-]{36}', args.expected_boot_id or '') or not args.reviewed_manifest):
-        parser.error('Root, reviewed manifest/hash, exact boot and 40..60 second runtime required')
+        parser.error('Root, reviewed manifest/hash, exact boot and 25..60 second runtime required')
     build = args.build_dir.resolve(strict=True)
     if not build.is_relative_to('/home'):
         parser.error('Use the private handset HOME staging directory')
-    review = verify_review(build, args.reviewed_manifest.resolve(strict=True), args.manifest_sha256, args.expected_boot_id)
+    review = verify_review(build, args.reviewed_manifest.resolve(strict=True), args.manifest_sha256, args.expected_boot_id, gpu=args.gles_buffer, composer=args.composer_no_display)
     if ('SM-G955N' not in Path('/sys/firmware/devicetree/base/model').read_text() or
             'g955n-ubuntu' not in Path('/proc/sys/kernel/osrelease').read_text()):
         raise SystemExit('Wrong target/kernel')

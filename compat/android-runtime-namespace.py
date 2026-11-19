@@ -41,7 +41,7 @@ def bind_readonly(source, destination):
 
 
 def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
-                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts):
+                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False):
     libc = ctypes.CDLL(None, use_errno=True)
     # If the outer supervisor disappears, killing namespace PID 1 also kills
     # all of its descendants and releases their private mounts.
@@ -97,6 +97,11 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
         if name == 'hwbinder':
             # Private RPC only: root manager/query plus the assessed graphics
             # GID1003 service. Do not chmod/chown the original native node.
+            os.chown(target, 0, 1003)
+            target.chmod(0o660)
+        elif name == 'binder' and composer_ipc:
+            # Original composer uses standard Binder in addition to HWBinder.
+            # This newly-created inode only; host node ownership is untouched.
             os.chown(target, 0, 1003)
             target.chmod(0o660)
         elif name == 'ion':
@@ -198,7 +203,10 @@ def main():
                         help='Explicit reviewed headless allocator trial only; private ION node, no display')
     parser.add_argument('--include-mali-device', action='store_true',
                         help='Explicit reviewed headless GLES trial only; needs ION, exposes no display')
+    parser.add_argument('--include-composer-ipc', action='store_true')
     args = parser.parse_args()
+    if args.include_composer_ipc and (not args.run_trial or not (args.include_mali_device or args.include_display_devices)):
+        parser.error('Composer IPC requires an explicit graphics runtime')
     if ((args.include_ion_device or args.include_mali_device) and
             (not args.run_trial or args.include_display_devices or
              (args.include_mali_device and not args.include_ion_device))):
@@ -291,7 +299,7 @@ def main():
     if not pid:
         try:
             prepare_child(runtime, info_bytes, system, devices, library_dirs, args.seconds,
-                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts)
+                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc)
         except BaseException as error:
             print('Private namespace setup failed: ' + str(error), flush=True)
             os._exit(1)

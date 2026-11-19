@@ -85,7 +85,9 @@ backport resolves one pinned-Hybris/fork interface mismatch. See
 This removes the missing HWC2 compatibility-layer/build dependency as a source
 blocker. It does not prove graphics services can initialize, buffers/fences can
 present, or GNOME is accelerated. All objects are private build artifacts,
-never copied to or executed on the phone. Existing GNOME, GL libraries and
+not executed on the phone at that build checkpoint. A subsequent private HOME
+staging passed native loader-only dependency resolution after fixing intermediate
+symlink packaging; no compositor backend has run. Existing GNOME, GL libraries and
 services were unchanged. The new unexpected kernel reboot investigation blocks
 live graphics trials; allocator/HWC qualification and a bounded exclusive
 panel test remain prerequisites before running the tinywl candidate.

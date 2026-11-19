@@ -595,3 +595,31 @@
   outputs are excluded from Git. Compilation is not phone presentation evidence.
   Kernel stability, allocator/fence proof and an exclusive bounded display trial
   remain prerequisites. Existing GNOME and global GL libraries are unchanged.
+
+
+### Native-buffer synchronization and composer dependencies
+
+- Stopped verification subagents at the owner's request; subsequent diagnosis,
+  code changes and device tests are performed directly.
+- Added separately hash/boot/taint-pinned CPU, GLES and no-display composer scopes.
+  Exact known taint512 is explicit for the existing MFC WARN; every new kernel
+  warning/fault signature and taint change still fails the trial. CPU-only
+  manifests cannot authorize GLES. No display node is exposed in these scopes.
+- Actual CPU buffer lifecycle passed. Found stale later native-buffer reads;
+  fixed the probe's shared-buffer CPU ownership/cache synchronization with real
+  per-frame mapper lock/unlock after GPU completion. Three distinct full-frame
+  colors, mapper and GL readback and final CPU contents passed, with no new
+  kernel fault signatures or reboot and full outer host-state restoration.
+  The original pbuffer reference again passed 300 alternating Mali-G71 frames.
+- Fixed private composer Binder permissions and supplied the original standard
+  service manager with bounded cleanup and real IPC readiness. Composer reached
+  actual manager registration; missing display nodes still prevent a panel pass.
+  Retained passthrough metadata requires a separate live-registration check.
+- Added private runtime packaging and fixed missing intermediate library links.
+  Native loader-only dependency resolution passed; no compositor/panel trial or
+  global GL replacement was performed. See graphics-buffer-investigation.md.
+- Compared 12 actual critical kernel15/22 function disassemblies: normalized
+  instructions match; no direct change explains the corruption. A fresh
+  baseline diagnostic candidate (#23), patches1..16 plus bounded ESS panic
+  history, compiled and packed. Its configuration and DT match the prior build;
+  deployment and runtime stability remain unverified. Source builds never flash.
