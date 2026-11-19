@@ -1074,3 +1074,18 @@ real open driver/compatibility issues. Sensor/audio/LTE/rotation/brightness goal
 remain open. Private evidence: artifacts/panel-safety/{install-receipt.json,
 power-cycles26.json,normal-login26.json,session26-verification.log,
 kernel26-initial.raw,kernel26-initial-audit.json}.
+
+
+### Kernel26 repeat failure and next QoS source repair
+
+Later GPU-desktop power testing hard-hung. After owner recovery, actual PAM login
+and five repeat cycles passed, but a further cycle series hung again without
+physical input. Retained RCU/GPU-DVFS fault-site evidence and managed live host
+capture are preserved privately. Kernel26 is not stability-qualified; the earlier
+bounded passes do not supersede this failure.
+
+Proposal30 repairs concrete decon_blank QoS ordering and failed/secondary state
+publication. Seven actual-function cases pass and the original fails pre-enable
+ordering. Kernel27 builds this source change on top of proposal29, normal CPU
+idle; no deployment or hardware stability claim. Current phone reconnection is
+required for further device tests; the owner is away. Host work continues.

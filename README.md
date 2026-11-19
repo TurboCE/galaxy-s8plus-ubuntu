@@ -51,7 +51,8 @@ was ignored by the bootloader. Kernel25 actually applies built-in
 `cpuidle.off=1`, but also reset: deep idle is not necessary for the failure, and
 this diagnostic is not a repair. A legacy panel-presentation comparison is in
 progress. Proposal29 fixes reproduced DPP metadata-lifetime and native pan/power
-races; its kernel26 target qualification is pending. Historical kernel22 remains
+races; kernel26 later hard-hung during repeated desktop DPMS. The source-level
+primary-QoS repair in proposal30 is under build-only evaluation. Historical kernel22 remains
 quarantined. Recovery/calibration partitions are preserved. See the
 [kernel investigation](docs/kernel22-stability-investigation.md).
 

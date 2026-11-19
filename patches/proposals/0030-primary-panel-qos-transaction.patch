@@ -1,0 +1,111 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PROPOSAL] Order primary-panel bus QoS before unblank
+
+Correct pre-enable QoS ordering, failed/invalid request state publication and
+secondary-display interference. Root-cause and target stability remain unproven.
+Original Samsung GPL notices retained.
+
+--- a/drivers/video/fbdev/exynos/dpu/decon_core.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_core.c
+@@ -54,6 +54,8 @@
+ #endif
+ 
+ bool is_suspend = false;
++/* Serialize the primary panel and its shared bus/CPU QoS transaction. */
++static DEFINE_MUTEX(decon_blank_qos_lock);
+ 
+ int decon_log_level = 4;
+ module_param(decon_log_level, int, 0644);
+@@ -939,55 +941,49 @@
+ {
+ 	struct decon_win *win = info->par;
+ 	struct decon_device *decon = win->decon;
++	bool primary = decon->id == 0 && decon->dt.out_type == DECON_OUT_DSI;
++	bool was_suspended = false;
+ 	int ret = 0;
+ 
+-	decon_info("decon-%d %s mode: %dtype (0: DSI, 1: eDP, 2:DP, 3: WB)\n",
+-			decon->id,
+-			blank_mode == FB_BLANK_UNBLANK ? "UNBLANK" : "POWERDOWN",
+-			decon->dt.out_type);
+-
+-	if (decon->state == DECON_STATE_SHUTDOWN) {
+-		decon_warn("DECON:WARN:%s:decon was already shutdown \n", __func__);
+-		return ret;
+-	}
+-
++	if (blank_mode != FB_BLANK_UNBLANK &&
++	    blank_mode != FB_BLANK_POWERDOWN && blank_mode != FB_BLANK_NORMAL)
++		return -EINVAL;
++	if (primary) {
++		mutex_lock(&decon_blank_qos_lock);
++		was_suspended = is_suspend;
++	}
++	if (decon->state == DECON_STATE_SHUTDOWN)
++		goto unlock;
++
++	/* Restore bus/CPU constraints before touching a waking display. The
++	 * former post-enable update left wake-up running at screen-off QoS. */
++	if (primary && blank_mode == FB_BLANK_UNBLANK) {
++		is_suspend = false;
++		set_devfreq_pm_qos();
++	}
+ 	decon_hiber_block_exit(decon);
+-
+-	switch (blank_mode) {
+-	case FB_BLANK_POWERDOWN:
+-	case FB_BLANK_NORMAL:
++	if (blank_mode == FB_BLANK_UNBLANK) {
++		DPU_EVENT_LOG(DPU_EVT_UNBLANK, &decon->sd, ktime_set(0, 0));
++		ret = decon_enable(decon);
++	} else {
+ 		DPU_EVENT_LOG(DPU_EVT_BLANK, &decon->sd, ktime_set(0, 0));
+ 		ret = decon_disable(decon);
++	}
++	decon_hiber_unblock(decon);
++	if (primary) {
++		/* Failed operations never publish a requested but unachieved state.
++		 * Secondary displays cannot put an active primary into low-bus QoS. */
+ 		if (ret) {
+-			decon_err("failed to disable decon\n");
+-			goto blank_exit;
+-		}
+-		break;
+-	case FB_BLANK_UNBLANK:
+-		DPU_EVENT_LOG(DPU_EVT_UNBLANK, &decon->sd, ktime_set(0, 0));
+-		ret = decon_enable(decon);
+-		if (ret) {
+-			decon_err("failed to enable decon\n");
+-			goto blank_exit;
+-		}
+-		break;
+-	case FB_BLANK_VSYNC_SUSPEND:
+-	case FB_BLANK_HSYNC_SUSPEND:
+-	default:
+-		ret = -EINVAL;
+-	}
+-
+-blank_exit:
+-	decon_hiber_unblock(decon);
+-	decon_info("%s -\n", __func__);
+-
+-	if (blank_mode == FB_BLANK_UNBLANK)
+-		is_suspend = false;
+-	else
+-		is_suspend = true;
+-
+-	set_devfreq_pm_qos();
+-
++			is_suspend = was_suspended;
++			set_devfreq_pm_qos();
++		} else if (blank_mode != FB_BLANK_UNBLANK) {
++			is_suspend = true;
++			set_devfreq_pm_qos();
++		}
++	}
++unlock:
++	if (primary)
++		mutex_unlock(&decon_blank_qos_lock);
+ 	return ret;
+ }
+ 

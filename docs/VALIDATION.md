@@ -25,7 +25,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Kernel24 with baseline fixes, bounded panic history and persistent native framebuffer ownership now boots; live build-id/config/DT match, initial WARNING/panic counts 0 and taint0. Later kernel24 long-idle operation also reset repeatedly with a genuine finish_wait/list-pointer fault and subsequent interrupt panic. Short graphics intervals do not qualify overall stability. Kernel25 live built-in cpuidle.off=1 was verified but also reset; deep idle is not necessary for the failure. Proposal29 host lifetime/power-race regressions pass; kernel26 target qualification pending; kernel22/24 corruption root cause and suspend qualification pending |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Kernel24 with baseline fixes, bounded panic history and persistent native framebuffer ownership now boots; live build-id/config/DT match, initial WARNING/panic counts 0 and taint0. Later kernel24 long-idle operation also reset repeatedly with a genuine finish_wait/list-pointer fault and subsequent interrupt panic. Short graphics intervals do not qualify overall stability. Kernel25 live built-in cpuidle.off=1 was verified but also reset; deep idle is not necessary for the failure. Proposal29 host lifetime/power-race regressions pass; kernel26 passed bounded tests but later hard-hung during repeated desktop DPMS; proposal30 is build-only and overall target stability remains failed; kernel22/24 corruption root cause and suspend qualification pending |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: normal GDM/manual login reaches GPU GNOME at1440x2960; owner confirms desktop. Three overlay/color and stable-calendar trials pass;60Hz panel commits observed (not renderedFPS). CPU greeter account-row still needs Return; touch latency, rotation/brightness/resume acceptance pending |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | PASS for normal GNOME GLES/EGL rendering/composition: actual shell Mali-G71, private EGL/Exynos gralloc, no swrast; three real client/overlay and stable-popup trials, same shell/boot and taint0. XPutImage CPU transfer remains; broad API/app performance and long-term stability unqualified |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
@@ -440,3 +440,12 @@ real open driver/compatibility issues. Sensor/audio/LTE/rotation/brightness goal
 remain open. Private evidence: artifacts/panel-safety/{install-receipt.json,
 power-cycles26.json,normal-login26.json,session26-verification.log,
 kernel26-initial.raw,kernel26-initial-audit.json}.
+
+
+### Later kernel26 power failure
+
+The preceding kernel26 bounded passes remain their actual intervals. A later
+GPU-desktop power trial hard-hung; after manual recovery, a second repeated DPMS
+trial also hard-hung without physical input. Kernel26 is not stability-qualified.
+See kernel26-power-investigation.md for retained RCU fault-site evidence, KASLR
+handling, live host capture and the unqualified primary-QoS proposal30.
