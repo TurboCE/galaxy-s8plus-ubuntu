@@ -580,3 +580,21 @@ actual desktop DPMS off/on cycles passed, same boot and taint0, with native
 sensor enable masks recorded. The inhibitor is transient, not an authentication
 or permanent power-policy change. Core corruption without the mitigation,
 long-term/deep-suspend, audio, modem and physical step/heading work remain open.
+
+
+### System Monitor install and measured refresh cost
+
+Installed Ubuntu ARM64 gnome-system-monitor46.0-1build1 and confirmed its real
+owner-session visible window, Mali/private EGL/Exynos libraries and no swrast.
+Included the package in the reproducible image and set the default graph update
+to1000ms instead of the package's100ms. Existing user preferences remain editable.
+
+A five-second visible100ms observation used about23percent of all8 CPUs; the
+minimized interval was about5percent. A preliminary1s result was invalid because
+the window remained iconic and is excluded. After normal application activation,
+verified unlocked/visible/panel-on before and after, the same1s view measured
+10.18percent overall (kernel1.35percent), versus22.78percent visible baseline.
+Per-process percentages use one core as100, unlike the whole-device percentage.
+GNOME composition and the app load Mali without swrast, but final X11/fbdev
+buffer transfer still has CPU copies; no zero-copy or FPS qualification follows.
+Private measurement logs remain under artifacts/system-monitor-*.
