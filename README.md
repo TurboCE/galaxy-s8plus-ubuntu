@@ -42,14 +42,18 @@ client/overlay pixel and stable-calendar trials passed. The X11 presentation
 still uses CPU copies and a separate60Hz panel commit pump; this is not a
 zero-copy or measured60FPS claim. See the [native GNOME setup](compat/native-gnome/README.md).
 Automatic login is disabled; credentials and device artifacts remain private.
-The GDM account-row touch workaround and other hardware acceptance remain open.
+The GDM account-row touch repair now passes owner-confirmed password/desktop entry;
+a separate cold-boot regression and other hardware acceptance remain open.
 
-Current kernel is24 with persistent framebuffer ownership and baseline fixes.
-It remained on the same boot with taint0 and no new kernel fault signatures
-through final native-GNOME trials. Historical kernel22 failed sustained
-operation and remains quarantined; old warnings and full cold-boot/suspend
-qualification are not declared resolved. Recovery/calibration partitions were
-preserved. See the [kernel investigation](docs/kernel22-stability-investigation.md).
+Kernel24 passed bounded graphics trials, but later unattended operation produced
+repeated resets and is **not stability-qualified**. A header-only cpuidle option
+was ignored by the bootloader. Kernel25 actually applies built-in
+`cpuidle.off=1`, but also reset: deep idle is not necessary for the failure, and
+this diagnostic is not a repair. A legacy panel-presentation comparison is in
+progress. Proposal29 fixes reproduced DPP metadata-lifetime and native pan/power
+races; its kernel26 target qualification is pending. Historical kernel22 remains
+quarantined. Recovery/calibration partitions are preserved. See the
+[kernel investigation](docs/kernel22-stability-investigation.md).
 
 ## Approach
 

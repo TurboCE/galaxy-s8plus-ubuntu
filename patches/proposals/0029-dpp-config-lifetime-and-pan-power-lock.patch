@@ -1,0 +1,155 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PROPOSAL] DPP owned metadata and DECON power serialization
+
+Fix real deferred caller-lifetime and blank/pan races. No claim that these
+explain the previously captured RCU corruption until target qualification.
+Original upstream GPL notices retained.
+
+--- a/drivers/video/fbdev/exynos/dpu/dpp.h
++++ b/drivers/video/fbdev/exynos/dpu/dpp.h
+@@ -223,7 +223,8 @@
+ 	struct dpp_resources res;
+ 	struct dpp_debug d;
+ 	wait_queue_head_t framedone_wq;
+-	struct decon_win_config *config;
++	/* Owned metadata: callers may pass stack or retired frame storage. */
++	struct decon_win_config config;
+ 	spinlock_t slock;
+ 	spinlock_t dma_slock;
+ 	struct mutex lock;
+@@ -348,7 +349,7 @@
+ static inline void dpp_select_format(struct dpp_device *dpp,
+ 			struct dpp_img_format *vi, struct dpp_params_info *p)
+ {
+-	struct decon_win_config *config = dpp->config;
++	struct decon_win_config *config = &dpp->config;
+ 
+ 	vi->vgr = is_vgr(dpp);
+ 	vi->normal = is_normal(dpp);
+--- a/drivers/video/fbdev/exynos/dpu/dpp_drv.c
++++ b/drivers/video/fbdev/exynos/dpu/dpp_drv.c
+@@ -270,9 +270,9 @@
+ {
+ 	struct dpp_device *dpp = (struct dpp_device *)arg;
+ 
+-	if (dpp->config->compression)
++	if (dpp->config.compression)
+ 		dpp_info("Compression Source is %s of DPP[%d]\n",
+-			dpp->config->dpp_parm.comp_src == DPP_COMP_SRC_G2D ?
++			dpp->config.dpp_parm.comp_src == DPP_COMP_SRC_G2D ?
+ 			"G2D" : "GPU", dpp->id);
+ 
+ 	dpp_info("DPP[%d] irq hasn't been occured", dpp->id);
+@@ -308,7 +308,7 @@
+ static void dpp_get_params(struct dpp_device *dpp, struct dpp_params_info *p)
+ {
+ 	u64 src_w, src_h, dst_w, dst_h;
+-	struct decon_win_config *config = dpp->config;
++	struct decon_win_config *config = &dpp->config;
+ 
+ 	memcpy(&p->src, &config->src, sizeof(struct decon_frame));
+ 	memcpy(&p->dst, &config->dst, sizeof(struct decon_frame));
+@@ -350,7 +350,7 @@
+ 
+ static int dpp_check_size(struct dpp_device *dpp, struct dpp_img_format *vi)
+ {
+-	struct decon_win_config *config = dpp->config;
++	struct decon_win_config *config = &dpp->config;
+ 	struct decon_frame *src = &config->src;
+ 	struct decon_frame *dst = &config->dst;
+ 	struct dpp_size_constraints vc;
+@@ -533,12 +533,26 @@
+ 	return 0;
+ }
+ 
+-static int dpp_set_config(struct dpp_device *dpp)
++/* Callers retain their buffers, but DPP owns the configuration metadata used
++ * after this ioctl by IRQ/debug/timer paths. Caller storage is not retained. */
++static void dpp_copy_config(struct dpp_device *dpp,
++        const struct decon_win_config *config)
++{
++    dpp->config = *config;
++}
++
++static int dpp_set_config(struct dpp_device *dpp,
++        const struct decon_win_config *config)
+ {
+ 	struct dpp_params_info params;
+ 	int ret = 0;
+ 
+ 	mutex_lock(&dpp->lock);
++	if (!config) {
++		ret = -EINVAL;
++		goto err;
++	}
++	dpp_copy_config(dpp, config);
+ 
+ 	/* parameters from decon driver are translated for dpp driver */
+ 	dpp_get_params(dpp, &params);
+@@ -605,7 +619,8 @@
+ 		disable_irq(dpp->res.irq);
+ 	}
+ 
+-	del_timer(&dpp->d.op_timer);
++	/* The callback can inspect metadata; finish it before power-down. */
++	del_timer_sync(&dpp->d.op_timer);
+ 	dpp_reg_deinit(dpp->id, reset);
+ 
+ #if defined(CONFIG_PM)
+@@ -639,8 +654,7 @@
+ 
+ 	switch (cmd) {
+ 	case DPP_WIN_CONFIG:
+-		dpp->config = (struct decon_win_config *)arg;
+-		ret = dpp_set_config(dpp);
++		ret = dpp_set_config(dpp, arg);
+ 		if (ret)
+ 			dpp_err("failed to configure dpp%d\n", dpp->id);
+ 		break;
+@@ -867,7 +881,7 @@
+ 		if (irqs & IDMA_RECOVERY_START_IRQ) {
+ 			DPU_EVENT_LOG(DPU_EVT_DMA_RECOVERY, &dpp->sd,
+ 					ktime_set(0, 0));
+-			val = (u32)dpp->config->dpp_parm.comp_src;
++			val = (u32)dpp->config.dpp_parm.comp_src;
+ 			dpp_info("dma%d recovery start(0x%x)...[src=%s]\n",
+ 				dpp->id, irqs,
+ 				val == DPP_COMP_SRC_G2D ? "G2D" : "GPU");
+--- a/drivers/video/fbdev/exynos/dpu/decon_dsi.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_dsi.c
+@@ -939,19 +939,19 @@
+ 	int shift = 0;
+ 	struct decon_mode_info psr;
+ 
+-	if ((decon->dt.out_type != DECON_OUT_DSI) || (!check_decon_state(decon))) {
+-		decon_warn("%s: decon%d state(%d), UNBLANK missed\n",
+-				__func__, decon->id, decon->state);
+-		return 0;
+-	}
++	if (decon->dt.out_type != DECON_OUT_DSI)
++		return -ENODEV;
+ 
+ 	decon_hiber_block_exit(decon);
++	mutex_lock(&decon->lock);
++	/* DPMS can power down after the caller's state observation. Serialize
++	 * the state test and all register updates with blank/unblank. A pan
++	 * while blanked only records the viewport for the next unblank. */
++	if (!check_decon_state(decon))
++		goto out;
+ 
+ 	decon_set_par(info);
+-
+ 	decon_set_win_info(info);
+-
+-	mutex_lock(&decon->lock);
+ 
+ 	set_bit(decon->dt.dft_idma, &decon->cur_using_dpp);
+ 	set_bit(decon->dt.dft_idma, &decon->prev_used_dpp);
+@@ -1011,6 +1011,7 @@
+ 				decon_err("DECON:ERR:%s:failed to disp on\n",
+ 				__func__);
+ 	}
++out:
+ 	mutex_unlock(&decon->lock);
+ 
+ 	decon_hiber_unblock(decon);

@@ -25,7 +25,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Kernel24 with baseline fixes, bounded panic history and persistent native framebuffer ownership now boots; live build-id/config/DT match, initial WARNING/panic counts 0 and taint0. Prior kernel22 remains failed; cold-boot/suspend qualification and old corruption root cause pending |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Kernel24 with baseline fixes, bounded panic history and persistent native framebuffer ownership now boots; live build-id/config/DT match, initial WARNING/panic counts 0 and taint0. Later kernel24 long-idle operation also reset repeatedly with a genuine finish_wait/list-pointer fault and subsequent interrupt panic. Short graphics intervals do not qualify overall stability. Kernel25 live built-in cpuidle.off=1 was verified but also reset; deep idle is not necessary for the failure. Proposal29 host lifetime/power-race regressions pass; kernel26 target qualification pending; kernel22/24 corruption root cause and suspend qualification pending |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: normal GDM/manual login reaches GPU GNOME at1440x2960; owner confirms desktop. Three overlay/color and stable-calendar trials pass;60Hz panel commits observed (not renderedFPS). CPU greeter account-row still needs Return; touch latency, rotation/brightness/resume acceptance pending |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | PASS for normal GNOME GLES/EGL rendering/composition: actual shell Mali-G71, private EGL/Exynos gralloc, no swrast; three real client/overlay and stable-popup trials, same shell/boot and taint0. XPutImage CPU transfer remains; broad API/app performance and long-term stability unqualified |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
@@ -404,3 +404,15 @@ separate. The CPU GDM greeter still needed a Return key to reveal its password
 prompt. Earlier failed checks/kernel-userland fault messages are retained and
 not filtered from history. Private evidence: artifacts/native-gpu/*-probe.log,
 *-gles-preflight.log, real-session-keyboard-check.log and target session JSONs.
+
+
+## GDM touch / boot prerequisite repair checkpoint
+
+Owner-confirmed account touch, password entry and desktop login now pass with
+the GDM-only account-tile re-entry repair; ten event fixtures pass. Cold-boot
+regression remains pending. This replaces the prior Return-key workaround.
+The same login exposed missing original SYSTEM mount after reboot, so that
+shell used the real software fallback. Requiring read-only preparation before
+GDM restores a real Mali-G71 GLES helper pass; a fresh GPU session still needs
+verification. See greeter-touch-validation.md. These bounded passes do not
+qualify kernel stability or remaining peripherals.

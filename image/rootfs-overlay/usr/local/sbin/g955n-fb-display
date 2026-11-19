@@ -12,9 +12,43 @@ import os
 from pathlib import Path
 import signal
 import struct
+import stat
+import subprocess
 import sys
 import time
 import zlib
+
+def x11_panel_off():
+    """Read the native X server's real DPMS state; empty Samsung sysfs is unknown.
+
+    xset runs in a disposable process so an X server restart cannot invoke an
+    Xlib fatal-I/O handler inside the persistent framebuffer owner.
+    """
+    off = False
+    for proc in Path('/proc').glob('[0-9]*'):
+        try:
+            args = (proc / 'cmdline').read_bytes().split(b'\0')
+            if args[0] != b'/usr/lib/xorg/Xorg' or b'-auth' not in args:
+                continue
+            auth = Path(os.fsdecode(args[args.index(b'-auth')+1]))
+            info = auth.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_uid not in (105, 1000) or info.st_mode & 0o077:
+                continue
+            for sock in Path('/tmp/.X11-unix').glob('X[0-9]*'):
+                display = ':' + sock.name[1:]
+                result = subprocess.run(['/usr/bin/xset', '-display', display, '-q'],
+                    env={'PATH':'/usr/bin:/bin','LC_ALL':'C','XAUTHORITY':str(auth)},
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=1)
+                if result.returncode:
+                    continue
+                if 'Monitor is On' in result.stdout:
+                    return False
+                if any('Monitor is ' + value in result.stdout for value in ('Off','Standby','Suspend')):
+                    off = True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+    return True if off else None
+
 
 if 'SM-G955N' not in Path('/proc/device-tree/model').read_text():
     raise SystemExit('Wrong device model')
@@ -40,7 +74,8 @@ try:
     if (width, height, bpp) != (1440, 2960, 32) or not 0 < size <= capacity:
         raise SystemExit('Unexpected primary framebuffer geometry')
     struct.pack_into('II', var, 16, 0, 0)
-    fcntl.ioctl(fd, 0x4611, 0)  # FBIOBLANK / UNBLANK
+    if x11_panel_off() is not True:
+        fcntl.ioctl(fd, 0x4611, 0)  # FBIOBLANK / UNBLANK
     with mmap.mmap(fd, size, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ) as pixels:
         if os.environ.get('G955N_FB_PAN_HZ') == '60':
             # The proven S8 X11 path needs regular DECON commits. Do not scan
@@ -54,9 +89,21 @@ try:
             print('Native X11 panel commit pump active: requested 60 Hz', flush=True)
             while running:
                 now = time.monotonic()
-                if now >= next_blank_check:
+                # Samsung's blank file is empty. Read authoritative parent
+                # runtime PM before every pan; query X only if it is unknown.
+                # The kernel must still serialize MMIO against power-down.
+                try:
+                    power = Path('/sys/class/graphics/fb0/device/power/runtime_status').read_text().strip()
+                except OSError:
+                    power = ''
+                if power in {'active', 'suspended', 'suspending', 'resuming'}:
+                    blanked = power != 'active'
+                elif now >= next_blank_check:
                     try:
-                        blanked = Path('/sys/class/graphics/fb0/blank').read_text().strip() in {'1','2','3','4'}
+                        level = Path('/sys/class/graphics/fb0/blank').read_text().strip()
+                        blanked = level in {'1','2','3','4'}
+                        if not level:
+                            blanked = x11_panel_off() is True
                     except OSError:
                         blanked = False
                     next_blank_check = now + 1.0

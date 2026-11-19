@@ -975,3 +975,78 @@ normal GDM/PAM GPU-GNOME trials. Raw evidence remains ignored under
 artifacts/native-gpu and /var/lib/g955n/native-gpu. Original CPU GDM account-row
 touch activation still needed one Return; optional calendar/bolt/DBusMenu service
 warnings and long-term power/other hardware acceptance remain open.
+
+### 2026-11-19 — subsequent kernel24 idle resets reopen stability acceptance
+
+After the successful normal-GNOME graphics intervals, the target unexpectedly
+reset repeatedly. The first newly saved kernel24 trace starts in finish_wait
+on rcu_preempt, with a wait-list pointer targeting read-only kernel text; later
+IRQ/block/scheduler exceptions lead to a fatal interrupt panic. This is genuine
+kernel corruption. Temporal proximity to WLAN resume/display blank does not
+identify the writer. Later resets are recorded as resets, not separate proven
+instances of that exact first fault without segmented matching traces.
+
+Preserved initial/previous kernel evidence and restored USB-console access as
+WLAN leases changed across boots. No historical raw log is deleted or filtered.
+The current kernel24 is not stability-qualified; the preceding short GPU passes
+remain their actual bounded results. A runtime C2-only diagnostic, after verifying
+the actual DT-backed state1 descriptions, did not prevent the next reset; already
+corrupted pre-isolation state and other causes are both possible. It is not a fix.
+
+Prepared a fresh-boot controlled diagnostic changing only the BOOT cmdline to
+cpuidle.off=1. The whole original BOOT was independently backed up on target/host
+and checked against the working kernel24 image; every byte outside the cmdline
+is identical. Full written BOOT readback and unchanged RECOVERY/EFS/CPEFS/RADIO
+hashes passed before the deliberate diagnostic reboot. No USERDATA/firmware/
+calibration rewrite. The actual source routes cpuidle-unavailable to architectural
+WFI, retaining the CPU governors; this is not the unsafe vendor enable_mask path.
+Outcome and long-term/root-cause acceptance remain pending.
+
+Also corrected the native panel pump's blank detection: Samsung's sysfs blank
+read is empty, so the service now queries the native X server's actual DPMS state
+through an isolated xset process. This avoids continuing60Hz pan requests after
+panel power-down and avoids Xlib fatal-I/O handlers in the persistent fb owner.
+This concrete display-state fix is not claimed to cure the unrelated-looking
+pointer corruption. Reboot/blank/unblank verification remains necessary.
+
+Sensor inventory found that hrm_sensor is misclassified by udev as the system
+accelerometer; SensorProxy's HasAccelerometer=true is therefore not actual
+accelerometer acceptance. Real SSP channels are packed IIO records, and the MCU
+is not initialized after an ordinary boot because the reviewed original LHD
+service remains disabled. Audio WirePlumber remains deliberately masked from
+the earlier fault isolation; ModemManager currently discovers no modem. These
+are explicit open usability tasks, not passes inferred from device-node presence.
+
+
+### GDM touch and cold-boot GPU prerequisites
+
+Account-only diagnostics reproduced press/leave/re-entry/release without a
+clicked signal. A pinned GDM resource repair recovers only a same-device,
+inside-tile, still-pressed primary release with no native click. Ten event cases
+passed. The owner then confirmed account touch, password and desktop entry.
+Cold-boot physical regression remains pending. No injected Return or autologin.
+
+That login exposed a separate persistent-setup omission: original SYSTEM was
+not mounted after reboot and vendor GPU library symlinks dangled. A required
+read-only preparation unit now runs before display-manager. After preparation,
+the actual GNOME GLES helper exits0 and reports Mali-G71. The previously running
+software fallback session was not retroactively treated as GPU accelerated.
+
+### Panel safety candidate and negative idle result
+
+The BOOT-header-only cpuidle option was ignored; it was not a valid idle-isolation
+trial. Kernel25 instead changes only the built-in config cmdline, and live
+cpuidle off=1 was verified. It still reset unexpectedly. Deep idle is therefore
+not necessary for this failure. A temporary legacy presentation override is a
+controlled comparison, not a permanent performance fix.
+
+Proposal29 replaces DPP's borrowed caller configuration pointer with owned
+metadata, synchronizes deferred timer completion before teardown, and serializes
+the native pan state check/MMIO with display power-down. Actual extracted code
+passes sanitizer and blank-at-lock fixtures. The old implementation reproduces
+stack-use-after-return and powered-down register access respectively. Removing
+inline asm from the lifetime fixture was necessary for Clang's fake-stack
+instrumentation; no failing acceptance assertion was relaxed. Kernel26 builds
+from the normal-idle baseline; target installation and power-cycle/idle
+acceptance remain separate. Presenter runtime-PM checks additionally avoid pan
+requests while the fb parent is suspended or transitioning.
