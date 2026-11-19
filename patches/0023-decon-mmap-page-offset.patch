@@ -1,0 +1,40 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] fbdev: DECON: preserve framebuffer mmap page offsets
+
+DECON's mmap callback discarded every caller offset by passing zero to
+dma_buf_mmap. Mapping a later framebuffer page therefore silently aliased the
+start, and an out-of-range offset could appear successful at offset zero.
+Pass the requested relative page offset to the existing dma-buf mapper.
+
+The pinned dma_buf_mmap checks unsigned page-offset addition overflow and
+allocation bounds before calling the exporter. ION also checks its offset and
+length and retains its protected-buffer/VM_IO/cache/mapping policy. Keep the
+existing write-combine protection; do not turn the display's smem_start DMA
+IOVA into a CPU physical address or add it to the offset. Offset-zero mappings
+retain their existing behavior. Without ION support, return ENODEV rather than
+claim that an unmapped VMA was established.
+
+This fixes the mmap offset/result contract; it neither supplies GPU acceleration
+nor establishes that a display restart or the captured MMU fault is resolved.
+Based on pinned Samsung and dma-buf source; no live display operation performed.
+
+diff --git a/drivers/video/fbdev/exynos/dpu/decon_dsi.c b/drivers/video/fbdev/exynos/dpu/decon_dsi.c
+--- a/drivers/video/fbdev/exynos/dpu/decon_dsi.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_dsi.c
+@@ -1025,11 +1025,14 @@
+ 	struct decon_win *win = info->par;
+ 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+ 
+-	ret = dma_buf_mmap(win->dma_buf_data[0].dma_buf, vma, 0);
++	/* fb offsets are relative to the framebuffer, in pages. Let dma-buf
++	 * and ION validate the requested offset/length against the allocation.
++	 */
++	ret = dma_buf_mmap(win->dma_buf_data[0].dma_buf, vma, vma->vm_pgoff);
+ 
+ 	return ret;
+ #else
+-	return 0;
++	return -ENODEV;
+ #endif
+ }
+ EXPORT_SYMBOL(decon_mmap);

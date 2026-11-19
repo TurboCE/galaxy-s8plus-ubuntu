@@ -1,0 +1,54 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] media: fimc-is2: reject incomplete binary I/O
+
+A filesystem binary read returning EOF (zero) before the advertised size
+freed the newly allocated buffer but returned zero to its caller. The caller
+could then treat bin->data == NULL and bin->size == 0 as a successfully loaded
+image. Normalize zero/positive short reads to EIO and preserve negative errno.
+Do not free caller-owned buffers or change their descriptor on failure.
+
+The write helper already retries positive partial writes, but returned success
+even after an error or zero-progress write. Return the original negative error
+or EIO for zero progress. Keep a zero-length write a successful no-op.
+
+No firmware names, binary contents, calibration selection, loading fallback,
+permissions or partition writes are added. This corrects the binary helpers'
+I/O result contract; it is not a fix for the observed ISP load EINVAL, which
+requires separately validating the stock firmware-selection lifecycle.
+Based on pinned Samsung source; no camera streaming or hardware test claimed.
+
+diff --git a/drivers/media/platform/exynos/fimc-is2/fimc-is-binary.c b/drivers/media/platform/exynos/fimc-is2/fimc-is-binary.c
+--- a/drivers/media/platform/exynos/fimc-is2/fimc-is-binary.c
++++ b/drivers/media/platform/exynos/fimc-is2/fimc-is-binary.c
+@@ -64,7 +64,10 @@
+ 	if (ret != size) {
+ 		if (!bin->data)
+ 			bin->free(buf);
+-		return ret;
++		/* EOF and short reads are not a complete binary. In particular,
++		 * returning zero here falsely reported an unset bin as loaded.
++		 */
++		return ret < 0 ? ret : -EIO;
+ 	}
+ 
+ 	bin->data = buf;
+@@ -79,6 +82,9 @@
+ 	ssize_t count;
+ 	loff_t pos = 0;
+ 	char *buf = (char *)bin->data;
++
++	if (!bin->size)
++		return 0;
+ 
+ 	do {
+ 		count = min_t(ssize_t, PAGE_SIZE, bin->size - pos);
+@@ -87,7 +93,8 @@
+ 			pos += ret;
+ 			buf += ret;
+ 		} else {
+-			break;
++			/* Preserve the filesystem error; zero progress cannot finish. */
++			return ret < 0 ? ret : -EIO;
+ 		}
+ 	} while (pos < bin->size);
+ 

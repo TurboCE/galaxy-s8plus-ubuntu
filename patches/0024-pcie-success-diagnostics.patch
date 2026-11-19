@@ -1,0 +1,108 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] PCI: exynos: distinguish successful power messages from errors
+
+Runtime Wi-Fi PCIe power transitions emit successful clock enables, L1SS
+configuration and acknowledged power-down handshakes with dev_err. The live
+capture has over one thousand such error-priority success messages. Classify
+only these proven success paths as debug; retain real clock failures and both
+handshake timeout error diagnostics. Evaluate each clock operation exactly once
+and retain error priority for any nonzero result. No global severity filter.
+
+Clock-return propagation and partial-enable rollback are separate defects under
+review; this patch preserves existing control flow and does not claim to fix
+those failures or certify suspend/resume. Based on pinned Samsung GPL source.
+
+--- a/drivers/pci/host/pci-exynos.c
++++ b/drivers/pci/host/pci-exynos.c
+@@ -751,13 +751,17 @@
+ {
+ 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pp);
+ 	u32 val;
++	int ret;
+ 
+ 	if (exynos_pcie->phy_ops.phy_config != NULL)
+ 		exynos_pcie->phy_ops.phy_config(exynos_pcie->phy_base,
+ 				exynos_pcie->phy_pcs_base, exynos_pcie->block_base,
+ 				exynos_pcie->elbi_base, exynos_pcie->ch_num);
+-	dev_err(pp->dev, "phy clk enable, ret value = %d\n",
+-			exynos_pcie_phy_clock_enable(&exynos_pcie->pp, 1));
++	ret = exynos_pcie_phy_clock_enable(&exynos_pcie->pp, 1);
++	if (ret)
++		dev_err(pp->dev, "phy clk enable failed: %d\n", ret);
++	else
++		dev_dbg(pp->dev, "phy clk enable, ret value = %d\n", ret);
+ 
+ 	/* Bus number enable */
+ 	val = exynos_elb_readl(exynos_pcie, PCIE_SW_WAKE);
+@@ -1468,9 +1472,14 @@
+ static void exynos_pcie_resumed_phydown(struct pcie_port *pp)
+ {
+ 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pp);
++	int ret;
+ 
+ 	/* phy all power down on wifi off during suspend/resume */
+-	dev_err(pp->dev, "pcie clk enable, ret value = %d\n", exynos_pcie_clock_enable(pp, 1));
++	ret = exynos_pcie_clock_enable(pp, 1);
++	if (ret)
++		dev_err(pp->dev, "pcie clk enable failed: %d\n", ret);
++	else
++		dev_dbg(pp->dev, "pcie clk enable, ret value = %d\n", ret);
+ 
+ 	exynos_pcie_enable_interrupts(pp);
+ 	regmap_update_bits(exynos_pcie->pmureg,
+@@ -1510,14 +1519,14 @@
+ 			writel(val, ep_dbi_base + 0xBC);
+ 			val = readl(ep_dbi_base + 0x248);
+ 			writel(val | 0xa0f, ep_dbi_base + 0x248);
+-			dev_err(pp->dev, "l1ss enabled(0x%x)\n", exynos_pcie->l1ss_ctrl_id_state);
++			dev_dbg(pp->dev, "l1ss enabled(0x%x)\n", exynos_pcie->l1ss_ctrl_id_state);
+ 		} else {
+ 			/* disable L1SS on Root Complex */
+ 			val = readl(ep_dbi_base + 0xbc);
+ 			writel(val & ~0x3, ep_dbi_base + 0xBC);
+ 			val = readl(ep_dbi_base + 0x248);
+ 			writel(val & ~0xf, ep_dbi_base + 0x248);
+-			dev_err(pp->dev, "l1ss disabled(0x%x)\n", exynos_pcie->l1ss_ctrl_id_state);
++			dev_dbg(pp->dev, "l1ss disabled(0x%x)\n", exynos_pcie->l1ss_ctrl_id_state);
+ 		}
+ 		spin_unlock_irqrestore(&exynos_pcie->conf_lock, flags);
+ 
+@@ -1552,6 +1561,7 @@
+ 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pp);
+ 	struct pinctrl *pinctrl_reset;
+ 	u32 val, vendor_id, device_id;
++	int ret;
+ 
+ 	dev_info(pp->dev, "%s, start of poweron, pcie state: %d\n", __func__,
+ 		 exynos_pcie->state);
+@@ -1577,7 +1587,11 @@
+ 			goto poweron_fail;
+ 		}
+ 
+-		dev_err(pp->dev, "pcie clk enable, ret value = %d\n", exynos_pcie_clock_enable(pp, 1));
++		ret = exynos_pcie_clock_enable(pp, 1);
++		if (ret)
++			dev_err(pp->dev, "pcie clk enable failed: %d\n", ret);
++		else
++			dev_dbg(pp->dev, "pcie clk enable, ret value = %d\n", ret);
+ 		regmap_update_bits(exynos_pcie->pmureg,
+ 				   PCIE_PHY_CONTROL + exynos_pcie->ch_num * 4,
+ 				   PCIE_PHY_CONTROL_MASK, 1);
+@@ -1783,7 +1797,7 @@
+ 	while (count < MAX_TIMEOUT) {
+ 		if ((exynos_elb_readl(exynos_pcie, PCIE_IRQ_PULSE)
+ 		    & IRQ_RADM_PM_TO_ACK)) {
+-			dev_err(dev, "ack message is ok\n");
++			dev_dbg(dev, "ack message is ok\n");
+ 			break;
+ 		}
+ 
+@@ -1800,7 +1814,7 @@
+ 		val = exynos_elb_readl(exynos_pcie, PCIE_ELBI_RDLH_LINKUP);
+ 		val = val & 0x1f;
+ 		if (val == 0x15) {
+-			dev_err(dev, "received Enter_L23_READY DLLP packet\n");
++			dev_dbg(dev, "received Enter_L23_READY DLLP packet\n");
+ 			break;
+ 		}
+ 		udelay(10);
