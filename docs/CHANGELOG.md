@@ -1104,3 +1104,18 @@ The native accelerometer/light SensorProxy prototype builds as AArch64 without
 warnings. Its README records provenance, uninstalled status and required abrupt
 termination/lease, physical matrix, firmware/calibration and GNOME integration
 work. It is not enabled at boot and not represented as working phone hardware.
+
+
+### Ondemand panel callback lifetime candidate
+
+Proposal31 replaces unreferenced per-CPU governor-private dereferences with a
+referenced, locked, verified Ondemand policy. The actual old callback reproduces
+ASan heap-buffer-overflow with foreign private storage; the fixed callback passes
+foreign/normal/teardown cases. Both observed device policies were ondemand, so
+this source bug is not presented as the proven RCU-corruption cause. Kernel28
+adds the patch as a build-only candidate; see ondemand-panel-lifetime.md.
+
+The device later reconnected in a new kernel26 boot while the owner was away;
+reboot origin is unconfirmed. Kernel27 BOOT installation then passed full readback
+and unchanged protected hashes, followed by a deliberate reboot. New-kernel
+functional/stability acceptance remains to verify.

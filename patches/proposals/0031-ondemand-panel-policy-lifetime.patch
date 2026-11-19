@@ -1,0 +1,106 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PROPOSAL] Hold and check CPU governor private-data lifetime
+
+Guard the panel callback against non-Ondemand data and concurrent policy
+teardown. This does not establish the root cause of retained RCU corruption.
+Original upstream GPL notices retained.
+
+--- a/drivers/cpufreq/cpufreq_ondemand.c
++++ b/drivers/cpufreq/cpufreq_ondemand.c
+@@ -655,56 +655,56 @@
+ 	.owner			= THIS_MODULE,
+ };
+ 
++/* The framebuffer callback may run while a policy changes governors. Take a
++ * real policy reference and its governor lifetime lock, never stale per-CPU
++ * Ondemand state or another governor's private data. */
++static void od_update_policy_tunables(unsigned int cpu)
++{
++	struct cpufreq_policy *policy = cpufreq_cpu_get(cpu);
++	struct dbs_data *dbs_data;
++	struct od_dbs_tuners *tuners;
++
++	if (!policy)
++		return;
++	down_read(&policy->rwsem);
++	if (policy->governor != &cpufreq_gov_ondemand)
++		goto out;
++	mutex_lock(&od_dbs_cdata.mutex);
++	dbs_data = policy->governor_data;
++	if (!dbs_data || dbs_data->cdata != &od_dbs_cdata || !dbs_data->tuners)
++		goto out_dbs;
++	tuners = dbs_data->tuners;
++	tuners->policy_nr = cpu;
++	if (is_suspend) {
++		tuners->up_threshold = tuners->up_threshold_suspend;
++		tuners->boost = tuners->boost_suspend;
++		tuners->sampling_rate = tuners->sampling_rate_suspend;
++	} else {
++		tuners->up_threshold = tuners->up_threshold_resume;
++		tuners->boost = tuners->boost_resume;
++		tuners->sampling_rate = tuners->sampling_rate_resume;
++	}
++	update_down_threshold(tuners);
++out_dbs:
++	mutex_unlock(&od_dbs_cdata.mutex);
++out:
++	up_read(&policy->rwsem);
++	cpufreq_cpu_put(policy);
++}
++
+ void update_gov_tunables(void)
+ {
+-	struct od_dbs_tuners *od_tuners;
+-	struct od_cpu_dbs_info_s *dbs_info;
+-	struct cpufreq_policy *policy;
+-	struct dbs_data *dbs_data;
+-	int cpu = 0;
++	int cpu;
+ 
+ 	for_each_cpu(cpu, &hmp_slow_cpu_mask) {
+ 		if (cpu_online(cpu)) {
+-			dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
+-			policy = dbs_info->cdbs.shared->policy;
+-			dbs_data = policy->governor_data;
+-			od_tuners = dbs_data->tuners;
+-			od_tuners->policy_nr = cpu;
+-			if (is_suspend) {
+-				od_tuners->up_threshold = od_tuners->up_threshold_suspend;
+-				od_tuners->boost = od_tuners->boost_suspend;
+-				od_tuners->sampling_rate = od_tuners->sampling_rate_suspend;
+-			} else {
+-				/* resumed */
+-				od_tuners->up_threshold = od_tuners->up_threshold_resume;
+-				od_tuners->boost = od_tuners->boost_resume;
+-				od_tuners->sampling_rate = od_tuners->sampling_rate_resume;
+-			}
+-			/* update down_threshold */
+-			update_down_threshold(od_tuners);
++			od_update_policy_tunables(cpu);
+ 			break;
+ 		}
+ 	}
+-
+ 	for_each_cpu(cpu, &hmp_fast_cpu_mask) {
+ 		if (cpu_online(cpu)) {
+-			dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
+-			policy = dbs_info->cdbs.shared->policy;
+-			dbs_data = policy->governor_data;
+-			od_tuners = dbs_data->tuners;
+-			od_tuners->policy_nr = cpu;
+-			if (is_suspend) {
+-				od_tuners->up_threshold = od_tuners->up_threshold_suspend;
+-				od_tuners->boost = od_tuners->boost_suspend;
+-				od_tuners->sampling_rate = od_tuners->sampling_rate_suspend;
+-			} else {
+-				/* resumed */
+-				od_tuners->up_threshold = od_tuners->up_threshold_resume;
+-				od_tuners->boost = od_tuners->boost_resume;
+-				od_tuners->sampling_rate = od_tuners->sampling_rate_resume;
+-			}
+-			/* update down_threshold */
+-			update_down_threshold(od_tuners);
++			od_update_policy_tunables(cpu);
+ 			break;
+ 		}
+ 	}
