@@ -1162,3 +1162,25 @@ without converting host fixture passes into hardware acceptance. Fresh console
 and pinned Wi-Fi/USB SSH checks still fail; there is no active build to wait on.
 Further on-device changes/verification need genuine recovery, and the owner is
 away. Matching candidates and private recovery materials are preserved.
+
+
+### Returned-device tests and builtin archive build correction
+
+Kernel28 installed with verified full BOOT readback/protected preservation. Owner
+touch login and three actual Mali GNOME trials passed.20 DPMS cycles passed, but
+a longer repeat stopped in its second off transition. The alternate-governor
+probe refused before writes because only ondemand is compiled.28 is not stable.
+
+The matched-code/config GCC7 kernel29 reboot-looped on an unsupported gzip
+builtin archive. The external ramdisk was correct; missing lz4 in the new builder
+caused upstream's generator to put gzip data in a .lz4 file. This is our build
+setup/validation defect, not a qualified compiler-runtime comparison. Restored
+known-booting28 in matching TWRP with full readback. Quarantined bad packed images.
+
+Added compressor preflight and actual linked-Image builtin codec/bounds/decoder
+checks at build and packaging. Real bad29 now fails before packing; real good28
+passes and retains identical image bytes. Nine new guards and85 total host tests
+pass. Corrected GCC7 builder uses liblz4-tool; fresh30 build is in progress.
+A pre-existing recovery-entry EFS raw-hash delta was preserved and investigated:
+118 saved file/link contents match original, without any EFS write. See
+builtin-initramfs-boot-failure.md. Hardware stability remains unresolved.

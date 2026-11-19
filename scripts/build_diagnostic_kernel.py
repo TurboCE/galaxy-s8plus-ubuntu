@@ -53,6 +53,9 @@ def main():
     if args.native_ondemand_safety:patchfiles.append(ROOT/'patches/proposals/0031-ondemand-panel-policy-lifetime.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
+    baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
+    if 'CONFIG_RD_LZ4=y' in baseline.splitlines():
+        subprocess.run(['docker','run','--rm','--network','none',args.builder,'lz4','--version'],check=True,stdout=subprocess.DEVNULL)
     compiler=subprocess.check_output(['docker','run','--rm','--network','none',args.builder,'aarch64-linux-gnu-gcc','-dumpfullversion'],text=True).strip()
     plan = {'target':'SM-G955N','source':expected,'builder':args.builder,'volume':volume,
             'patches':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in patchfiles},
@@ -95,8 +98,13 @@ def main():
         '-v',str(output)+':/output','-e','ARCH=arm64','-e','CROSS_COMPILE=aarch64-linux-gnu-',args.builder,
         'bash','-euc','\n'.join(commands)])
     plan['build_exit']=result.returncode
+    if result.returncode == 0:
+        check=subprocess.run(['python3',str(ROOT/'scripts/verify_kernel_initramfs.py'),'--kernel-dir',str(output)],capture_output=True,text=True)
+        plan['builtin_initramfs_check']=json.loads(check.stdout)
+        (output/'builtin-initramfs-check.json').write_text(check.stdout)
+        if check.returncode:plan['build_exit']=check.returncode
     plan['artifacts']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in output.iterdir() if p.name!='plan.json'}
     (output/'plan.json').write_text(json.dumps(plan,indent=2)+'\n')
-    raise SystemExit(result.returncode)
+    raise SystemExit(plan['build_exit'])
 
 if __name__=='__main__':main()

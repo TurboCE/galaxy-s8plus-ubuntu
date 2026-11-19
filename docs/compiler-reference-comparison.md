@@ -44,3 +44,15 @@ USB serial carrier did not recover a prompt. No raw USB vendor command, partitio
 write, or alternate-device operation was attempted for recovery. Further
 handset verification needs a genuine reconnection; host source/build work is
 not being counted as hardware acceptance.
+
+
+## Later runtime correction
+
+Kernel28 was subsequently installed and failed extended DPMS testing after
+bounded passes. Kernel29 was then installed but reboot-looped before Ubuntu:
+the GCC7 builder lacked lz4, so the builtin archive was silently gzip despite its
+.lz4 filename and disabled gzip decompressor. The earlier pack check only covered
+the external ramdisk. Therefore29 is a failed build-input validation case, not a
+GCC7 runtime comparison. Known-booting28 was restored through TWRP. Actual builtin
+codec guards and the corrected liblz4-tool builder are now used for fresh30.
+See builtin-initramfs-boot-failure.md for evidence and preserved calibration.

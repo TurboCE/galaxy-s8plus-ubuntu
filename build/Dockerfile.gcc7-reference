@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-7 g++-7 gcc-7-aarch64-linux-gnu g++-7-aarch64-linux-gnu \
     make binutils binutils-aarch64-linux-gnu bc bison flex git libssl-dev libelf-dev \
-    device-tree-compiler xz-utils ca-certificates python python3 \
+    device-tree-compiler liblz4-tool xz-utils ca-certificates python python3 \
     && rm -rf /var/lib/apt/lists/*
 RUN test "$(dpkg --print-architecture)" = amd64 \
     && aarch64-linux-gnu-gcc-7 -dumpversion | grep -q '^7' \

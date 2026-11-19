@@ -22,6 +22,49 @@ def verify_embedded_config(kernel, config):
         raise ValueError('Embedded kernel configuration differs from supplied config')
 
 
+
+def verify_builtin_initramfs(kernel, config, system_map):
+    """Check the bytes actually linked into Image, not a filename/extension.
+
+    usr/initramfs_data.S stores a u64 size after the builtin CPIO. The pinned
+    ARM64 raw Image maps its file origin to _text. Fail before packaging if a
+    missing builder tool silently generated an unsupported compression stream.
+    """
+    if kernel[56:60] != b'ARMd':
+        raise ValueError('Expected uncompressed ARM64 Image header')
+    symbols = {}
+    for line in system_map.splitlines():
+        fields = line.split()
+        if len(fields) == 3 and fields[2] in ('_text', '__initramfs_start', '__initramfs_size'):
+            if fields[2] in symbols:
+                raise ValueError('Ambiguous builtin initramfs symbol map')
+            symbols[fields[2]] = int(fields[0], 16)
+    if len(symbols) != 3:
+        raise ValueError('Matching System.map with builtin initramfs symbols required')
+    start = symbols['__initramfs_start']-symbols['_text']
+    size_at = symbols['__initramfs_size']-symbols['_text']
+    if not 64 <= start <= size_at <= len(kernel)-8:
+        raise ValueError('Builtin initramfs map is outside Image')
+    size = struct.unpack_from('<Q', kernel, size_at)[0]
+    if size > size_at-start:
+        raise ValueError('Builtin initramfs exceeds linked bounds')
+    data = kernel[start:start+size]
+    if not data:
+        return dict(validated=True, codec='empty', bytes=0)
+    if data.startswith((b'070701', b'070702')):
+        return dict(validated=True, codec='cpio-newc', bytes=size)
+    if data.startswith(b'\x02\x21\x4c\x18'):
+        codec, decoder = 'lz4-legacy', 'CONFIG_DECOMPRESS_LZ4=y'
+    elif data.startswith(b'\x1f\x8b'):
+        codec, decoder = 'gzip', 'CONFIG_DECOMPRESS_GZIP=y'
+    else:
+        raise ValueError('Unsupported builtin initramfs format for pinned Linux4.4')
+    settings = config.decode().splitlines() if isinstance(config, bytes) else config.splitlines()
+    if decoder not in settings:
+        raise ValueError('Builtin initramfs is '+codec+' but '+decoder+' is absent')
+    return dict(validated=True, codec=codec, bytes=size)
+
+
 def compress_initramfs(data, config):
     settings = config.splitlines()
     if 'CONFIG_RD_LZ4=y' in settings:
@@ -61,7 +104,9 @@ def main():
     if hashlib.file_digest(stock.open('rb'), 'sha256').hexdigest() != '6de0f78b0f5f6476cf1ad91bc4871c32160769735847596c530401630e027862':
         raise SystemExit('Stock G955N reference checksum mismatch')
     config = (args.kernel_dir / 'kernel.config').read_bytes()
-    verify_embedded_config((args.kernel_dir / 'Image.unqualified').read_bytes(), config)
+    kernel = (args.kernel_dir / 'Image.unqualified').read_bytes()
+    verify_embedded_config(kernel, config)
+    builtin = verify_builtin_initramfs(kernel, config, (args.kernel_dir / 'System.map').read_text())
     elf = args.busybox.read_bytes()
     if elf[:6] != b'\x7fELF\x02\x01' or struct.unpack_from('<H', elf, 18)[0] != 183:
         raise SystemExit('Busybox is not AArch64 ELF')
@@ -102,7 +147,7 @@ def main():
     if args.output.stat().st_size > 41943040:
         raise SystemExit('BOOT image exceeds verified 40 MiB capacity')
     manifest = dict(target='SM-G955N', qualified=False, kernel_trial=args.kernel_trial,
-                    initramfs_compression=compression,
+                    initramfs_compression=compression, builtin_initramfs=builtin,
                     image_sha256=hashlib.file_digest(args.output.open('rb'), 'sha256').hexdigest(),
                     kernel_sha256=hashlib.file_digest((args.kernel_dir / 'Image.unqualified').open('rb'), 'sha256').hexdigest(),
                     config_sha256=hashlib.file_digest((args.kernel_dir / 'kernel.config').open('rb'), 'sha256').hexdigest(),

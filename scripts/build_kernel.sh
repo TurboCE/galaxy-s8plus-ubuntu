@@ -46,9 +46,14 @@ docker run --rm --network none -v "$VOLUME:/work" \
     make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig
     cp /work/out/.config /artifacts/kernel.config
     if [ "$PORT_MODE" = image ]; then
+      if grep -qx CONFIG_RD_LZ4=y /work/out/.config; then command -v lz4 >/dev/null; fi
       make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" Image dtbs
       cp /work/out/arch/arm64/boot/Image /artifacts/Image.unqualified
       cp /work/out/vmlinux /work/out/System.map /artifacts/
       cp /work/out/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dtb /artifacts/
     fi
   '
+
+if [ "$MODE" = image ]; then
+  python3 "$ROOT/scripts/verify_kernel_initramfs.py" --kernel-dir "$OUTPUT"
+fi
