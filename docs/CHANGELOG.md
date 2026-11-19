@@ -1152,3 +1152,13 @@ handler and all eight enabled CPU paths pass. The actual modified AArch64 object
 compiles against read-only kernel29 inputs. It is an inactive recovery proposal,
 not deployed or an initiating-corruption fix. No deliberate hardware fault was
 triggered. Host tooling suite:76 tests pass; hardware acceptance remains open.
+
+### Current-state acceptance and recovery block
+
+Reconciled the main validation rows with actual current evidence: the GDM touch
+repair passes the owner's rebooted manual login, while kernel27 stability fails;
+28/29 remain uninstalled. Added an explicit seven-requirement evidence audit,
+without converting host fixture passes into hardware acceptance. Fresh console
+and pinned Wi-Fi/USB SSH checks still fail; there is no active build to wait on.
+Further on-device changes/verification need genuine recovery, and the owner is
+away. Matching candidates and private recovery materials are preserved.
