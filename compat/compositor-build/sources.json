@@ -1,0 +1,52 @@
+{
+  "wlroots": {
+    "url": "https://github.com/droidian/wlroots",
+    "commit": "e7f6be5105b009a025b033ab696c34b287011156",
+    "license": "MIT",
+    "archive_sha256": "d85c02ea116f00bb6e1668b91d5cd41bb099ef3615def283fc3766ee1a99e249"
+  },
+  "libdroid": {
+    "url": "https://github.com/droidian/libdroid",
+    "commit": "87e22ff552e1aed6978757e51cb81eaf159ffd6a",
+    "license": "BSD-3-Clause; Debian packaging GPL-3+",
+    "archive_sha256": "ff854d8770d042bcf621792f9f44e01428a398df1db40bd6ac7dfe670fcb5c8f"
+  },
+  "libgbinder": {
+    "url": "https://github.com/mer-hybris/libgbinder",
+    "commit": "6faaa1cf6d456ed34145a3e68b94bd091d1ce42a",
+    "archive_sha256": "f60e8dd1c246ff999e8d50fae4a7f4489100b965a4451e3c2bc0a5a7675cde80",
+    "license": "BSD-3-Clause"
+  },
+  "libglibutil": {
+    "url": "https://github.com/sailfishos/libglibutil",
+    "commit": "fa82adf84ba308626c4389c6e5b95bb4c12ce1d6",
+    "archive_sha256": "e7e99f61689828073a817c8dcb02c65d499249de18b1761b13352c4e260c3e0e",
+    "license": "BSD-3-Clause"
+  },
+  "frameworks-hardware-interfaces": {
+    "url": "https://android.googlesource.com/platform/frameworks/hardware/interfaces",
+    "commit": "0eb5ead59bb76ad6d5714cc04d9f764dfe7357c9",
+    "tag": "android-9.0.0_r61",
+    "scope": "vr/composer only",
+    "license": "Apache-2.0"
+  },
+  "libfmq": {
+    "url": "https://android.googlesource.com/platform/system/libfmq",
+    "commit": "fb90fec55b70a3a9f221acaf3ccfd28debb057b9",
+    "license": "Apache-2.0"
+  },
+  "existing_android_inputs": "See ../../sources.json and ../hidl-query-sources.json; verify those exact commits, never substitute another device libraries.",
+  "libhwbinder": {
+    "url": "https://android.googlesource.com/platform/system/libhwbinder",
+    "commit": "3b82196284ea11b8374bfea6afb027617043d6e6",
+    "tag": "android-9.0.0_r61",
+    "scope": "include only",
+    "license": "Apache-2.0"
+  },
+  "droidian-libhybris-api-backport": {
+    "url": "https://github.com/droidian/libhybris",
+    "commit": "9cfe3f583156881f5971b158011a197ca5a0f6df",
+    "scope": "HWCNativeWindowSetBufferCount C wrapper and public class method declaration only; base remains pinned upstream libhybris",
+    "license": "Apache-2.0"
+  }
+}

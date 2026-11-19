@@ -1,0 +1,52 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libhybris: backport Droidian HWC buffer-count C API
+
+Backport the existing Droidian implementation/public access declaration from
+https://github.com/droidian/libhybris/commit/9cfe3f583156881f5971b158011a197ca5a0f6df
+for pinned wlroots e7f6be5. Existing Apache-2.0 file notices apply.
+The actual existing setBufferCount implementation is unchanged; no fake stub.
+
+--- a/hybris/egl/platforms/hwcomposer/hwcomposer_window.cpp
++++ b/hybris/egl/platforms/hwcomposer/hwcomposer_window.cpp
+@@ -77,6 +77,11 @@
+     delete window;
+ }
+ 
++extern "C" int HWCNativeWindowSetBufferCount(struct ANativeWindow *window, int cnt)
++{
++    return static_cast<HWComposerNativeWindow *>(window)->setBufferCount(cnt);
++}
++
+ struct _BufferFenceAccessor : public HWComposerNativeWindowBuffer {
+     int get() { return fenceFd; }
+     void set(int fd) { fenceFd = fd; };
+--- a/hybris/egl/platforms/hwcomposer/hwcomposer_window.h
++++ b/hybris/egl/platforms/hwcomposer/hwcomposer_window.h
+@@ -48,6 +48,7 @@
+ 
+     int getFenceBufferFd(HWComposerNativeWindowBuffer *buffer);
+     void setFenceBufferFd(HWComposerNativeWindowBuffer *buffer, int fd);
++    virtual int setBufferCount(int cnt);
+ protected:
+     // overloads from BaseNativeWindow
+     virtual int setSwapInterval(int interval);
+@@ -70,7 +71,6 @@
+     virtual int setUsage(uint64_t usage);
+     virtual int setBuffersFormat(int format);
+     virtual int setBuffersDimensions(int width, int height);
+-    virtual int setBufferCount(int cnt);
+     virtual void present(HWComposerNativeWindowBuffer *buffer) = 0;
+ 
+ private:
+--- a/hybris/egl/platforms/hwcomposer/hwcomposer.h
++++ b/hybris/egl/platforms/hwcomposer/hwcomposer.h
+@@ -58,6 +58,9 @@
+  */
+ void HWCNativeWindowDestroy(struct ANativeWindow *window);
+ 
++/* Set the native window buffer count before allocation/presentation. */
++int HWCNativeWindowSetBufferCount(struct ANativeWindow *window, int cnt);
++
+ /** Get the current fence FD on a buffer.
+  *
+  * The buffer must be a buffer passed from the HWC layer trough the present

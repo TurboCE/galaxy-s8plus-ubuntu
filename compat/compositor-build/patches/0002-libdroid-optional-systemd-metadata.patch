@@ -1,0 +1,18 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libdroid: make optional systemd unit-directory metadata optional
+
+The following if(systemd.found()) already guards unit-file generation. The
+required-by-default dependency made this conditional ineffective. Private
+C-library-only staging does not install or run the HAL service executables.
+
+--- a/hals/meson.build
++++ b/hals/meson.build
+@@ -13,7 +13,7 @@
+ )
+ 
+ 
+-systemd = dependency('systemd')
++systemd = dependency('systemd', required: false)
+ if systemd.found()
+   systemd_unit_dir = systemd.get_variable(pkgconfig: 'systemdsystemunitdir')
+ 

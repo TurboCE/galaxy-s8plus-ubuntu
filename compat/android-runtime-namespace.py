@@ -99,6 +99,13 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
             # GID1003 service. Do not chmod/chown the original native node.
             os.chown(target, 0, 1003)
             target.chmod(0o660)
+        elif name == 'ion':
+            # Only the original system-UID allocator and supervised root probe.
+            os.chown(target, 1000, 1000)
+            target.chmod(0o600)
+        elif name == 'mali0':
+            os.chown(target, 0, 1003)
+            target.chmod(0o660)
     properties = root / 'dev/__properties__'
     properties.mkdir(mode=0o711)
     properties.chmod(0o711)
@@ -187,7 +194,15 @@ def main():
     parser.add_argument('--seconds', type=int, default=45)
     parser.add_argument('--include-display-devices', action='store_true',
                         help='Expose display nodes only for a separately coordinated HWC trial; no open here')
+    parser.add_argument('--include-ion-device', action='store_true',
+                        help='Explicit reviewed headless allocator trial only; private ION node, no display')
+    parser.add_argument('--include-mali-device', action='store_true',
+                        help='Explicit reviewed headless GLES trial only; needs ION, exposes no display')
     args = parser.parse_args()
+    if ((args.include_ion_device or args.include_mali_device) and
+            (not args.run_trial or args.include_display_devices or
+             (args.include_mali_device and not args.include_ion_device))):
+        parser.error('Headless device options require explicit run-trial, separate from display mode; Mali requires ION')
     if not (args.run_trial or args.namespace_selftest or args.permissions_selftest):
         parser.print_help()
         return 0
@@ -232,11 +247,17 @@ def main():
     names = ['null', 'zero', 'random', 'urandom', 'binder', 'hwbinder', 'vndbinder', 'ashmem']
     if args.include_display_devices:
         names += ['mali0', 'ion', 'fb0', 'graphics/fb0', 'sw_sync']
+    if args.include_ion_device:
+        names.append('ion')
+    if args.include_mali_device:
+        names.append('mali0')
     devices = []
     for name in names:
         try:
             info = (Path('/dev') / name).stat()
         except FileNotFoundError:
+            if name in ('ion', 'mali0'):
+                raise SystemExit('Explicit requested headless device is unavailable: ' + name)
             continue
         if not stat.S_ISCHR(info.st_mode):
             raise SystemExit('Expected a character device: ' + name)

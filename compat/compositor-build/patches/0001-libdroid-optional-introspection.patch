@@ -1,0 +1,41 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libdroid: allow C-only cross builds without target introspection
+
+wlroots consumes the public C API, not GIR metadata. Make introspection an
+explicit feature so a private cross build can skip target scanning. The library
+sources and HAL behavior are unchanged. Upstream native default remains enabled.
+
+--- a/include/libdroid/meson.build
++++ b/include/libdroid/meson.build
+@@ -19,16 +19,18 @@
+     install_dir: get_option('includedir') / 'libdroid'
+ )
+ 
+-gnome = import('gnome')
+-libdroid_gir = gnome.generate_gir(libdroid_lib,
+-            nsversion: api_version,
+-            namespace: 'Droid',
+-        symbol_prefix: 'droid',
+-    identifier_prefix: 'Droid',
+-             sources:  libdroid_headers,
+-             includes: [ 'Gio-2.0' ],
+-              install: true,
+-)
++if not get_option('introspection').disabled() and not meson.is_cross_build()
++  gnome = import('gnome')
++  libdroid_gir = gnome.generate_gir(libdroid_lib,
++              nsversion: api_version,
++              namespace: 'Droid',
++          symbol_prefix: 'droid',
++      identifier_prefix: 'Droid',
++               sources:  libdroid_headers,
++               includes: [ 'Gio-2.0' ],
++                install: true,
++  )
++endif
+ 
+ 
+ install_headers(libdroid_headers, subdir: 'libdroid')--- /dev/null
++++ b/meson_options.txt
+@@ -0,0 +1 @@
++option('introspection', type: 'feature', value: 'auto', description: 'Build native GIR metadata')

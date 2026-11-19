@@ -1,0 +1,21 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] hwc2 compatibility: match declared sideband C ABI
+
+The public header and glibc dlsym wrapper take native_handle_t*, whereas this
+implementation used const native_handle_t*. C++ treats that as a new overload
+without the prior extern-C declaration: only a mangled symbol was exported.
+Match the declared parameter; forwarding it to the const HAL method preserves
+behavior and exports the actual wrapper's expected C name. Apache-2.0 notices
+in the original file remain unchanged.
+
+--- a/compat/hwc2/hwc2_compatibility_layer.cpp
++++ b/compat/hwc2/hwc2_compatibility_layer.cpp
+@@ -377,7 +377,7 @@
+     return static_cast<hwc2_error_t>(error);
+ }
+ hwc2_error_t hwc2_compat_layer_set_sideband_stream(hwc2_compat_layer_t* layer,
+-                                            const native_handle_t* stream)
++                                            native_handle_t* stream)
+ {
+     hal::Error error = layer->self->setSidebandStream(stream);
+     return static_cast<hwc2_error_t>(error);

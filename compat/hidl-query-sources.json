@@ -19,5 +19,11 @@
     "commit": "e609036145cd4457439e4798878f6ff5bf9c756f",
     "url": "https://android.googlesource.com/platform/system/hwservicemanager",
     "usage": "Source review of real registration caller PID; not linked into query"
+  },
+  "hardware-interfaces": {
+    "tag": "android-9.0.0_r61",
+    "commit": "f53f4c35268154fd5e320bb39d772e8a61d200ff",
+    "url": "https://android.googlesource.com/platform/hardware/interfaces",
+    "usage": "Public graphics/common1.0 and mapper/allocator2.0 IDL; sparse graphics checkout only"
   }
 }

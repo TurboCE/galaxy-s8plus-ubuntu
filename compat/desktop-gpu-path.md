@@ -70,3 +70,22 @@ Wayland client, verify renderer strings and composition/presentation, then
 qualify desktop shell, touch, resize, rotation and suspend. This provides a
 real accelerated Ubuntu userspace desktop route without prematurely patching
 Mutter or globally mixing Android EGL and Xorg's GLX libraries.
+
+
+## Private compositor dependency build completed
+
+On 2026-11-19, the isolated host build in `compositor-build/` produced ARM64
+libdroid/libgbinder/libglibutil, Hybris EGL/GLES/Wayland/HWC glue, the Android9
+Bionic `libhwc2_compat_layer.so`, Droidian wlroots ABI12a with HWC2 backend and
+Android/GLES2 renderers, and its tinywl example. No full Android tree or phone
+package installation was needed. The small actual Droidian buffer-count API
+backport resolves one pinned-Hybris/fork interface mismatch. See
+[build provenance and commands](compositor-build/README.md).
+
+This removes the missing HWC2 compatibility-layer/build dependency as a source
+blocker. It does not prove graphics services can initialize, buffers/fences can
+present, or GNOME is accelerated. All objects are private build artifacts,
+never copied to or executed on the phone. Existing GNOME, GL libraries and
+services were unchanged. The new unexpected kernel reboot investigation blocks
+live graphics trials; allocator/HWC qualification and a bounded exclusive
+panel test remain prerequisites before running the tinywl candidate.
