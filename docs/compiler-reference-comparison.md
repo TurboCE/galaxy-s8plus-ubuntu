@@ -26,3 +26,21 @@ aborted attempt cannot be mistaken for a passing or source-compilation failure.
 
 Public source/patch notices remain intact. Proprietary device firmware and
 compiled images remain private; this comparison does not publish those inputs.
+
+
+## Build checkpoint
+
+The native-host cross-compiler kernel29 build completed successfully with actual
+GCC7.5.0. Its config and exact source-patch hashes match kernel28. Both packed
+ramdisk and DTBH are byte-identical to kernel28, and the completed image fits
+the existing BOOT partition. Build29 is not deployed or hardware-qualified.
+Kernel28 is also packed but not deployed: the prior staging attempt lost the
+connection before any BOOT write. The last confirmed running kernel remains27.
+Private full images/receipts are under artifacts/ondemand-safety.
+
+At the latest check neither SSH nor the selected G955N USB console responds.
+Interrupting the agent's console foreground command and toggling its standard
+USB serial carrier did not recover a prompt. No raw USB vendor command, partition
+write, or alternate-device operation was attempted for recovery. Further
+handset verification needs a genuine reconnection; host source/build work is
+not being counted as hardware acceptance.

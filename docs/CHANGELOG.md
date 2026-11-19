@@ -1119,3 +1119,19 @@ The device later reconnected in a new kernel26 boot while the owner was away;
 reboot origin is unconfirmed. Kernel27 BOOT installation then passed full readback
 and unchanged protected hashes, followed by a deliberate reboot. New-kernel
 functional/stability acceptance remains to verify.
+
+
+### Compiler-reference candidate and latest device boundary
+
+Kernel27 subsequently failed repeated DPMS after13 complete cycles. Retained
+metadata proves a kernel-panic/watchdog reset; it is not a clean stability result.
+Kernel28 (Ondemand lifetime) and kernel29 (same patches/config with GCC7.5) both
+build and pack. Their ramdisk/DTBH match byte-for-byte. Neither is deployed:
+the device stopped responding before the kernel28 backup/staging finished and
+no BOOT write for28 was initiated. Last confirmed live kernel is27.
+
+Recorded immutable compiler-image ID/version and explicit comparison build
+number. Core porting takes priority; USB-C HDMI/DisplayPort work is deferred and
+requires a new explicit instruction even after both porting projects complete.
+The latest source/data checks are62 host tooling tests plus the independent
+actual-function sanitizer/event fixtures. These do not certify phone hardware.
