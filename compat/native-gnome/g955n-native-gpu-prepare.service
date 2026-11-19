@@ -1,0 +1,14 @@
+[Unit]
+Description=Prepare read-only SM-G955N Mali userspace before GDM
+After=local-fs.target systemd-udev-trigger.service
+Before=display-manager.service gdm.service gdm3.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/g955n-android-bsp
+ExecStart=/opt/g955n-native-gpu/prepare-properties.py --prepare
+RemainAfterExit=yes
+TimeoutStartSec=25
+
+[Install]
+RequiredBy=display-manager.service

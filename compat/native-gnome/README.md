@@ -56,6 +56,15 @@ as `bin/session-x11-pixel-probe`0755. Install `ubuntu-g955n.desktop` in
 `/usr/share/xsessions`0644. Run `prepare-properties.py --prepare` as root.
 The generated `device-properties` is own-device metadata: **never commit it**.
 
+For reboot persistence, install `g955n-native-gpu-prepare.service` in
+`/etc/systemd/system` and explicitly enable/start it. Its required dependency on
+`display-manager.service` runs the checked own-device BSP preparation (SYSTEM
+mounted read-only, without journal replay) and regenerates the property snapshot
+before GDM. Existing symlinks alone do not mount SYSTEM: this omission caused
+`eglGetDisplay` failure and software fallback after reboot. The unit starts no
+Android init or hardware service. The original SYSTEM and calibration remain
+unchanged. Verify the service and real renderer after a fresh boot.
+
 Run `session.py --check` as ubuntu with the actual native DISPLAY/XAUTHORITY.
 Then explicitly run `select-login.py --select-default` as root; it backs up GDM
 and account configuration and preserves manual authentication. A GDM restart
@@ -82,9 +91,9 @@ before persistence. No BOOT/RECOVERY/calibration partition changes are involved.
 
 ## Remaining boundaries
 
-The account-row touch issue in the CPU GDM greeter still required one Return
-key before the password prompt; the owner then authenticated normally. It is
-not claimed fixed by GPU integration. Optional calendar/Thunderbolt/DBusMenu
+The account-row touch repair is tracked separately under `../greeter` and
+`docs/greeter-touch-validation.md`: the owner confirmed password/desktop entry
+after the repair, without an injected Return. Cold-boot regression is pending. Optional calendar/Thunderbolt/DBusMenu
 service warnings remain. Long-term suspend/cold-boot, physical smoothness/FPS,
 other apps/APIs and other phone hardware are separate acceptance work. Historical
 failed experiments remain in raw logs; passing the final interval does not mean

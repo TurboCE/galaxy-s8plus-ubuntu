@@ -21,3 +21,10 @@ The resulting desktop session was ubuntu-g955n but its GLES preflight failed
 not a GPU acceptance. Investigating the cold-boot graphics readiness failure is
 separate, ongoing work. Kernel taint was zero at this checkpoint; that does not
 qualify long-term kernel stability.
+
+The subsequent GPU failure was traced to original SYSTEM not being mounted after
+reboot, leaving the existing vendor library symlinks dangling. Enabling the
+read-only GPU preparation unit before display-manager restored the real GLES
+helper: exit0, actual Mali-G71. The already-running software desktop was not
+replaced during this check. A new full login/cold-boot GPU session remains to
+verify; this helper pass is not evidence that the old running shell changed.
