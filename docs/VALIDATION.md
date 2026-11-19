@@ -460,3 +460,44 @@ watchdog path and eight enabled CPU paths pass sanitizer fixtures; the actual
 AArch64 object builds without changing kernel29. This is an inactive recovery
 source proposal. No new device pass, clean-kernel claim or primary corruption
 fix follows from these tests. See panic-decoder-and-safe-recovery.md.
+
+
+### Restored28 diagnostic floor / corrected30 staging
+
+Following the29 builtin-codec recovery, the ordinary GPU desktop on restored28
+completed100 actual DPMS off/on cycles with a bounded421000kHz MIF PM QoS vote.
+Every sample observed runtime suspended/active and DPMS off/on; same boot,
+taint0. The per-fd vote was released on completion and min_freq stayed208000.
+This is a diagnostic pass only; the earlier no-floor28 hang remains a failure.
+
+The fixed GCC7 builder produced30 with genuine legacy-LZ4 builtin156 bytes.
+Its actual linked payload was also decompressed and parsed as newc. Source patch
+hashes/config and external ramdisk/DTBH match28. Fresh full28 backup and protected
+hashes preceded30's BOOT-only write; full readback and all protected comparisons
+passed. Boot and no-floor runtime acceptance remain pending at this checkpoint.
+Private records: artifacts/ondemand-safety/{mif-qos-power100.log,
+packed30-receipt.json,install30-returned-receipt.json}.
+
+
+### Corrected30 runtime failure / reversible QoS service
+
+30 booted and authenticated through actual GDM password PAM. Three ordinary
+Mali GNOME composition/popup trials passed, same shell/boot, taint0. The default
+bus-policy DPMS trial completed nine cycles and stopped during the tenth off
+operation. Owner confirmed automatic reboot to GDM. Matching retained logs show
+an invalid indirect request callback in blk_finish_request through UFS/SCSI
+completion; the initiating corruption writer remains unidentified.
+
+On the recovered same30 kernel, a per-fd421000kHz MIF-floor trial completed100
+cycles with real runtime/DPMS state checks, same boot and taint0; its vote was
+released. The explicit systemd holder passed unit validation and actual stop,
+SIGKILL request-count cleanup and restart-readiness checks. Longer intervals and
+reboot persistence are pending. No clean-kernel or full stability pass follows.
+See mif-desktop-stability.md. Private lifecycle and power records remain ignored.
+
+
+The installed holder also passed10 further desktop DPMS cycles with five-second
+off/on intervals, including actual off-frequency421000kHz samples, same boot
+and taint0. Enabled its ordered display-manager requirement and requested a
+deliberate reboot for persistence qualification. That reboot result is pending
+at this checkpoint; no sensor/audio/modem/rotation completion is inferred.

@@ -1,14 +1,18 @@
 # Current seven-requirement evidence audit
 
 This is an incomplete-goal checkpoint. No requirement is removed or weakened by
-this audit. The latest confirmed live kernel is27; neither packed28 nor29 is
-installed. No active build remains. Worktree changes and evidence are preserved.
+this audit. After owner-assisted recovery,28 was tested and failed a longer display-power
+trial.29 reboot-looped due to a builtin archive build error;28 was restored.
+The corrected GCC7 candidate30 has now been written with full BOOT readback;
+boot/GDM authentication and three Mali GNOME trials passed, but its default
+display-power trial auto-rebooted. A bounded MIF-floor comparison passed100
+cycles on both28 and30; the explicit service mitigation is being qualified. Private recovery materials are preserved.
 
 | Owner requirement | Evidence actually available | Remaining acceptance |
 | --- | --- | --- |
 | Boot, select account and enter GNOME by touch | Owner confirmed manual account/password/desktop after repaired GDM and a26 reboot; authentication/autologin settings unchanged | Repeated stable boots and long use; power-hang failures prevent overall pass |
 | Real accelerated GNOME and fast touch response | Actual normal GNOME Mali-G71, EGL/Exynos gralloc, no swrast; three26 composition/popup passes; real27 Mali login | Physical response/latency and sustained application/display-power workload; commits/sec are not FPS |
-| No kernel errors; fix real driver defects | Reproduced/fixed DPP metadata lifetime, pan/power serialization, QoS ordering and Ondemand lifetime source bugs; private real RCU/stack-check fault records | Actual initiating corruption remains unresolved.26/27 still hang;28/29 not deployed. Proposal32 improves a recovery path only |
+| No kernel errors; fix real driver defects | Reproduced/fixed DPP metadata lifetime, pan/power serialization, QoS ordering and Ondemand lifetime source bugs; private real RCU/stack-check fault records | Actual initiating corruption remains unresolved.26/27/28 hang;29 never reached Ubuntu due to a build error. Corrected30 also auto-rebooted without the diagnostic floor. Proposal32 improves a recovery path only |
 | Accel, magnetic, pedometer and ambient-light operation | Earlier native accel/gyro records; pinned magnetic/step/light decoders; uninstalled accel/light SensorProxy prototype | Boot-time genuine firmware/calibration, reliable claims/cleanup, live magnetic/step/ALS and physical motion/light acceptance |
 | Microphone and speaker | Bounded selected speaker PCM progress; scoped audio policy experiment | Acoustic speaker and microphone acceptance, stable routing and safe default policy. WirePlumber remains masked |
 | LTE modem without driver errors | Original protected RADIO/calibration preserved; modem device nodes; no SIM supplied | Actual modem bootstrap/driver checks; native modem control. Later SIM registration, mobile-only data/reconnect; no-SIM is not a modem pass |
@@ -20,26 +24,33 @@ compiler-reference-comparison.md, panic-decoder-and-safe-recovery.md and
 native-rotation-requirements.md. Device records/images and addresses remain in
 ignored private artifacts, not this document.
 
-## Actual blocking condition
+## Recovery and controlled display-power comparison
 
-Repeated current checks find the dedicated G955N USB device but no console
-prompt. Pinned SSH on both last-known Wi-Fi and USB networking times out.
-Console interrupt, serial-carrier reset and an earlier mDNS lookup did not
-restore a usable path. This is a connection/recovery block, not a live job wait.
-The owner is away and explicitly cannot provide physical recovery for now.
+The owner returned and recovered the device. The previous connection block is
+resolved.28 accepted owner touch login and three ordinary Mali GNOME composition
+trials, but failed in a later repeated DPMS trial. It remains unqualified.
 
-No further BOOT write may proceed without live model/boot identity, a fresh
-matching backup and protected-partition/readback checks. Those are unavailable
-while the phone does not respond. Source fixes, matched28/29 images, decoder and
-sanitizer fixtures are ready; more passing host tests would not validate the
-missing hardware behavior or identify a new corrupting writer by themselves.
+29's retained matching panic identified an unsupported gzip **builtin** archive
+inside Image. The corrected builder supplies lz4; linked-Image and pack guards
+now reject that exact failure.30 keeps28's source patches/config and external
+ramdisk/DTBH bytes while using GCC7 and a genuine legacy-LZ4 builtin archive.
+It has passed build/codec checks and BOOT-only write/readback/protection checks;
+these are not evidence of runtime stability.
 
-After genuine recovery/reconnection, first capture actual identity/previous
-fault evidence and guard the staging interval against automatic screen blank.
-Review and install one candidate with full BOOT verification, then test actual
-GNOME/display-power behavior with a foreground host kernel capture and a reviewed
-recovery guard. Preserve the separate28/29 source/config/compiler comparison.
-Do not infer recovery from a visible USB descriptor alone.
+After restoring28, a bounded test held a per-file-descriptor
+PM_QOS_BUS_THROUGHPUT minimum of421000kHz. All100 actual desktop DPMS off/on
+cycles completed with runtime suspended/active, the same boot and taint0.
+Observed off frequencies were at least421000kHz. The descriptor was closed and
+its vote released; the driver minimum remained208000kHz. This is a diagnostic
+condition and a cause clue, not a permanent power-management fix. A direct
+min_freq write had previously failed read-only without changing that value.
+The next compiler comparison must run without the diagnostic floor.
+
+The recovery-entry EFS raw-hash difference was investigated without EFS writes:
+118 file/link contents match the original and only eight bytes differ, entirely
+within the ext4 superblock. Current calibration was preserved; no rollback or
+identifier changes were made. Protected partitions remained unchanged across
+each recorded BOOT write.
 
 HDMI/DisplayPort is deferred. S9+ remains separately managed; no S9+ operation is
 part of this session. The seven core requirements above remain unfinished.

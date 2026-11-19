@@ -100,3 +100,23 @@ failed experiments remain in raw logs; passing the final interval does not mean
 all historical kernel messages are clean. Stock Ubuntu on Xorg remains available
 in the greeter session chooser for recovery; fallback switching is not newly
 qualified by this result.
+
+
+## MIF stability mitigation (separate from GPU acceleration)
+
+`hold-mif-qos.py --hold` and `g955n-desktop-mif-qos.service` hold a per-fd
+421000kHz memory-bus minimum on this model. This is a reversible mitigation for
+the native-desktop screen-power failures, not a proven corruption root-cause
+repair. The CPU governor/idle states and higher bus operating points remain
+available; idle power may increase. Deep suspend is not qualified by DPMS tests.
+See `docs/mif-desktop-stability.md` for bounded actual evidence and limitations.
+
+The root-owned script goes under `/opt/g955n-native-gpu`; the unit under
+`/etc/systemd/system`. Verify model and file hashes, validate the unit and run
+actual lifecycle/display-power checks before enabling it. `Type=notify` only
+reports ready after kernel acknowledgement. Enabling adds a display-manager
+requirement with startup ordering before GDM; it must be active before exposing
+the known failing low-bus screen-off path. No partition or OPP edits are needed.
+For rollback, first keep the panel on and disable automatic DPMS, then disable
+and stop this unit and remove its installed files. Closing the fd (including
+SIGKILL) removes only its own QoS vote; other kernel requests are preserved.

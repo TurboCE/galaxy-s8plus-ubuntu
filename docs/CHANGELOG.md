@@ -1184,3 +1184,38 @@ pass. Corrected GCC7 builder uses liblz4-tool; fresh30 build is in progress.
 A pre-existing recovery-entry EFS raw-hash delta was preserved and investigated:
 118 saved file/link contents match original, without any EFS write. See
 builtin-initramfs-boot-failure.md. Hardware stability remains unresolved.
+
+
+### Completed corrected image / bounded MIF diagnostic
+
+Corrected GCC7 build30 passed linked builtin codec validation, actual LZ4/newc
+payload decoding and matched source/config/external ramdisk/DTBH checks. Staged
+to BOOT after fresh independent full28 backup, full readback and unchanged
+RECOVERY/EFS/CPEFS/RADIO/PARAM/MISC. Runtime qualification pending.
+
+Restored28 completed100 desktop DPMS cycles under a bounded per-fd421000kHz
+MIF QoS minimum, then released its vote. This diagnostic result does not repair
+or qualify the default power path. EFS comparison found only eight differing
+superblock bytes, with118 file/link contents identical; no EFS write occurred.
+
+
+### Kernel30 matched failure and scoped runtime mitigation
+
+Corrected30 boots and passes three actual accelerated GNOME tests, but its
+no-floor DPMS trial automatically rebooted during the tenth off transition.
+Preserved the matching retained callback fault and verified relocation. This is
+not evidence of the corrupting writer. Repeating with421000kHz per-fd MIF QoS
+passed100 cycles, reproducing restored28's bounded diagnostic result.
+
+Added an opt-in, model/device-checked QoS holder and ordered notify service,
+explicitly documented as a stability mitigation with possible idle-power cost.
+Actual30 lifecycle tests verify normal stop and SIGKILL remove the request and
+restart adds only one. No OPP/minimum/calibration edits or CPU-idle disabling.
+Longer power intervals and reboot persistence remain under qualification.
+
+
+The installed holder also passed10 further desktop DPMS cycles with five-second
+off/on intervals, including actual off-frequency421000kHz samples, same boot
+and taint0. Enabled its ordered display-manager requirement and requested a
+deliberate reboot for persistence qualification. That reboot result is pending
+at this checkpoint; no sensor/audio/modem/rotation completion is inferred.

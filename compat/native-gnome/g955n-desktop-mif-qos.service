@@ -1,0 +1,24 @@
+[Unit]
+Description=SM-G955N native desktop MIF stability mitigation
+After=systemd-udev-trigger.service
+Before=display-manager.service gdm.service gdm3.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/opt/g955n-native-gpu/hold-mif-qos.py --hold
+Restart=on-failure
+RestartSec=1
+TimeoutStartSec=10
+TimeoutStopSec=5
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+DevicePolicy=closed
+DeviceAllow=/dev/bus_throughput rw
+ReadWritePaths=/run
+
+[Install]
+RequiredBy=display-manager.service
