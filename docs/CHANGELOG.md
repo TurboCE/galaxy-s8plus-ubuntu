@@ -1309,3 +1309,10 @@ for the display ownership and synchronization work still required.
 At the owner's request, restored the package default of 100 ms. The owner
 preference was reset on the SM-G955N and a readback confirmed 100 ms. The
 image no longer overrides this key. System Monitor remains installed.
+
+### Exynos8895 direct panel submission primitive
+
+Implemented the userspace single-window DECON submission for a verified
+linear DMA-BUF and its acquire fence. It returns the driver's completion
+fence without reading pixels. The AArch64 ABI was checked against the pinned
+kernel declarations. GNOME producer and panel ownership integration remain pending.

@@ -51,3 +51,22 @@ changes were 300.5, 291 and 279 ms. Longest intervals were 532, 536 and 552 ms.
 The fixture's X queries and synthetic input are included in these results.
 Boot identity and taint stayed unchanged. No direct GNOME path or comparative
 performance improvement was demonstrated.
+
+## Downstream submission code
+
+`compat/native-gnome/direct-panel/decon-output.c` implements the last stage
+for the pinned Exynos8895 ABI. It accepts a verified linear full-panel DMA-BUF
+and its optional acquire fence, builds a single-window submission, and returns
+the driver's completion fence. It checks the allocation size using DMA-BUF
+seek semantics. It never maps the buffer or copies pixels. The caller must
+verify the actual allocation layout and own the panel exclusively.
+
+Both the helper and an independent fixture extracted from the pinned Samsung
+kernel declarations compiled for AArch64 with warnings treated as errors.
+The fixture checked the window size, source offset, ioctl payload size and
+RGB format enum values. No panel ioctl was executed by this build check.
+The remaining integration work is the GNOME producer hook, verification of
+the gralloc layout, and ownership across framebuffer handoff, blanking and
+fence completion. Completing the new frame does not authorize immediate
+reuse of that same frame. The previous buffer can be retired after a verified
+replacement. The installed X11 session has not been modified by this helper.

@@ -613,3 +613,10 @@ path and before/after improvement are pending.
 At the owner's request, restored the package default of 100 ms. The owner
 preference was reset on the SM-G955N and a readback confirmed 100 ms. The
 image no longer overrides this key. System Monitor remains installed.
+
+### Direct panel submission build check
+
+The AArch64 DECON helper and a fixture extracted from the pinned kernel
+compiled with warnings treated as errors. The fixture checked structure sizes,
+the source offset and accepted format enum values. No panel ioctl, on-device
+direct presentation or before/after drag measurement was performed.
