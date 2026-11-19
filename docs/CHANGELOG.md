@@ -1303,3 +1303,9 @@ and window-manager update intervals before changing presentation. Confirmed
 that the installed session still transfers Mali buffers through XPutImage and
 that the running kernel lacks a DRM device. See gnome-direct-panel-output.md
 for the display ownership and synchronization work still required.
+
+### System Monitor refresh default restored
+
+At the owner's request, restored the package default of 100 ms. The owner
+preference was reset on the SM-G955N and a readback confirmed 100 ms. The
+image no longer overrides this key. System Monitor remains installed.

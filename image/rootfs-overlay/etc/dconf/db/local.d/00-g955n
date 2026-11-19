@@ -3,6 +3,3 @@ scaling-factor=uint32 2
 
 [org/gnome/desktop/a11y/applications]
 screen-keyboard-enabled=true
-
-[org/gnome/gnome-system-monitor]
-graph-update-interval=1000

@@ -607,3 +607,9 @@ position changes. Whole-device CPU busy was 20.28–21.29% and median intervals
 between geometry changes were 279–300.5 ms. Same boot and taint0 were checked.
 These measurements are for the existing CPU transfer path. The direct output
 path and before/after improvement are pending.
+
+### System Monitor refresh default restored
+
+At the owner's request, restored the package default of 100 ms. The owner
+preference was reset on the SM-G955N and a readback confirmed 100 ms. The
+image no longer overrides this key. System Monitor remains installed.
