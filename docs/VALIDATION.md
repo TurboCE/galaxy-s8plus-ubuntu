@@ -598,3 +598,12 @@ Per-process percentages use one core as100, unlike the whole-device percentage.
 GNOME composition and the app load Mali without swrast, but final X11/fbdev
 buffer transfer still has CPU copies; no zero-copy or FPS qualification follows.
 Private measurement logs remain under artifacts/system-monitor-*.
+
+### Native GNOME drag baseline
+
+On kernel32 with the ordinary unlocked X11 GNOME session, three drag trials
+requested 180 pointer positions each. Each trial observed nine test-window
+position changes. Whole-device CPU busy was 20.28–21.29% and median intervals
+between geometry changes were 279–300.5 ms. Same boot and taint0 were checked.
+These measurements are for the existing CPU transfer path. The direct output
+path and before/after improvement are pending.

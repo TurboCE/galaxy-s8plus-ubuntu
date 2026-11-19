@@ -1295,3 +1295,11 @@ Per-process percentages use one core as100, unlike the whole-device percentage.
 GNOME composition and the app load Mali without swrast, but final X11/fbdev
 buffer transfer still has CPU copies; no zero-copy or FPS qualification follows.
 Private measurement logs remain under artifacts/system-monitor-*.
+
+### GNOME direct output investigation
+
+Added a reproducible synthetic GNOME drag baseline for measuring the CPU cost
+and window-manager update intervals before changing presentation. Confirmed
+that the installed session still transfers Mali buffers through XPutImage and
+that the running kernel lacks a DRM device. See gnome-direct-panel-output.md
+for the display ownership and synchronization work still required.
