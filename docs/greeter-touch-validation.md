@@ -28,3 +28,10 @@ read-only GPU preparation unit before display-manager restored the real GLES
 helper: exit0, actual Mali-G71. The already-running software desktop was not
 replaced during this check. A new full login/cold-boot GPU session remains to
 verify; this helper pass is not evidence that the old running shell changed.
+
+After the deliberate kernel26 reboot, the owner confirmed smooth account/password
+entry by touch and desktop login again. Boot ordering of read-only SYSTEM
+preparation was verified before GDM. This new ordinary GNOME shell reports
+Mali-G71, loads private EGL/Mali/Exynos gralloc without swrast, and passes three
+client/overlay/calendar trials. The former software-fallback boundary above
+applies to the earlier kernel25 login, not this kernel26 session.

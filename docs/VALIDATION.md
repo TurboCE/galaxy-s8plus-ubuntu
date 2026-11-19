@@ -416,3 +416,27 @@ shell used the real software fallback. Requiring read-only preparation before
 GDM restores a real Mali-G71 GLES helper pass; a fresh GPU session still needs
 verification. See greeter-touch-validation.md. These bounded passes do not
 qualify kernel stability or remaining peripherals.
+
+
+### Kernel26 reboot / manual GPU login checkpoint
+
+Kernel26 with proposal29 was built and installed to BOOT only. Whole-partition
+readback passed; RECOVERY/EFS/CPEFS/RADIO hashes remained unchanged. Its config
+matches kernel24 exactly (normal CPU idle); ramdisk/DTBH bytes match the prior
+working image. Live build26, cpuidle off=0 and taint0 were verified after reboot.
+GPU preparation completed before GDM and original SYSTEM is ro,norecovery.
+
+Five actual DPMS off/on cycles returned suspended/off then active/on with the
+same boot and taint0. The owner then confirmed smooth password entry and desktop
+entry after reboot using touch. The ordinary GNOME shell reports Mali-G71,
+loads private EGL/Mali/Exynos gralloc and no swrast. Three actual six-color
+client/overlay plus stable-calendar trials passed with the same shell/boot,
+taint0 and no new fault signatures in that interval. All54 host tooling tests
+pass; extracted DPP lifetime/power-race tests pass separately.
+
+This is bounded acceptance, not long-term stability or clean-log completion.
+The raw initial kernel audit still contains vendor error-priority messages and
+real open driver/compatibility issues. Sensor/audio/LTE/rotation/brightness goals
+remain open. Private evidence: artifacts/panel-safety/{install-receipt.json,
+power-cycles26.json,normal-login26.json,session26-verification.log,
+kernel26-initial.raw,kernel26-initial-audit.json}.
