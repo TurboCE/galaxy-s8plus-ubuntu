@@ -25,6 +25,9 @@ PATCHED_HASHES = {
 }
 
 
+SCOPED_HASHES = {'spa/plugins/alsa/alsa-pcm.c': '09380f2a78c14f8bd481ee9a9d992aca22b552d07baf183d177648723e31988e', 'spa/plugins/alsa/acp/acp.c': '407e5ef8ad4705a96c0cc7da01a8bbb3f8001ef318895af7e6fe9fb8c66b2008', 'spa/plugins/alsa/acp/alsa-util.c': '0236d625fbf4d7f4e7598d0e63af3b6aa2ccf997ba77cb4a567b58dce53ab4c6', 'spa/plugins/alsa/g955n-scope.h': 'ce1251d627b2a91823f2bb1f49c53f6c0c9378e3764d0dc8d8719ad482bb632e'}
+SCOPE_PATCH_SHA256 = '8f2edae1cfbe22f243011f691eb20eebe8a563f3f2347141297f8aa3f867031a'
+
 def digest(path):
     with Path(path).open('rb') as source:
         return hashlib.file_digest(source, 'sha256').hexdigest()
@@ -43,6 +46,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--workspace', type=Path,
                         default=Path.home() / 'g955n-pipewire-build')
+    parser.add_argument("--g955n-scope", action="store_true",
+                        help="Build separately staged hardware-scoped source candidate")
     args = parser.parse_args()
     if (os.geteuid() == 0 or platform.machine() != 'aarch64'
             or 'g955n-ubuntu' not in platform.release()
@@ -57,10 +62,13 @@ def main():
     for name, expected in SOURCE_HASHES.items():
         if digest(work / name) != expected:
             raise SystemExit('Authenticated source archive checksum mismatch: ' + name)
-    source = work / 'pipewire-1.0.5'
-    for name, expected in PATCHED_HASHES.items():
+    source = work / ('pipewire-1.0.5-scoped-v2' if args.g955n_scope else 'pipewire-1.0.5')
+    checked_hashes = SCOPED_HASHES if args.g955n_scope else PATCHED_HASHES
+    for name, expected in checked_hashes.items():
         if digest(source / name) != expected:
             raise SystemExit('Reviewed backport source checksum mismatch: ' + name)
+    if args.g955n_scope and digest(work / '0002-g955n-pcm-open-scope.patch') != SCOPE_PATCH_SHA256:
+        raise SystemExit('Reviewed scope patch checksum mismatch')
     if not (source / 'debian/changelog').read_text().startswith('pipewire (' + VERSION + ')'):
         raise SystemExit('Unexpected Ubuntu changelog/version')
     series = [line.split()[0] for line in (source / 'debian/patches/series').read_text().splitlines()
@@ -72,8 +80,8 @@ def main():
         if shutil.which(command) is None:
             raise SystemExit('Missing build dependency: ' + command)
     subprocess.run(['pkg-config', '--exists', 'alsa', 'libudev'], check=True)
-    build = work / 'build-alsa'
-    candidate = work / 'candidate'
+    build = work / ('build-alsa-scoped-v2' if args.g955n_scope else 'build-alsa')
+    candidate = work / ('candidate-scoped-v2' if args.g955n_scope else 'candidate')
     candidate.mkdir(mode=0o700, exist_ok=True)
     environment = dict(os.environ, DEB_BUILD_MAINT_OPTIONS='hardening=+all',
                        DEB_LDFLAGS_MAINT_APPEND='-Wl,-z,defs')
@@ -114,7 +122,9 @@ def main():
         package='libspa-0.2-modules', ubuntu_source_version=VERSION,
         upstream_backport='a8b9ce2050dfb3f91c19061562d0a161117c3ab8',
         feature='api.acp.disable-pro-audio', source_archives=SOURCE_HASHES,
-        patched_source_files=PATCHED_HASHES, ubuntu_patch_series=applied,
+        patched_source_files=checked_hashes, ubuntu_patch_series=applied,
+        hardware_open_scope=("g955n-rdma0-playback-ucm-v2" if args.g955n_scope else None),
+        scope_patch_sha256=(SCOPE_PATCH_SHA256 if args.g955n_scope else None),
         compiler_flags={key: environment[key] for key in ('CPPFLAGS', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS')},
         candidate_sha256=digest(plugin), original_plugin_sha256=digest(original),
         candidate_bytes=plugin.stat().st_size, exported_symbols=symbols,

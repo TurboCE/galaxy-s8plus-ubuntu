@@ -85,7 +85,9 @@ The manifest's `files` dictionary must contain exactly these absolute keys:
 Each value is that installed file's SHA-256. Other required fields are
 `feature: "api.acp.disable-pro-audio"` and
 `ubuntu_source_version: "1.0.5-1ubuntu3.3"`, plus
-`plugin_search_mode: "private-only"` and `original_plugin_sha256` matching the
+`plugin_search_mode: "private-only"`,
+`hardware_open_scope: "g955n-rdma0-playback-ucm-v2"`, the reviewed
+`scope_patch_sha256` and `patched_source_files`, and `original_plugin_sha256` matching the
 unchanged Ubuntu ALSA plugin. The generator also records the upstream commit
 and candidate hash. The UCM lookup symlink must resolve to the
 listed master file. The guard itself is installed root-owned executable and the
@@ -183,3 +185,166 @@ including the PipeWire core. Acceptance requires zero special-PCM opens over
 the entire interval, not only correct final profile metadata. If duplicates
 still escape policy, enforce the verified-card restriction before ACP probing
 rather than merely suppressing profiles after enumeration.
+
+### Scoped PCM candidate (not installed)
+
+`patches/0002-g955n-pcm-open-scope.patch` adds a second boundary below
+WirePlumber's mutable object names. Apply it after 0001 to the authenticated
+Ubuntu source. The standalone `g955n-scope.h` is the exact header included in
+that patch, not a separately installed runtime file.
+
+The dedicated candidate requires a readable DT model containing SM-G955N.
+Before ACP discovery it queries ALSA **control-card INFO**, requiring all four
+primary identity fields: driver `Exynos8895-Made`, card ID `Exynos8895Mader`, name
+and longname `Exynos8895-Madera`. A partial identity match is an error. Primary
+ACP forces UCM, disables Pro Audio, fixes the probe rate to 48000 and rejects
+UCM failure before generic fallback. The exact debug-card driver/name/longname
+`abox_dump` and ID `aboxdump` are rejected before ACP profiling.
+
+Both production `snd_pcm_open` entry points, ACP `alsa-util.c` and runtime
+`alsa-pcm.c`, additionally validate the actual control-card identity **before**
+opening the requested PCM. Protected primary hardware accepts only PCM 0,
+subdevice 0, playback. Capture, CALL, VTS and realtime PCM addresses are refused.
+DSP dump and unknown/external cards are refused pending separate qualification.
+This dedicated development build refuses ALSA aliases and
+plug wrappers on this handset because they can resolve to a protected card
+behind another name; the verified UCM speaker's direct hardware string remains
+supported. Model/identity/permission errors reject the request rather than
+falling back. This is not a general-purpose upstream ALSA policy.
+
+Every requested production open has a `G955N_PCM_SCOPE` journal line **before**
+`snd_pcm_open_lconf`, including rejected attempts. Fields include origin (`acp` or
+`runtime`), PID, per-origin sequence, actual control-card number, parsed PCM,
+direction, hardware scope, policy result and requested device. A zero result
+means permission to attempt the isolated open, not successful playback. Unresolvable identity
+is explicitly card=-1; this is not reported as a verified card. ACP initialization
+also logs its hardware scope. These logs permit startup-wide attribution and
+counts; no PCM contents or microphone audio are collected.
+
+Control resolution uses a private minimal `ctl.g955n_native` type-hw
+configuration via `snd_ctl_open_lconf`. PCM open uses a separate private minimal
+`pcm.g955n_native` type-hw configuration via `snd_pcm_open_lconf`, with the actual
+control INFO card number and only the validated PCM/subdevice. Global ALSA
+configuration, `pcm.hw` redefinition, user hooks and aliases cannot redirect
+these calls. Pure control `snd_ctl_pcm_info` additionally requires ID
+`RDMA0 (*)`, empty name, playback/card/device/subdevice/count matching the saved
+`/proc/asound/card0/pcm0p/info` (card0/device0/sub0/count1). The pinned kernel
+PCM_INFO ioctl copies metadata without DPCM startup or HW_PARAMS.
+
+The launcher also clears inherited ALSA_* overrides, pins the default system
+ALSA configuration and passwd HOME/XDG directory for UCM/mixer setup, and refuses
+per-user .asoundrc or .config/alsa/asoundrc. These checks supplement the isolated
+PCM/control roots; they are not the sole PCM boundary.
+
+The C test `test-g955n-scope.c` supplies mock implementations of every ALSA
+control/config/PCM call and does not link libasound. It verifies no global
+snd_ctl_open/snd_pcm_open is called, including with a hostile ALSA_CONFIG_PATH.
+`test-g955n-config.c` separately exercises only the real configuration parser
+and checks the three minimal roots, with no control/PCM API calls. It covers primary playback allow,
+32 denied capture addresses, unsupported playback/debug paths, aliases,
+malformed/overflow addresses, inconsistent card identity, permission failure, wrong PCM identity, unknown cards,
+and a nonmatching model. Its only file is a temporary model fixture, removed at
+exit. Native compilation uses actual ALSA headers, `-Wall -Wextra -Werror`.
+No production factory/plugin is loaded by this test.
+
+Keep the original reviewed source/build/candidate intact. Create a separate
+HOME `pipewire-1.0.5-scoped-v2` source copy, apply 0002, and run
+`build-alsa-plugin-native.py --g955n-scope`. It uses `build-alsa-scoped-v2` and
+`candidate-scoped-v2`, verifies all source/archive/scope-patch hashes and preserves
+the complete 31-patch Ubuntu series. Build metadata adds
+`hardware_open_scope=g955n-rdma0-playback-ucm-v2` and `scope_patch_sha256`.
+The candidate manifest generator and guard now require these fields, so the
+old Pro-only build cannot satisfy the revised launcher. Installing the revised
+launcher, plugin, candidate rules and corresponding manifest is a separate
+root-reviewed operation; these source/build steps do not change the installed
+prefix or start an audio service. A successful build/test is not a live claim
+that all unsafe kernel entry paths are fixed.
+
+Stable pre-rule matching evidence: Ubuntu's `spa/plugins/alsa/alsa-udev.c:543–547`
+emits `device.bus-path` from udev `ID_PATH` into the object properties before
+`spa_device_emit_object_info`; card name/longname are emitted at lines 526–529.
+WirePlumber's `monitors/alsa.lua:209–230` changes only `device.name` for
+deduplication, then `rulesApplyProperties` at line 279 receives the original
+bus path. The saved trial device has bus path `platform-sound`; the saved debug
+card has `platform-samsung-abox-dump.20`. Candidate matching uses these stable
+pre-rule identities rather than the potentially suffixed presentation name.
+
+Historical v1 isolated build validation (before its incomplete trial): native
+`candidate-scoped/build.json` records ELF SHA-256
+`4c44529fc5599b8069dd76653b29c8eeabc7c11d0bff91fe0280963a3984200b`
+(2,959,088 bytes), scope-patch SHA-256
+`434c849ca354e5a5611ab8519bd9ffae197f5df127d21cbb610a72269e01079b`.
+The copied private host artifact matches that hash. Both mocked policy/lconf
+and real parser-only tests passed. ELF exported symbols match the Ubuntu
+plugin; RELRO/BIND_NOW/NX stack remain enabled and no RPATH/RUNPATH is present.
+ELF imports `snd_pcm_open_lconf`, with no `snd_pcm_open` import. Existing
+control/mixer routines still import `snd_ctl_open`; scoped identity resolution
+uses `snd_ctl_open_lconf`. The installed stock and private Pro-only plugin
+hashes remained unchanged during build and verification. No daemon, production
+plugin factory or physical PCM was started by this work.
+
+### UCM namespace correction, v2
+
+The root-coordinated muted v1 trial lasted 21.2 seconds without a reset. It
+loaded the expected private plugin in both relevant processes and attempted
+`_ucm0001.hw:Exynos8895Mader,0` and `_ucm0002.hw:Exynos8895Mader,0`. V1 refused
+those names before opening any PCM. The result was **Off only, no HiFi and no
+sink**; zero special-PCM opens demonstrates containment, not working audio.
+Evidence is privately retained under `artifacts/scoped-quiet-trial-evidence`.
+
+ALSA 1.2.11 [`src/ucm/main.c:668`](https://github.com/alsa-project/alsa-lib/blob/v1.2.11/src/ucm/main.c#L668)
+adds `_ucm%04X.` to local-configuration PCM names. Although printf's width is a
+minimum, the actual consumer
+[`uc_mgr_alibcfg_by_device`](https://github.com/alsa-project/alsa-lib/blob/v1.2.11/src/ucm/utils.c#L837)
+requires a dot at byte eight, parses exactly four hexadecimal characters, and
+rejects values outside 0..0xffff. V2 accepts exactly one such canonical generated
+namespace: `_ucm` + four uppercase hex digits + `.` immediately followed by
+`hw:`. It deliberately rejects lowercase/noncanonical prefixes, long/truncated
+IDs, nested namespaces and aliases. No UCM namespace is looked up or trusted as
+authority: only its decoration is removed, after which the full independent
+control-card/PCM INFO/direction policy and numeric private lconf open remain.
+
+The extended mock tests cover both observed IDs, a hexadecimal ID, the 16-bit
+limit, plain addresses, malformed prefixes, other cards, capture and PCM/subdevice
+redirection. Every accepted form must reach the same literal numeric RDMA0
+lconf; every denied form must leave the mock open count unchanged. Global
+snd_ctl_open/snd_pcm_open calls must remain zero with a hostile configuration
+environment. No real PCM is opened by these tests.
+
+The v2 source/build/candidate directories are separate from v1 and use attestation
+`hardware_open_scope=g955n-rdma0-playback-ucm-v2`. The host guard and manifest
+generator require that reviewed v2 field and updated source/patch/plugin hashes.
+Installation and activation remain separate reviewed operations. The live
+checkpoint below qualifies bounded metadata probing only; acoustic, microphone
+and kernel DMA-fault acceptance remain separate.
+
+The completed v2 native build candidate is
+`~/g955n-pipewire-build/candidate-scoped-v2/libspa-alsa.so`, SHA-256
+`f1ac9da4dac0d462f0ccaa6807d0b8dcacb90c40d8cb4cf3ec67c91a453426a8`
+(2,960,888 bytes); scope patch SHA-256
+`8f2edae1cfbe22f243011f691eb20eebe8a563f3f2347141297f8aa3f867031a`.
+Mock UCM/full-policy/global-open-zero tests and real parser-only tests passed;
+all 31 Ubuntu patches and symbol ABI are preserved. The copied host ELF and
+source/patch pins match its build record. Its only PCM-open import is
+`snd_pcm_open_lconf`. Raw build/test evidence stays privately in
+`artifacts/pipewire-plugin-scoped-v2/`.
+
+### Installed v2 quiet checkpoint and core guard
+
+The reviewed v2 binary is installed in the private SPA tree, with an updated
+root-owned manifest and all four runtime UCM Speaker Gain values fixed at 0.
+A bounded 21.2-second greeter trial exported Off/HiFi and the normal speaker
+sink, no capture node. Both WirePlumber and the actual PipeWire core mapped
+only the reviewed private ALSA plugin. Full-interval open/openat traces in both
+processes contain only `/dev/snd/pcmC0D0p`; no call/realtime/VTS/capture PCM was
+opened. Gain stayed 0, the boot stayed unchanged, and every test audio engine
+was stopped. VTS mixer-control reads are not VTS PCM opens. This is containment
+and profile integration evidence, not audible playback or a kernel-fault cure.
+
+The launcher also accepts `--pipewire` to apply the same manifest/configuration
+guard and private-only SPA root to the actual PCM engine. The separate
+`10-g955n-validated-core.conf` user-service drop-in selects that mode. A default
+core must not load the stock unscoped plugin after the policy daemon exports a
+node. Both drop-ins and the launcher are staged by image finalization; an image
+without the reviewed binary/manifest fails closed rather than probing hardware.
+Global WirePlumber activation remains masked until fuller qualification.

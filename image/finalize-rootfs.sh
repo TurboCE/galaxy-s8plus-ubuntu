@@ -8,12 +8,18 @@ tar -C /source/image/rootfs-overlay -cf - . | tar -C "$R" --keep-directory-symli
 # Broad ACP probing still reaches unsafe Abox endpoints. New images must retain
 # isolation until a separately reviewed runtime trial qualifies the replacement.
 test "$(readlink "$R/etc/systemd/user/wireplumber.service")" = /dev/null
+# Both session policy and the actual PCM engine must use the same guarded SPA
+# tree. Missing candidate/manifest makes startup fail closed on a fresh image.
+install -D -m 755 /source/compat/pipewire/g955n-wireplumber "$R/usr/local/libexec/g955n-wireplumber"
+install -D -m 644 /source/compat/pipewire/10-g955n-validated-plugin.conf "$R/etc/systemd/user/wireplumber.service.d/10-g955n-validated-plugin.conf"
+install -D -m 644 /source/compat/pipewire/10-g955n-validated-core.conf "$R/etc/systemd/user/pipewire.service.d/10-g955n-validated-plugin.conf"
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
 chmod 755 "$R/usr/local/sbin/g955n-grow-root"
 chmod 755 "$R/usr/local/sbin/g955n-android-bsp"
 chmod 755 "$R/usr/local/sbin/g955n-fb-display"
 chmod 755 "$R/usr/local/sbin/g955n-location-hub"
-chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service serial-getty@ttyGS0.service
+chmod 755 "$R/usr/local/sbin/g955n-kernel-evidence"
+chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service g955n-kernel-evidence.service serial-getty@ttyGS0.service
 chroot "$R" dconf update
 chroot "$R" systemctl set-default graphical.target
 if [ -s /inputs/ubuntu-password ]; then

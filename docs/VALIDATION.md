@@ -36,7 +36,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Partial: LHD/MCU initialized and 220 native IIO records each with changing payloads/increasing timestamps; controlled motion, units, axes and desktop integration pending |
 | Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, proximity, light and other present sensors, calibration | Incomplete: ambient light capture only one zero-count event; no physical response acceptance |
 | Cameras | Camera service dump collected privately | Front/rear preview, capture, video, autofocus and flash | Not tested |
-| Audio | Audio service dump collected privately | Speaker, earpiece, microphones, headphone jack and routing | Partial: normal RDMA0 2-second PCM progress passed, acoustic check postponed; microphone/headphone routing untested. Broad ACP probing caused Abox panic and is currently isolated. Quiet guarded trial exposed only Off/HiFi profiles but still opened special PCMs; replacement not qualified |
+| Audio | Audio service dump collected privately | Speaker, earpiece, microphones, headphone jack and routing | Partial: normal RDMA0 2-second PCM progress passed, acoustic check postponed. Installed v2 scoped plugin exported Off/HiFi/speaker in a muted 21-second trial; both core/policy traces opened only pcmC0D0p. Default policy remains masked; microphone/headphone/kernel-fault acceptance pending |
 | Charging / battery / thermals | Power service dump collected privately | Current/voltage/temp telemetry, controlled charge and thermal limits | Not tested |
 | CPU scaling / idle | No measured Android baseline | Both cluster frequency response, idle residency, unchanged governor and thermal policy | Partial: bounded CPU0/CPU4 load completed, both frequencies changed and both idle states advanced, policy unchanged, peak observed 54 C. Battery draw/full thermal/suspend qualification pending |
 | Suspend / resume | No Ubuntu evidence | Measured idle draw, wake sources, repeated resume with radio/GPU recovery | Not tested |
@@ -92,3 +92,25 @@ open diagnostic reached real HWBinder but timed out waiting for the absent
 graphics allocator 2.0 service. Its automatic start request was rejected rather
 than acknowledged artificially. No ION/Mali/display/audio/block nodes were
 exposed. This diagnoses dependencies, not accelerated desktop output.
+
+Stabilization checkpoint: patches 0022–0025 correct binary I/O error propagation,
+framebuffer offset mapping, success-message priority, and PHY-clock lookup/bounds.
+Their integrated BOOT candidate passes build/image checks but has not been
+deployed; do not attribute these fixes to running kernel 15. The camera
+firmware-selection lifecycle, L2 timeout recovery and full PCIe clock-failure
+unwind remain unresolved. Current and previous kernel evidence is saved privately
+with hashes; persistent journaling is installed without hiding priorities.
+
+The installed v2 audio scope additionally requires verified control/PCM INFO,
+rejects unvalidated endpoints, and resolves PCM through independent configuration
+instead of user-overridable aliases. A 21-second muted trial exposed Off/HiFi and
+the speaker sink; traces in both policy and core opened only pcmC0D0p. Both mapped
+the same reviewed private module. No microphone samples or playback samples were
+sent, no reset occurred, and the test services were stopped. Default policy stays
+masked pending broader qualification; this is not kernel DMA-fault acceptance.
+
+Later graphics runtime checkpoint: original allocator startup and exact HWBinder
+registration/termination passed after private inode permissions were corrected.
+Host namespace/process/property state was restored and host hwbinder permissions
+were unchanged. This used no ION/GPU/display/audio node and called no allocation
+method; it does not qualify desktop acceleration or camera/audio drivers.

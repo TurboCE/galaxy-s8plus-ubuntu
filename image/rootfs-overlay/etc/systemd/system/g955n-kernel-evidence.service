@@ -1,0 +1,18 @@
+[Unit]
+Description=Preserve SM-G955N early and previous kernel evidence
+After=local-fs.target systemd-journal-flush.service
+Before=display-manager.service
+ConditionPathExists=/proc/device-tree/model
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/g955n-kernel-evidence
+StateDirectory=g955n/kernel-evidence
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

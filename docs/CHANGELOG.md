@@ -431,3 +431,64 @@
   ASan/UBSan and ThreadSanitizer concurrent-table checks; the complete candidate
   compiled. It has not been deployed. L2 ACK timeout recovery remains a documented
   unresolved contract in an excluded proposal, not an automatically applied fix.
+
+### Driver stabilization candidates and quiet containment
+
+- Patch 0022 corrects FIMC binary I/O results: EOF/short read and zero-progress
+  write are failures, original negative errors are preserved, and positive
+  partial writes continue correctly. Actual-function ASan/UBSan fault injection
+  covered complete/short/EOF/error and caller-owned buffers. This does not supply
+  missing Android camera firmware selection or qualify camera operation.
+- Patch 0023 preserves DECON framebuffer mmap page offsets through the existing
+  dma-buf/ION bounds and protected-buffer checks. Non-ION cannot falsely return
+  mapping success. Actual-function offset/overflow/bounds/error models passed.
+  Offset-zero display behavior is retained; this does not add GPU scanout.
+- Patch 0024 classifies successful PCIe clock/L1SS/ACK events correctly without
+  removing clock calls or changing transitions. Nonzero clock results and real
+  handshake timeouts remain error messages; no global priority filter is used.
+- Patch 0025 checks the actual PHY-clock array slot and validates fixed-array
+  DT counts before indexing. The reproducible host actual-function harness
+  passed 25 ASan/UBSan cases and detects the uncorrected regression. Existing
+  enable/disable and optional panic policy remain byte-identical. Full PCIe
+  clock-failure ownership/IRQ/MMIO unwind is an excluded proposal, not a partial
+  rollback change that would introduce double disable or unclocked MMIO.
+- The complete candidate with 24 active patches compiled and its normal BOOT
+  image passed embedded-config, model, capacity/header/hash/footer checks. This
+  image is **not flashed**: live kernel 15 is unchanged. The existing initramfs
+  reboot helper cannot recover a panic before PID1/USB; automatic recovery is
+  not assumed merely because build or host timeout succeeds.
+  A fresh case-sensitive Linux export of the pinned kernel also accepted all
+  24 active patches in order with strict added-line whitespace checks.
+- Installed the reviewed private hardware-scoped ALSA plugin without replacing
+  Ubuntu libraries. V1 correctly refused special PCMs but also refused UCM's
+  namespace decoration and exported Off only. V2 handles the actual bounded UCM
+  prefix, then independently validates real card/PCM/direction and opens through
+  minimal private numeric ALSA configuration; user alias/configuration overrides
+  cannot redirect it. Independent source, ELF, mock, parser and fuzz checks pass.
+- A muted 21.2-second v2 trial exported Off/HiFi and the normal speaker sink.
+  Both core and policy mapped the reviewed private module; open/openat evidence
+  in both processes contains only pcmC0D0p. No unsupported PCM opened, no reset
+  occurred, all Speaker Gain observations remained 0, and audio test processes
+  were stopped. This qualifies bounded scope/profile probing, not audible audio,
+  microphone capture or a cure for the kernel DMA/firmware ownership defect.
+  Global WirePlumber remains masked. A separate guarded core launcher/drop-in
+  prevents a default PipeWire engine from loading the original unscoped module.
+  A second 21.24-second test started that core through its normal installed
+  drop-in, without a transient manager SPA override. Off/HiFi/speaker, both
+  private module maps and only pcmC0D0p opens passed again; gain stayed 0 and
+  all test engines were stopped. The test waits for the guard to exec the real
+  core rather than treating systemd's early simple-service activation as ready.
+- Added and installed root-private per-boot kernel evidence capture, preserving
+  raw current and previous last_kmsg with byte counts/hashes and explicit taint,
+  boot-start and incomplete-qualification fields. Atomic directory publication
+  prevents an interrupted capture masquerading as complete. The live oneshot,
+  private permissions and file hashes passed. Persistent journal files are now
+  present with a 256 MiB journal size limit and no severity suppression. The
+  current capture still has taint 512 and does not establish a clean boot.
+- Corrected private Android-runtime inode permissions, including read-only
+  property areas and a private graphics-group hwbinder node; host inode modes
+  were unchanged. The UID1000 permission-only test and a subsequent original
+  allocator registration lifecycle passed. Real manager-registered PID matched
+  the supervised child, termination/reap and registration disappearance passed,
+  and host state was restored. No ION or rendering device was exposed and no
+  buffer allocation/presentation was attempted; desktop GPU acceptance is pending.

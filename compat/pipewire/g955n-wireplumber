@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import pwd
 import stat
 import subprocess
 import sys
@@ -88,6 +89,10 @@ def check():
     manifest = json.loads(MANIFEST.read_text())
     if manifest.get('feature') != 'api.acp.disable-pro-audio':
         raise ValueError('Missing reviewed ALSA probe-control feature attestation')
+    if manifest.get('hardware_open_scope') != 'g955n-rdma0-playback-ucm-v2':
+        raise ValueError('Missing reviewed hardware PCM-open scope attestation')
+    if len(manifest.get('scope_patch_sha256', '')) != 64:
+        raise ValueError('Missing reviewed scope patch hash')
     if manifest.get('plugin_search_mode') != 'private-only':
         raise ValueError('Manifest does not attest to a private-only SPA search root')
     version = subprocess.check_output(
@@ -118,23 +123,43 @@ def check():
             or int.from_bytes(header[18:20], 'little') != 183):
         raise ValueError('Reviewed private plugin is not an AArch64 ELF64 library')
     trusted_regular(Path('/usr/bin/wireplumber'))
+    trusted_regular(Path("/usr/share/alsa/alsa.conf"))
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+    for path in (home / ".asoundrc", home / ".config/alsa/asoundrc"):
+        if path.exists() or path.is_symlink():
+            raise ValueError("Unreviewed per-user ALSA override: " + str(path))
 
 
 def main():
+    arguments = sys.argv[1:]
+    program = '/usr/bin/wireplumber'
+    if arguments[:1] == ['--pipewire']:
+        program = '/usr/bin/pipewire'
+        arguments = arguments[1:]
     try:
         check()
+        trusted_regular(Path(program))
     except Exception as error:
-        print('G955N WirePlumber guard refused startup: ' + str(error), file=sys.stderr)
+        print('G955N audio guard refused startup: ' + str(error), file=sys.stderr)
         return 78
-    if sys.argv[1:] == ['--check']:
-        print('Reviewed G955N plugin and card scope verified; WirePlumber not started')
+    if arguments == ['--check']:
+        print('Reviewed G955N plugin and card scope verified; audio engine not started')
         return 0
     environment = dict(os.environ)
+    # UCM/mixer setup also uses ALSA: remove inherited configuration/plugin
+    # overrides and require the reviewed default path with no per-user hooks.
+    for key in list(environment):
+        if key.startswith("ALSA_"):
+            environment.pop(key)
+    home = pwd.getpwuid(os.getuid()).pw_dir
+    environment["HOME"] = home
+    environment["XDG_CONFIG_HOME"] = str(Path(home) / ".config")
+    environment["ALSA_CONFIG_PATH"] = "/usr/share/alsa/alsa.conf"
     # Deliberately no colon-separated stock fallback: if the reviewed ALSA
     # module cannot load, fail rather than retrying the unsafe stock module.
     # Other plugin families use the individually checked stock directory links.
     environment['SPA_PLUGIN_DIR'] = str(PRIVATE_ROOT)
-    os.execve('/usr/bin/wireplumber', ['/usr/bin/wireplumber', *sys.argv[1:]], environment)
+    os.execve(program, [program, *arguments], environment)
 
 
 if __name__ == '__main__':

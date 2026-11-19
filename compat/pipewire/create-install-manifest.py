@@ -21,7 +21,9 @@ def main():
     record = json.loads(args.build_record.read_text())
     if (record.get('ubuntu_source_version') != '1.0.5-1ubuntu3.3'
             or record.get('feature') != 'api.acp.disable-pro-audio'
-            or not record.get('exported_symbol_abi_matches')):
+            or not record.get('exported_symbol_abi_matches')
+            or record.get('hardware_open_scope') != 'g955n-rdma0-playback-ucm-v2'
+            or len(record.get('scope_patch_sha256', '')) != 64):
         raise SystemExit('Build record does not match the reviewed candidate')
     stage = args.stage_root.resolve()
     hashes = {}
@@ -35,7 +37,10 @@ def main():
         feature=record['feature'], upstream_backport=record['upstream_backport'],
         candidate_sha256=record['candidate_sha256'],
         original_plugin_sha256=record['original_plugin_sha256'],
-        plugin_search_mode='private-only', files=hashes), indent=2))
+        plugin_search_mode='private-only',
+        hardware_open_scope=record['hardware_open_scope'],
+        scope_patch_sha256=record['scope_patch_sha256'],
+        patched_source_files=record['patched_source_files'], files=hashes), indent=2))
 
 
 if __name__ == '__main__':

@@ -1,0 +1,73 @@
+#!/usr/bin/python3
+"""Save private early-boot/previous-kernel evidence without changing the kernel."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import platform
+import re
+import subprocess
+import tempfile
+import time
+
+
+def main():
+    if (os.geteuid() or 'g955n-ubuntu' not in platform.release()
+            or 'SM-G955N' not in Path('/proc/device-tree/model').read_text()):
+        raise SystemExit('Requires native SM-G955N Ubuntu')
+    boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    if not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', boot):
+        raise SystemExit('Invalid kernel boot identity')
+    os.umask(0o077)
+    parent = Path('/var/lib/g955n/kernel-evidence')
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for path in (parent, *parent.parents):
+        mode = path.stat()
+        if path.is_symlink() or mode.st_uid != 0 or mode.st_mode & 0o022:
+            raise SystemExit('Evidence directory is not exclusively root-managed')
+    final = parent / boot
+    if final.exists():
+        if final.is_symlink() or not (final / 'manifest.json').is_file():
+            raise SystemExit('Unexpected evidence symlink')
+        print('Evidence for this boot already exists; preserving original capture')
+        return 0
+    # Publish the directory only after a complete manifest exists. An interrupted
+    # capture cannot masquerade as the completed capture for a subsequent run.
+    destination = Path(tempfile.mkdtemp(prefix='.' + boot + '.partial-', dir=parent))
+    report = dict(target='SM-G955N', kernel=platform.release(),
+                  capture_uptime_seconds=round(time.monotonic(), 3),
+                  kernel_taint_at_capture=int(Path('/proc/sys/kernel/tainted').read_text()),
+                  initial_capture_only=True, clean_boot_qualified=False, sources={})
+
+    def save(name, data, truncated=False):
+        with (destination / name).open('xb') as file:
+            file.write(data)
+        report['sources'][name] = dict(available=True, bytes=len(data),
+                                      sha256=hashlib.sha256(data).hexdigest(),
+                                      truncated=truncated)
+
+    try:
+        result = subprocess.run(['dmesg', '--raw'], capture_output=True, timeout=10)
+        if result.returncode == 0:
+            save('initial-dmesg.raw.txt', result.stdout[:8388608], len(result.stdout) > 8388608)
+            report['boot_start_present'] = b'Linux version ' in result.stdout[:8388608]
+        else:
+            report['sources']['initial-dmesg.raw.txt'] = dict(available=False, error='dmesg failed')
+    except (OSError, subprocess.TimeoutExpired):
+        report['sources']['initial-dmesg.raw.txt'] = dict(available=False, error='dmesg unavailable')
+    try:
+        with Path('/proc/last_kmsg').open('rb') as file:
+            data = file.read(8388609)
+        save('previous-last-kmsg.bin', data[:8388608], len(data) > 8388608)
+    except OSError:
+        report['sources']['previous-last-kmsg.bin'] = dict(available=False)
+    with (destination / 'manifest.json').open('x') as file:
+        json.dump(report, file, indent=2)
+        file.write('\n')
+    destination.rename(final)
+    print('Private kernel evidence saved; initial capture does not qualify a clean boot')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
