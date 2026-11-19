@@ -1135,3 +1135,20 @@ number. Core porting takes priority; USB-C HDMI/DisplayPort work is deferred and
 requires a new explicit instruction even after both porting projects complete.
 The latest source/data checks are62 host tooling tests plus the independent
 actual-function sanitizer/event fixtures. These do not certify phone hardware.
+
+
+### Matching-image panic decoding and logging-independent recovery proposal
+
+Added an offline retained-log decoder with compiled-banner/build-hash checks,
+boot segmentation, independently checked KASLR displacement and call-instruction
+attribution for stack-protector returns. Fourteen guard cases pass. The actual
+kernel27 capture resolves to the secondary safe-fault handler; the damaged
+kernel26 capture is refused. No raw device addresses/logs enter Git.
+
+Proposal32 repairs a concrete safe-fault path that skipped its existing watchdog
+request when optional snapshot logging was off, before its caller's terminal WFI.
+The original fails the actual-function disabled-logging fixture; the fixed
+handler and all eight enabled CPU paths pass. The actual modified AArch64 object
+compiles against read-only kernel29 inputs. It is an inactive recovery proposal,
+not deployed or an initiating-corruption fix. No deliberate hardware fault was
+triggered. Host tooling suite:76 tests pass; hardware acceptance remains open.

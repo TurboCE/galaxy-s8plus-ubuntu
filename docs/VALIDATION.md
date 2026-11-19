@@ -449,3 +449,14 @@ GPU-desktop power trial hard-hung; after manual recovery, a second repeated DPMS
 trial also hard-hung without physical input. Kernel26 is not stability-qualified.
 See kernel26-power-investigation.md for retained RCU fault-site evidence, KASLR
 handling, live host capture and the unqualified primary-QoS proposal30.
+
+
+### Offline fault attribution / recovery source check
+
+The matching-image decoder passes14 scope/relocation/input-preservation cases.
+It decodes actual kernel27's stack-check caller as the secondary safe handler
+and rejects damaged kernel26 input. Proposal32's actual disabled-logging
+watchdog path and eight enabled CPU paths pass sanitizer fixtures; the actual
+AArch64 object builds without changing kernel29. This is an inactive recovery
+source proposal. No new device pass, clean-kernel claim or primary corruption
+fix follows from these tests. See panic-decoder-and-safe-recovery.md.

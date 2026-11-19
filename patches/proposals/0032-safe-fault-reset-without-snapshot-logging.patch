@@ -1,0 +1,28 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PROPOSAL] Keep safe-fault watchdog recovery independent of logging
+
+The ARM64 safe-fault caller enters terminal WFI after this callback. Optional
+snapshot disablement must not skip the existing emergency watchdog request.
+Preserve the enabled-logging path and existing raw watchdog count. This is a
+recovery correction, not a fix for the initiating corruption or proof that it
+caused any observed device hang. Not in the automatic boot patch chain.
+
+--- a/drivers/trace/exynos-ss.c
++++ b/drivers/trace/exynos-ss.c
+@@ -2207,13 +2207,15 @@
+ 	size_t len;
+ 
+ 	if (unlikely(!ess_base.enabled))
+-		return;
++		goto reset;
+ 
+ 	strncat(text, cpu_num[cpu], 1);
+ 	len = strnlen(text, SZ_32);
+ 
+ 	exynos_ss_report_reason(ESS_SIGN_SAFE_FAULT);
+ 	exynos_ss_dump_panic(text, len);
++reset:
++	/* Fault recovery must not depend on optional snapshot logging. */
+ 	s3c2410wdt_set_emergency_reset(100);
+ 
+ }
