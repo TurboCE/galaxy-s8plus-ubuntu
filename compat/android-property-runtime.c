@@ -22,6 +22,7 @@ extern uint32_t __system_property_area_serial(void);
 extern int __system_property_get(const char *, char *);
 extern int android_property_serve(int, char **);
 extern int android_property_namespace_selftest(void);
+extern int android_property_permissions_selftest(void);
 
 static int file_contains(const char *path, const char *expected) {
     char buffer[512] = {0};
@@ -44,6 +45,7 @@ int main(int argc, char **argv, char **environment) {
         printf("Real shared property: name=%s value=%s serial=%u\n", argv[2], value, __system_property_area_serial());
         return length > 0 ? 0 : 1;
     }
+    if (argc == 2 && !strcmp(argv[1], "--permissions-selftest")) return android_property_permissions_selftest();
     if (argc == 2 && !strcmp(argv[1], "--namespace-selftest")) return android_property_namespace_selftest();
     if (argc >= 2 && !strcmp(argv[1], "--serve")) return android_property_serve(argc, argv);
     if (argc != 2 || strcmp(argv[1], "--abi-selftest")) {

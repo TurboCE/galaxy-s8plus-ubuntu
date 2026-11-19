@@ -41,7 +41,7 @@ def bind_readonly(source, destination):
 
 
 def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
-                  namespace_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts):
+                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts):
     libc = ctypes.CDLL(None, use_errno=True)
     # If the outer supervisor disappears, killing namespace PID 1 also kills
     # all of its descendants and releases their private mounts.
@@ -57,6 +57,9 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
     run('mount', '-t', 'tmpfs', '-o', 'mode=0700,size=64m', 'g955n-private-run', '/run')
     root = Path('/run/g955n-android-root')
     root.mkdir(mode=0o755)
+    root.chmod(0o755)  # Outer host staging keeps umask077; chroot / must be traversable.
+    (root / 'android').mkdir(mode=0o755)
+    (root / 'android').chmod(0o755)
     context_stage = Path('/run/g955n-stock-service-contexts')
     context_stage.mkdir(mode=0o700)
     for name, payload in contexts.items():
@@ -83,15 +86,24 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
     bind_readonly(system, root / 'android/system')
     for name in ('data', 'tmp', 'run', 'dev'):
         (root / name).mkdir(mode=0o755)
+        (root / name).chmod(0o755)
     (root / 'tmp').chmod(0o1777)
     run('mount', '-t', 'tmpfs', '-o', 'mode=0755,size=16m', 'g955n-private-dev', str(root / 'dev'))
     for name, mode, number in devices:
         target = root / 'dev' / name
         target.parent.mkdir(parents=True, exist_ok=True)
         os.mknod(target, stat.S_IFCHR | stat.S_IMODE(mode), number)
+        target.chmod(stat.S_IMODE(mode))  # Preserve only this new private node's original access mode.
+        if name == 'hwbinder':
+            # Private RPC only: root manager/query plus the assessed graphics
+            # GID1003 service. Do not chmod/chown the original native node.
+            os.chown(target, 0, 1003)
+            target.chmod(0o660)
     properties = root / 'dev/__properties__'
     properties.mkdir(mode=0o711)
+    properties.chmod(0o711)
     (root / 'dev/socket').mkdir(mode=0o755)
+    (root / 'dev/socket').chmod(0o755)
     path = properties / 'property_info'
     path.write_bytes(info_bytes)
     path.chmod(0o644)
@@ -112,7 +124,9 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
     if not any(' /proc ro' in line and ' - proc ' in line for line in mounts.splitlines()):
         raise SystemExit('Fresh read-only procfs missing')
     print('namespace_pid=1 fresh_proc_readonly=yes host_proc_hidden=yes', flush=True)
-    if namespace_selftest:
+    if permissions_selftest:
+        arguments = [str(runtime), '--permissions-selftest']
+    elif namespace_selftest:
         arguments = [str(runtime), '--namespace-selftest']
     else:
         arguments = [str(runtime), '--serve', '/system/bin/hwservicemanager', str(seconds)]
@@ -165,6 +179,8 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--run-trial', action='store_true')
     mode.add_argument('--namespace-selftest', action='store_true')
+    mode.add_argument('--permissions-selftest', action='store_true',
+                      help='Only private property-area initialization plus unprivileged file/exec-access checks; no manager/HAL')
     parser.add_argument('--runtime', type=Path)
     parser.add_argument('--property-info', type=Path)
     parser.add_argument('--stock-contexts', type=Path, help='Private selected context files/manifest from verified stock BOOT')
@@ -172,7 +188,7 @@ def main():
     parser.add_argument('--include-display-devices', action='store_true',
                         help='Expose display nodes only for a separately coordinated HWC trial; no open here')
     args = parser.parse_args()
-    if not (args.run_trial or args.namespace_selftest):
+    if not (args.run_trial or args.namespace_selftest or args.permissions_selftest):
         parser.print_help()
         return 0
     if not args.runtime or not args.property_info or not 1 <= args.seconds <= 300:
@@ -254,7 +270,7 @@ def main():
     if not pid:
         try:
             prepare_child(runtime, info_bytes, system, devices, library_dirs, args.seconds,
-                          args.namespace_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts)
+                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts)
         except BaseException as error:
             print('Private namespace setup failed: ' + str(error), flush=True)
             os._exit(1)

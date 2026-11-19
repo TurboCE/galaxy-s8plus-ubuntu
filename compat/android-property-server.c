@@ -105,6 +105,54 @@ static int private_namespace(void) {
     return fresh_proc && (dev || (props && sockets));
 }
 
+
+/* All callers first prove PID1/private tmpfs dev; these are never host paths.
+ * Android property areas are originally created 0444. The outer supervisor's
+ * intentional umask077 must not make shared read-only data root-only (0400).
+ */
+static int publish_private_property_read_access(void) {
+    return chmod("/dev/__properties__/properties_serial", 0444) ||
+           chmod("/dev/__properties__/u:object_r:default_prop:s0", 0444);
+}
+
+int android_property_permissions_selftest(void) {
+    if (!private_namespace() || __system_property_area_serial() != UINT32_MAX) return 1;
+    __system_property_area_init();
+    if (__system_property_area_serial() == UINT32_MAX || publish_private_property_read_access()) return 1;
+    /* No property values, readiness, socket listener, manager or HAL is seeded. */
+    int child = fork();
+    if (child < 0) return 1;
+    if (!child) {
+        extern int setgroups(unsigned long, const unsigned int *), setgid(unsigned int), setuid(unsigned int);
+        extern int execl(const char *, const char *, ...);
+        const unsigned int groups[] = {1026};
+        if (setgroups(1, groups) || setgid(1003) || setuid(1000)) _exit(125);
+        execl("/usr/bin/python3", "python3", "-c",
+              "import os,stat,json,pathlib; "
+              "paths=['/','/android','/data','/run','/dev','/dev/socket','/dev/__properties__',"
+              "'/dev/__properties__/property_info','/dev/__properties__/properties_serial',"
+              "'/dev/__properties__/u:object_r:default_prop:s0']; "
+              "modes={p:oct(stat.S_IMODE(os.stat(p).st_mode)) for p in paths}; "
+              "checks={'root':modes['/']=='0o755','properties_dir':modes['/dev/__properties__']=='0o711',"
+              "'areas_readonly':all(modes[p]=='0o444' for p in paths[-2:]),"
+              "'properties_readable':all(os.access(p,os.R_OK) for p in paths[-3:]),"
+              "'exec_access':all(os.access(p,os.X_OK) for p in ['/vendor/bin/hw/android.hardware.graphics.allocator@2.0-service','/system/bin/linker64']),"
+              "'std_binder_rw':all(os.access(p,os.R_OK|os.W_OK) for p in ['/dev/null','/dev/hwbinder'])}; "
+              "print(json.dumps(dict(uid=os.getuid(),gid=os.getgid(),groups=os.getgroups(),modes=modes,checks=checks,"
+              "device_modes={p:dict(mode=oct(stat.S_IMODE(os.stat(p).st_mode)),uid=os.stat(p).st_uid,gid=os.stat(p).st_gid) for p in ['/dev/null','/dev/hwbinder']})),flush=True); "
+              "assert all(checks.values()); "
+              "payloads={p:len(pathlib.Path(p).read_bytes()[:128]) for p in paths[-3:]}; "
+              "print(json.dumps(dict(uid=os.getuid(),gid=os.getgid(),groups=os.getgroups(),modes=modes,read_lengths=payloads,"
+              "original_allocator_exec_access=True,hal_executed=False,manager_started=False),sort_keys=True))",
+              (char *)0);
+        _exit(126);
+    }
+    int status = 0;
+    if (waitpid(child, &status, 0) != child || status != 0) return 1;
+    puts("Private property/exec-permissions selftest passed; no manager/HAL/hardware device opened");
+    return 0;
+}
+
 int android_property_namespace_selftest(void) {
     if (!private_namespace()) return 1;
     if (__system_property_area_serial() != UINT32_MAX) return 1;
@@ -214,6 +262,10 @@ int android_property_serve(int argc, char **argv) {
         return 1;
     }
     if (initialized) puts("Property area exists with failed security-label setup; namespace is diagnostic only");
+    if (publish_private_property_read_access()) {
+        puts("Private read-only property area permissions failed");
+        return 1;
+    }
     seed_file("/system/build.prop");
     seed_file("/vendor/build.prop");
     if (set_property("ro.property_service.version", "2")) return 1;

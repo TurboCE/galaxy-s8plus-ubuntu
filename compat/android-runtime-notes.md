@@ -290,7 +290,8 @@ The source now queries libc.prctl(PR_GET_NO_NEW_PRIVS=39) and requires an actual
 result of 1; a missing proc field is never defaulted to success. Once verified,
 NNP is inherited immutably by the service; an available child proc field is also
 checked. Pure tests cover missing proc metadata with actual 0/1/-1 and wrong PID
-registration evidence. The corrected HAL trial has not yet been run.
+registration evidence. The next attempt and the eventual successful registration
+checkpoint are recorded below; none tested buffer allocation or rendering.
 
 Private evidence is under artifacts/hidl-query/. The post-trial host had no stock
 manager/allocator process, no property directory, identical host namespace IDs
@@ -298,3 +299,62 @@ and mountinfo hash, and the same boot ID. Taint was 512, and recent warning-leve
 kernel journal still contained unsupported-syscall register dumps (notably
 statx/faccessat2). This checkpoint does not claim clean kernel logs, a driver
 fault diagnosis, successful allocator startup or accelerated GNOME output.
+
+
+## Private permissions and actual allocator registration checkpoint
+
+The next corrected 40.698-second runtime passed NNP and real before/after
+registration-absence checks, but allocator exec failed with EACCES before a
+service PID was created. This was private runtime setup, not an allocator-driver
+fault. The supervisor's intentional umask077 had reduced requested chroot and
+property-directory modes to 0700 and Bionic's originally 0444 property-area files
+to 0400. Copying native /dev/hwbinder permissions also left a private 0600
+root:root node inaccessible to the actual Android service identity.
+
+Only newly created private inode modes were corrected: chroot /, /android,
+/data,/run,/dev/socket 0755, property directory 0711, property_info 0644 and the
+two shared property areas 0444. The outer namespace's /run and context staging
+remain 0700. No bind-mounted stock/native inode is chmodded. Standard private
+nodes retain their assessed native access mode, and only the private hwbinder
+node is root:GID1003 mode0660, allowing the root manager/query and the expected
+graphics-group service. The original host hwbinder stays 0600 root:root.
+The original stock BOOT ueventd used 0666 root:root for Binder nodes; the private
+0660 diagnostic permission is narrower and does not change a host device.
+
+A dedicated --permissions-selftest initializes only a private real Bionic
+property area, without any property-value/readiness seed, listener, manager or
+HAL. A child actually drops to UID1000, primary GID1003 and supplementary
+GID1026, executes the plain native Python interpreter and verifies inode modes,
+reads metadata/area bytes, checks original allocator/linker execute access and
+standard/hwbinder read-write access without opening the hardware node. This
+completed with all checks true and exact host namespace/mount/property-state
+restoration. Failed intermediate access tests and their evidence are retained.
+
+The following one authorized actual allocator trial then completed in 40.694
+seconds, with both property_runtime_passed and allocator_registration_passed
+true. Before activation, the host/native hashes of the runtime, namespace helper,
+query ELF and two controller scripts matched, and the real Bionic runtime ABI
+selftest passed. The registered original allocator was namespace PID34, matched
+through host NSpid/PPid metadata to host PID24936. Actual credentials were
+UID1000/GID1003/supplementary1026, effective/permitted capabilities zero, the
+assessed bounding set, and NNP inherited from a controller that read actual
+prctl=1. The vendor executable, allocator implementation, stock gralloc,
+libion_exynos and shared properties appeared in its private maps.
+
+The first exact-instance query saw absence; the next saw real hwbinder
+registration with manager-recorded caller PID34 matching expected PID34.
+IBase::getDebugInfo returned -1 exactly as a stock user build permits, and was
+not fabricated or mistaken for the registration PID. The service was observed
+for 0.260 seconds and deliberately terminated with SIGTERM (exit -15), reaped,
+and its actual registration disappeared. No remaining service process group,
+manager/helper, host property area or private namespace remained. Host namespace
+IDs and the complete mountinfo SHA matched the baseline. This proves bounded
+startup/registration/cleanup, not ten-second endurance.
+
+ION/GPU/display/audio/block nodes stayed absent, no allocation method was called,
+and no HWC/display service was started. This result removes the previously
+unstarted-allocator dependency but does not demonstrate successful allocation,
+HWC open, GPU scanout, GNOME acceleration or clean overall kernel logs. No BOOT
+write or reboot occurred. Private evidence is
+artifacts/hidl-query/allocator-no-ion-first-exec-trial-kernel15.json and
+private-permissions-final-selftest-kernel15.json. No further HAL trial is running.
