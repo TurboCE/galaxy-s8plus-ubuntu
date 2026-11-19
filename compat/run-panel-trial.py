@@ -31,7 +31,7 @@ PREFIX=Path('/home/ubuntu/g955n-compositor')
 UNIT='g955n-panel-trial.service'
 FILES={'run-panel-trial.py','run-cpu-buffer-trial.py','allocator-cpu-buffer-trial.py',
        'allocator-no-ion-trial.py','run-property-trial.py','android-runtime-namespace.py',
-       'android-property-runtime','headless-buffer-probe'}
+       'android-property-runtime','headless-buffer-probe','host-pid-gui.py'}
 COMMANDS=('/system/bin/servicemanager','/system/bin/hwservicemanager',
  '/vendor/bin/hw/android.hardware.graphics.allocator@2.0-service',
  '/vendor/bin/hw/android.hardware.graphics.composer@2.1-service',str(PREFIX/'bin/tinywl-g955n-candidate'),'/usr/bin/es2gears_wayland',str(BASE/'es2gears-wayland-safe'),str(BASE/'x11-pixel-probe'))
@@ -58,7 +58,7 @@ def build_id():
 def review(path,sha):
  if digest(path)!=sha:raise RuntimeError('Review digest changed')
  data=json.loads(path.read_text())
- if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s') or set(data.get('files',{}))!=FILES:
+ if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s','exclusive-hwc-panel-host-gnome20s') or set(data.get('files',{}))!=FILES:
   raise RuntimeError('Wrong/incomplete exclusive panel scope')
  for name,expected in data['files'].items():
   p=BASE/name
@@ -93,11 +93,15 @@ def review(path,sha):
    if digest(BASE/'trace-client-gl.so')!=data['client_preload_sha256']:raise RuntimeError('Changed client diagnostic')
    package['client_preload']=True
  if data.get('scope')=='exclusive-hwc-panel-gtk20s' and data.get('client_probe')!='gtk4-zenity':raise RuntimeError('GTK20 scope requires its fixed client')
- if data.get('scope') in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s') and data.get('client_probe')!='gnome-x11':raise RuntimeError('GNOME20 scope requires its fixed client')
- if bool(data.get('native_system_bus'))!=(data.get('scope') in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s')):raise RuntimeError('Native system bus is restricted to explicit GNOME20 scope')
+ if data.get('scope') in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s','exclusive-hwc-panel-host-gnome20s') and data.get('client_probe')!='gnome-x11':raise RuntimeError('GNOME20 scope requires its fixed client')
+ if bool(data.get('native_system_bus'))!=(data.get('scope') in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s','exclusive-hwc-panel-host-gnome20s')):raise RuntimeError('Native system bus is restricted to explicit GNOME20 scope')
  if data.get('touch_input'):
-  if data.get('scope') not in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s') or digest(BASE/'seatd')!=data.get('seatd_sha256'):raise RuntimeError('Touch requires reviewed GNOME scope and seat broker')
+  if data.get('scope') not in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s','exclusive-hwc-panel-host-gnome20s') or digest(BASE/'seatd')!=data.get('seatd_sha256'):raise RuntimeError('Touch requires reviewed GNOME scope and seat broker')
   package['touch_input']=True
+ if bool(data.get('host_pid_client'))!=(data.get('scope')=='exclusive-hwc-panel-host-gnome20s'):raise RuntimeError('Host PID entry requires its separate reviewed scope')
+ if data.get('host_pid_client'):
+  if not data.get('touch_input'):raise RuntimeError('Host GUI requires reviewed native input')
+  package['host_pid_client']=True
  package['native_system_bus']=data.get('native_system_bus') is True
  if data.get('scope')=='exclusive-hwc-panel-gnome60s' and not data.get('touch_input'):raise RuntimeError('GNOME60 scope requires its reviewed touchscreen')
  if data.get('gnome_geometry'):
@@ -175,6 +179,11 @@ def inner(boot,package):
  # Enumerate only after proving private PID/proc provenance.
  def private_pids():return {int(p.name) for p in Path('/proc').glob('[0-9]*') if p.is_dir()}
  inherited_private=private_pids()
+ host_gui=None
+ if package.get('host_pid_client'):
+  if not isinstance(package.get('host_gui_fd'),int):raise RuntimeError('Missing inherited host GUI channel')
+  host_gui=SourceFileLoader('panel_host_gui',str(BASE/'host-pid-gui.py')).load_module()
+  host_socket=socket.socket(fileno=package['host_gui_fd']);host_socket.settimeout(4)
  parent=os.getpid();processes=[];report={'panel_presented':False,'desktop_qualified':False};handles=[]
  binary=BASE/'headless-buffer-probe'
  def listing():
@@ -183,6 +192,11 @@ def inner(boot,package):
   return p.stdout
  def launch(command,name,system=False,env=None):
   log=tempfile.TemporaryFile(dir='/run');handles.append(log)
+  if name=='client' and host_gui:
+   try:p=host_gui.RemoteGui(host_socket,env,log)
+   except Exception:
+    report['host_gui_setup_stdout']=legacy.read_log(log);raise
+   processes.append((name,p,log));return p
   p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,close_fds=True,
    cwd='/',preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name in ('compositor','xwayland','client') else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
   processes.append((name,p,log));return p
@@ -304,7 +318,7 @@ def inner(boot,package):
   report['display_irq_progressed']=all(report['display_irq_after'][key]>=value+3 for key,value in report['display_irq_before'].items())
   report['compositor_alive_8s']=compositor.poll() is None
   report['observation_seconds']=package['observation_seconds']
-  if client is not None and Path('/proc',str(client.pid),'maps').exists():
+  if client is not None and not getattr(client,'is_remote',False) and Path('/proc',str(client.pid),'maps').exists():
    report['client_maps']=Path('/proc',str(client.pid),'maps').read_text()
   report['client_alive_at_end']=client is not None and client.poll() is None
   if package.get('client_kind') in ('x11-pixels','gnome-x11'):
@@ -317,7 +331,7 @@ def inner(boot,package):
  finally:
   report['cleanup']={}
   for name,p,log in reversed(processes):
-   report['cleanup'][name]=legacy.stop_group(p);report[name+'_stdout']=legacy.read_log(log)
+   report['cleanup'][name]=p.stop() if getattr(p,'is_remote',False) else legacy.stop_group(p);report[name+'_stdout']=legacy.read_log(log)
   for sig in (signal.SIGTERM,signal.SIGKILL):
    for pid in private_pids()-inherited_private:
     try:os.kill(pid,sig)
@@ -333,7 +347,8 @@ def inner(boot,package):
   if failure.is_file() and failure.stat().st_size<legacy.MAX_TRACE:report['composite_failure_ppm_base64']=base64.b64encode(failure.read_bytes()).decode()
   report['remaining_private_processes']=sorted(set(android_processes())-inherited)
   report['remaining_private_pids']=sorted(private_pids()-inherited_private)
-  report['cleanup_passed']=not report['remaining_private_pids'] and not report['remaining_private_processes'] and all(p.poll() is not None for _,p,_ in processes)
+  report['host_gui_cleanup_passed']=all(not info.get('remaining') and info.get('reaped') for name,info in report['cleanup'].items() if name=='client' and host_gui)
+  report['cleanup_passed']=report['host_gui_cleanup_passed'] and not report['remaining_private_pids'] and not report['remaining_private_processes'] and all(p.poll() is not None for _,p,_ in processes)
   report['logs_complete']=all(os.fstat(log.fileno()).st_size<legacy.MAX_TRACE for log in handles)
   for log in handles:log.close()
  text=report.get('compositor_stdout','')
@@ -417,7 +432,11 @@ def execute(path,sha):
     cmd=['nsenter','--target',child,'--mount','--pid','--root','--wdns=/','/usr/bin/setpriv','--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot','--inh-caps=-all','--ambient-caps=-all','--no-new-privs',
      '/usr/bin/env','-i','HOME=/home/ubuntu','PATH=/usr/sbin:/usr/bin:/sbin:/bin','G955N_ANDROID_PRIVATE_RUNTIME=1','G955N_PARENT_PID_NS='+os.readlink('/proc/self/ns/pid'),'G955N_PARENT_MOUNT_NS='+os.readlink('/proc/self/ns/mnt'),
      '/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--inner','--reviewed-manifest',str(path),'--manifest-sha256',sha]
-    p=subprocess.run(cmd,capture_output=True,text=True,timeout=package['observation_seconds']+8);result['inner_exit']=p.returncode;result['inner_stdout']=p.stdout;result['inner_stderr']=p.stderr
+    if package.get('host_pid_client'):
+     broker=SourceFileLoader('panel_outer_host_gui',str(BASE/'host-pid-gui.py')).load_module()
+     p,cleanup=broker.run_inner(cmd,package['observation_seconds']+8,child,path,sha);result['host_gui_cleanup']=cleanup
+    else:p=subprocess.run(cmd,capture_output=True,text=True,timeout=package['observation_seconds']+8)
+    result['inner_exit']=p.returncode;result['inner_stdout']=p.stdout;result['inner_stderr']=p.stderr
     if p.stdout.strip():result['panel']=json.loads(p.stdout)
     result['display_irq_after']=display_irqs()
     result['display_irq_progressed']=all(result['display_irq_after'][key]>value for key,value in result['display_irq_before'].items())
@@ -446,7 +465,7 @@ def execute(path,sha):
 
 def main():
  p=argparse.ArgumentParser(description=__doc__);mode=p.add_mutually_exclusive_group();mode.add_argument('--launch',action='store_true');mode.add_argument('--run',action='store_true');mode.add_argument('--inner',action='store_true');mode.add_argument('--restore',action='store_true')
- p.add_argument('--reviewed-manifest',type=Path);p.add_argument('--manifest-sha256');a=p.parse_args()
+ p.add_argument('--host-gui-fd',type=int);p.add_argument('--reviewed-manifest',type=Path);p.add_argument('--manifest-sha256');a=p.parse_args()
  if a.restore:
   os.umask(0o077);restore();return 0
  if not(a.launch or a.run or a.inner):p.print_help();return 0
@@ -458,6 +477,8 @@ def main():
    '--property=ExecStopPost=/usr/bin/python3 '+str(BASE/'run-panel-trial.py')+' --restore','/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--run','--reviewed-manifest',str(a.reviewed_manifest),'--manifest-sha256',a.manifest_sha256]).returncode
  if a.inner:
   data,package=review(a.reviewed_manifest,a.manifest_sha256);identity(data['boot_id'])
+  if bool(package.get('host_pid_client'))!=(a.host_gui_fd is not None):raise RuntimeError('Unexpected host GUI channel')
+  package['host_gui_fd']=a.host_gui_fd
   package['diagnostic_debugger']=data.get('diagnostic_debugger') is True
   package['diagnostic_trace']=data.get('diagnostic_trace') is True
   report=inner(data['boot_id'],package);print(json.dumps(report,indent=2));return 0 if report['panel_presented'] else 1

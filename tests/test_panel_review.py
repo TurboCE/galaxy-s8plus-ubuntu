@@ -62,9 +62,10 @@ class PanelReviewGuard(unittest.TestCase):
  def test_touch_cannot_enable_input_in_pattern_scope(self):
   self.data['touch_input']=True;self.write()
   with self.assertRaisesRegex(RuntimeError,'Touch requires reviewed GNOME'):self.verify()
- def gnome_review(self,scope,touch=False):
+ def gnome_review(self,scope,touch=False,host=False):
   package=json.loads(self.package.read_text());package['features']={'private_x11_candidate':True};self.package.write_text(json.dumps(package))
   self.data.update(scope=scope,client_probe='gnome-x11',client_probe_sha256='a'*64,xwayland_sha256='a'*64,dbus_run_session_sha256='a'*64,native_system_bus=True,compositor_manifest_sha256=sha(self.package))
+  if host:self.data['host_pid_client']=True
   if touch:
    (MODULE.BASE/'seatd').write_bytes(b'fixed seat broker');self.data.update(touch_input=True,seatd_sha256=sha(MODULE.BASE/'seatd'))
   self.write();original=MODULE.digest
@@ -79,4 +80,13 @@ class PanelReviewGuard(unittest.TestCase):
  def test_popup_proof_requires_its_composite_fixture(self):
   self.data['popup_probe']=True;self.write()
   with self.assertRaisesRegex(RuntimeError,'Popup proof'):self.verify()
+ def test_host_pid_flag_rejected_outside_its_scope(self):
+  self.data['host_pid_client']=True;self.write()
+  with self.assertRaisesRegex(RuntimeError,'Host PID entry'):self.verify()
+ def test_host_scope_requires_explicit_host_client(self):
+  with self.assertRaisesRegex(RuntimeError,'Host PID entry'):self.gnome_review('exclusive-hwc-panel-host-gnome20s',True)
+ def test_host_scope_requires_real_input(self):
+  with self.assertRaisesRegex(RuntimeError,'Host GUI requires'):self.gnome_review('exclusive-hwc-panel-host-gnome20s',False,True)
+ def test_host_scope_accepts_reviewed_input_and_client(self):
+  _,package=self.gnome_review('exclusive-hwc-panel-host-gnome20s',True,True);self.assertTrue(package['host_pid_client']);self.assertEqual(package['observation_seconds'],20)
 if __name__=='__main__':unittest.main()

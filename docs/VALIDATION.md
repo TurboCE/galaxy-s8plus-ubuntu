@@ -359,3 +359,30 @@ was3 (and0 during initialization). This confirms the history mismatch on the
 actual device; the fix uses the genuine3 rather than forcing permanent full
 redraws. The owner confirmed the physical calendar remains steady. The
 ordinary GDM/CPU session was restored after the bounded experiment.
+
+
+### Host-PID GNOME session precursor
+
+A separately reviewed20-second host-PID GUI trial passed actual Mali-G71 GNOME
+startup, six client/overlay pixel checks,20 stable popup samples, both private
+and host-GUI cleanup, restored display services and no new kernel faults.
+Only Linux GNOME gets a separate mount namespace and a fresh read-only procfs
+using real host PIDs; the Android manager/HAL/compositor retain their private
+PID/proc view. Capability sets are all zero and no-new-privileges is verified
+before the fixed unprivileged command. Parent-death cleanup, source/ELF pins,
+unit deadlines and independent restoration remain active.
+
+The root broker uses an inherited private socketpair with actual descriptor
+passing/process status. Host cleanup rechecks the unique GUI mount namespace
+and unit cgroup before signaling each process; it cannot scan-kill the native
+or Android mount namespace. Failed setup logs remain in the result. The first
+setup exposed util-linux propagation on a chroot directory that is not a mount
+point; unchanged propagation plus the actual private proc mount fixed it.
+Native Polkit requests no longer refer to nonexistent namespace-local PIDs.
+Actual PAM/local-session authorization, optional services and permanent GDM
+integration are still pending. No permission result is overridden.
+
+Validation:42 host scope guards passed. Private evidence:
+compositor-build/panel-host-gnome-proc-result.json and preceding setup failures.
+The ordinary native X server is independently confirmed at1440x2960/depth24;
+its direct X11 EGL route remains an additional integration option to verify.
