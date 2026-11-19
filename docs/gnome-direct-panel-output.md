@@ -142,3 +142,8 @@ A controlled reboot while the tracked trial controller was armed exercised the
 boot service on the SM-G955N. All three file hashes matched the baseline,
 the pending snapshot and lease were cleared, and the GDM and framebuffer
 services were active on the new boot. Kernel taint was 0.
+
+A separate direct-output test repeated DPMS off/on 18 times. Every cycle
+resuspended and reactivated DECON, then advanced its timeline by 141–181
+points in the same GNOME process and boot. Taint stayed 0 and normal output
+was restored when the test ended.

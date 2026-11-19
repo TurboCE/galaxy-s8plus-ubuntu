@@ -642,3 +642,21 @@ stayed 0. A separate controlled reboot with the tracked trial armed restored
 all three original file hashes, cleared trial state, and brought up GDM and
 the legacy panel service on the new boot. Extended uptime, cursor rendering
 and system suspend are still open.
+
+The extended direct-output test passed another 18 off/on cycles on the
+real device with the same GNOME process, unchanged boot and taint0.
+Each cycle processed additional DECON work after resume. The trial
+restored the original output.
+
+### Shared DPP DMA registers
+
+The recovery boot still reported six failed requests for the same DPP
+DMA common register range. All seven channels declare that range. The
+old probe tried to claim it once per channel and treated the mapping error
+pointer as usable. The channel start path can access those common registers.
+Proposal0032 reserves and maps the shared range once, validates each
+channel's range, and propagates errors for the per-channel mappings.
+It also clears the published channel pointer on probe failure and lets
+devres release the allocation. The kernel33 AArch64 build and built-in
+initramfs check passed with kernel32's config and identical Korean DTB.
+Kernel33 is a build candidate. Runtime hardware acceptance remains open.

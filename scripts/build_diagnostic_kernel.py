@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--native-panel-qos',action='store_true',help='Include primary-panel pre-enable QoS ordering and error rollback')
     parser.add_argument('--native-ondemand-safety',action='store_true',help='Hold and check CPU governor private-data lifetime during display events')
     parser.add_argument('--ssp-sysfs-counts',action='store_true',help='Fix SSP IIO poll_delay sysfs EOF/no-progress return counts')
+    parser.add_argument('--dpp-shared-dma', action='store_true', help='Map the shared Exynos8895 DPP DMA register block once')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -35,6 +36,8 @@ def main():
     if args.native_panel_qos and not args.native_panel_safety:parser.error('--native-panel-qos requires --native-panel-safety')
     if args.native_panel_safety and (not args.native_fb_owner or args.wfi_only):parser.error('--native-panel-safety requires the normal-idle native-fb-owner baseline')
     if args.wfi_only and not args.native_fb_owner:parser.error('--wfi-only requires the native-fb-owner baseline')
+    if args.dpp_shared_dma and (not args.native_panel_safety or not args.build_version):
+        parser.error('--dpp-shared-dma requires --native-panel-safety and an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -58,6 +61,8 @@ def main():
     if args.native_panel_safety:patchfiles.append(ROOT/'patches/proposals/0029-dpp-config-lifetime-and-pan-power-lock.patch')
     if args.native_panel_qos:patchfiles.append(ROOT/'patches/proposals/0030-primary-panel-qos-transaction.patch')
     if args.native_ondemand_safety:patchfiles.append(ROOT/'patches/proposals/0031-ondemand-panel-policy-lifetime.patch')
+    if args.dpp_shared_dma:
+        patchfiles.append(ROOT/'patches/proposals/0032-dpp-shared-dma-registers.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -69,6 +74,7 @@ def main():
             'build_version':version,'builder_image_id':image_id,'compiler_version':compiler,
             'ssp_sysfs_counts':args.ssp_sysfs_counts,
             'audio_safety':args.audio_safety,
+            'dpp_shared_dma':args.dpp_shared_dma,
             'native_panel_safety':args.native_panel_safety,
             'native_panel_qos':args.native_panel_qos,
             'native_ondemand_safety':args.native_ondemand_safety,

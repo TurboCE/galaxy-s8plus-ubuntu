@@ -1,0 +1,112 @@
+Subject: Map the Exynos8895 DPP shared DMA register block once
+
+The internal display channels each describe the same common DMA register
+range. Reserve and map that block once for the built-in driver. Check that
+later channels describe the same range before sharing the mapping. Return
+the real mapping errors and leave release of probe allocations to devres.
+
+diff --git a/drivers/video/fbdev/exynos/dpu/dpp_drv.c b/drivers/video/fbdev/exynos/dpu/dpp_drv.c
+--- a/drivers/video/fbdev/exynos/dpu/dpp_drv.c
++++ b/drivers/video/fbdev/exynos/dpu/dpp_drv.c
+@@ -14,6 +14,8 @@
+ #include <linux/clk.h>
+ #include <linux/of.h>
+ #include <linux/exynos_iovmm.h>
++#include <linux/io.h>
++#include <linux/ioport.h>
+ #include <linux/videodev2_exynos_media.h>
+ 
+ #include "dpp.h"
+@@ -988,6 +990,44 @@
+ 	dpp->dev = dev;
+ }
+ 
++#if defined(CONFIG_SOC_EXYNOS8895)
++/* The built-in DPP channels share this block for the lifetime of the DPU. */
++static DEFINE_MUTEX(dpp_dma_common_lock);
++static struct resource *dpp_dma_common_region;
++static void __iomem *dpp_dma_common_regs;
++
++static int dpp_map_dma_common(struct dpp_device *dpp, struct resource *res)
++{
++	resource_size_t size = resource_size(res);
++	int ret = 0;
++
++	mutex_lock(&dpp_dma_common_lock);
++	if (!dpp_dma_common_region) {
++		dpp_dma_common_region = request_mem_region(res->start, size,
++							 "exynos-dpp-dma-common");
++		if (!dpp_dma_common_region) {
++			ret = -EBUSY;
++			goto out;
++		}
++		dpp_dma_common_regs = ioremap(res->start, size);
++		if (!dpp_dma_common_regs) {
++			release_mem_region(res->start, size);
++			dpp_dma_common_region = NULL;
++			ret = -ENOMEM;
++			goto out;
++		}
++	} else if (res->start != dpp_dma_common_region->start ||
++		   res->end != dpp_dma_common_region->end) {
++		ret = -EINVAL;
++		goto out;
++	}
++	dpp->res.dma_com_regs = dpp_dma_common_regs;
++out:
++	mutex_unlock(&dpp_dma_common_lock);
++	return ret;
++}
++#endif
++
+ static int dpp_init_resources(struct dpp_device *dpp, struct platform_device *pdev)
+ {
+ 	struct resource *res;
+@@ -1001,9 +1041,9 @@
+ 	dpp_info("res: start(0x%x), end(0x%x)\n", (u32)res->start, (u32)res->end);
+ 
+ 	dpp->res.regs = devm_ioremap_resource(dpp->dev, res);
+-	if (!dpp->res.regs) {
++	if (IS_ERR(dpp->res.regs)) {
+ 		dpp_err("failed to remap DPP SFR region\n");
+-		return -EINVAL;
++		return PTR_ERR(dpp->res.regs);
+ 	}
+ 
+ #if defined(CONFIG_SOC_EXYNOS8895)
+@@ -1015,9 +1055,9 @@
+ 	dpp_info("dma res: start(0x%x), end(0x%x)\n", (u32)res->start, (u32)res->end);
+ 
+ 	dpp->res.dma_regs = devm_ioremap_resource(dpp->dev, res);
+-	if (!dpp->res.dma_regs) {
++	if (IS_ERR(dpp->res.dma_regs)) {
+ 		dpp_err("failed to remap DPU_DMA SFR region\n");
+-		return -EINVAL;
++		return PTR_ERR(dpp->res.dma_regs);
+ 	}
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 2);
+@@ -1028,10 +1068,10 @@
+ 	dpp_info("dma common res: start(0x%x), end(0x%x)\n",
+ 			(u32)res->start, (u32)res->end);
+ 
+-	dpp->res.dma_com_regs = devm_ioremap_resource(dpp->dev, res);
+-	if (!dpp->res.dma_com_regs) {
+-		dpp_err("failed to remap DPU_DMA COMMON SFR region\n");
+-		return -EINVAL;
++	ret = dpp_map_dma_common(dpp, res);
++	if (ret) {
++		dpp_err("failed to map shared DPU DMA registers: %d\n", ret);
++		return ret;
+ 	}
+ #endif
+ 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
+@@ -1120,7 +1160,7 @@
+ 	return 0;
+ 
+ err_clk:
+-	kfree(dpp);
++	dpp_drvdata[dpp->id] = NULL;
+ err:
+ 	return ret;
+ }

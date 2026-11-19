@@ -1335,3 +1335,8 @@ Tested three DPMS off/on cycles on the active direct GNOME session.
 Added a boot recovery service and durable rollback snapshot. Verified
 restoration of the baseline library, manifest and launcher on an SM-G955N
 reboot during a staged trial.
+
+Extended the direct-output power test to 18 cycles on the SM-G955N.
+Prepared the kernel33 DPP shared DMA mapping fix after identifying the
+repeated MMIO conflict in the recovery boot log. The build is opt-in via
+`--dpp-shared-dma` in the diagnostic kernel builder. The device runs kernel32.
