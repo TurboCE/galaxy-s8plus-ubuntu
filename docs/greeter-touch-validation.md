@@ -1,0 +1,23 @@
+# GDM touch login checkpoint, 2026-11-19
+
+The owner reproduced an account tap that focused the row without revealing the
+password prompt. Account-tile-only instrumentation confirmed button press,
+leave/re-entry (pressed true/false/true), then release with no clicked signal.
+The stock St.Button pointer-device lifetime explains this failed release.
+
+A GDM-only pinned resource repair handles a still-pressed primary-button release
+only when the corresponding press came from the same device, release is inside
+the mapped/reactive tile and no native click occurred. Authentication is intact.
+Ten event fixtures and generated JavaScript syntax checks passed.
+
+After installing this repair and restarting GDM, the owner confirmed touch
+account selection, password entry and desktop login. The overlay is persistent;
+a separate cold-boot touchscreen regression is still pending. No automated Return
+key or autologin was used in this acceptance. Private account-event and login
+records remain under artifacts/greeter.
+
+The resulting desktop session was ubuntu-g955n but its GLES preflight failed
+(eglGetDisplay), so the existing software fallback started. This login pass is
+not a GPU acceptance. Investigating the cold-boot graphics readiness failure is
+separate, ongoing work. Kernel taint was zero at this checkpoint; that does not
+qualify long-term kernel stability.
