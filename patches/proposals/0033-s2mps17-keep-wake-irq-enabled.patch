@@ -1,0 +1,37 @@
+Subject: Keep the Exynos8895 S2MPS17 wake IRQ available across suspend
+
+The RTC alarm is nested under the S2MPS17 parent IRQ. Leave that
+parent enabled for wakeup-capable configurations so the generic IRQ
+suspend code can arm it. Return wake setup errors to PM. Keep the normal
+disable/enable pair when the PMIC is configured without wakeup.
+
+diff --git a/drivers/mfd/s2mps17_core.c b/drivers/mfd/s2mps17_core.c
+--- a/drivers/mfd/s2mps17_core.c
++++ b/drivers/mfd/s2mps17_core.c
+@@ -550,8 +550,12 @@
+ 	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
+ 	struct s2mps17_dev *s2mps17 = i2c_get_clientdata(i2c);
+ 
++	if (!s2mps17->irq)
++		return 0;
++
++	/* Keep the parent line enabled so the IRQ core can detect a wake. */
+ 	if (device_may_wakeup(dev))
+-		enable_irq_wake(s2mps17->irq);
++		return enable_irq_wake(s2mps17->irq);
+ 
+ 	disable_irq(s2mps17->irq);
+ 
+@@ -567,8 +571,11 @@
+ 	pr_info("%s:%s\n", MFD_DEV_NAME, __func__);
+ #endif /* CONFIG_SAMSUNG_PRODUCT_SHIP */
+ 
++	if (!s2mps17->irq)
++		return 0;
++
+ 	if (device_may_wakeup(dev))
+-		disable_irq_wake(s2mps17->irq);
++		return disable_irq_wake(s2mps17->irq);
+ 
+ 	enable_irq(s2mps17->irq);
+ 

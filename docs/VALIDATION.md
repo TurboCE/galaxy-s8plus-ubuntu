@@ -660,3 +660,35 @@ It also clears the published channel pointer on probe failure and lets
 devres release the allocation. The kernel33 AArch64 build and built-in
 initramfs check passed with kernel32's config and identical Korean DTB.
 Kernel33 is a build candidate. Runtime hardware acceptance remains open.
+
+### Persistent GNOME direct output
+
+Installed the persistent Mali-to-DECON configuration on the SM-G955N and
+verified that boot recreated the lease. Replayed touchscreen contact events
+on the actual evdev device to select the GDM owner and type the credential on
+the screen keyboard. The real PAM session and direct GNOME Shell started.
+This is software event replay through the touchscreen path. Digitizer
+response needs separate physical acceptance.
+
+Eight post-boot DPMS off/on cycles on the first persistent configuration
+resumed with new DECON work, unchanged boot and shell, and taint 0. Nine
+workload samples over 260 seconds remained active before a deliberate
+redeploy. Fixed opaque fullscreen X11 clients bypassing the GNOME overlay.
+After the correction and another reboot, repeated touchscreen login passed.
+The fullscreen fixture reported zero empty overlay samples and 170 new
+DECON timeline points. Extended operation after this correction is pending.
+
+Full system suspend remains open. The original image masks the systemd
+sleep targets. A bounded freeze test temporarily unmasked them, requested
+an RTC wake and then lost both network and USB console. Host-side USB
+re-enumeration did not recover the handset. The test included timer and
+next-boot policy restoration. The last kernel suspend stage is unconfirmed.
+
+The S2MPS17 parent IRQ carries the nested RTC alarm on this board. Source
+review found that the late suspend callback calls enable_irq_wake() and
+then disables that parent IRQ. The generic suspend-to-idle path relies
+on wake-marked IRQs remaining available. Proposal0033 keeps the wake
+line enabled and returns errors from wake setup. The AArch64 kernel34
+build, built-in initramfs check, and comparison with kernel32's exact
+config and Korean DTB passed. This is a candidate. The RTC alarm and
+actual no-transport failure still need a hardware check after recovery.

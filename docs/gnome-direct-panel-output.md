@@ -186,3 +186,17 @@ inhibits this bypass in the direct session. The real device reproduced
 before the extension. After installation and a clean boot, the same
 fixture stayed fullscreen with zero empty overlay samples and the
 DECON timeline advanced by 170 points.
+
+The first persistent configuration stayed active for 260 seconds with nine
+workload samples, stable GNOME PID and boot, DECON progress on every sample
+and taint 0. The run was deliberately interrupted to install the fullscreen
+correction. An extended run of the corrected configuration is still pending.
+
+The first system suspend request was refused because the stock Ubuntu image
+masks sleep.target and suspend.target. A subsequent bounded test temporarily
+enabled suspend-to-idle (freeze), scheduled a 24-second RTC alarm, and armed
+policy restoration both by timer and on the next boot. Neither network nor
+USB console returned by the end of the observation. A host USB port
+re-enumeration did not restore access. This is a failed system suspend test.
+The last reached kernel power stage and any retained crash trace need to be
+collected after the phone is accessible. Deep system suspend was not tested.

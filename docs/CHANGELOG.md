@@ -1340,3 +1340,17 @@ Extended the direct-output power test to 18 cycles on the SM-G955N.
 Prepared the kernel33 DPP shared DMA mapping fix after identifying the
 repeated MMIO conflict in the recovery boot log. The build is opt-in via
 `--dpp-shared-dma` in the diagnostic kernel builder. The device runs kernel32.
+
+### Persistent Mali-to-DECON GNOME output
+
+- Enabled the direct path on the installed SM-G955N. Verified persistent
+  configuration and normal GDM/PAM entry using touchscreen-event replay
+  after reboot. Eight DPMS cycles passed on the first persistent version.
+- Reproduced an opaque fullscreen X11 client's compositor bypass and
+  inhibited it only in the direct GNOME session. Rebooted and re-ran the
+  fullscreen fixture successfully with the original Ubuntu GNOME mode.
+- System suspend-to-idle lost both device transports during a guarded RTC
+  wake test. Display DPMS and system suspend have distinct acceptance status.
+- Prepared an opt-in kernel34 candidate which keeps the S2MPS17 wake IRQ
+  available and propagates setup errors. Verified a build with kernel32's
+  config and device tree. No kernel or partition write took place.
