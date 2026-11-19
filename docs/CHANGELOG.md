@@ -1089,3 +1089,18 @@ publication. Seven actual-function cases pass and the original fails pre-enable
 ordering. Kernel27 builds this source change on top of proposal29, normal CPU
 idle; no deployment or hardware stability claim. Current phone reconnection is
 required for further device tests; the owner is away. Host work continues.
+
+
+### Packed sensor protocol and uninstalled SensorProxy prototype
+
+Extended the bounded native sensor capture to calibrated magnetic and accumulated
+step-counter records using pinned Samsung layouts. Corrected on-change handling:
+a single real light event is not a broken continuous stream; absent stationary
+step events remain incomplete evidence (exit2). Added decoded values, strict
+layouts/timestamps and a shared controller ownership lock. Eight protocol cases
+pass; no new physical sensor acceptance is claimed while the phone is offline.
+
+The native accelerometer/light SensorProxy prototype builds as AArch64 without
+warnings. Its README records provenance, uninstalled status and required abrupt
+termination/lease, physical matrix, firmware/calibration and GNOME integration
+work. It is not enabled at boot and not represented as working phone hardware.
