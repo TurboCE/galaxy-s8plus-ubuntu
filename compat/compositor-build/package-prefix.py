@@ -55,7 +55,15 @@ env={'LD_LIBRARY_PATH':base+'/lib','HYBRIS_EGLPLATFORM':'hwcomposer','HYBRIS_AND
      'HYBRIS_LD_LIBRARY_PATH':base+'/android:/system/lib64:/vendor/lib64',
      'LIBEGL':'/vendor/lib64/egl/libGLES_mali.so','LIBGLESV2':'/vendor/lib64/egl/libGLES_mali.so',
      'WLR_BACKENDS':'hwcomposer','WLR_RENDERER':'gles2'}
-record={'target':'SM-G955N','status':'packaged only; not executed; not hardware qualified','destination':base,
+licenses={}
+for component in [a.work/'input/libhybris', *sorted((a.work/'sources').glob('*'))]:
+    if not component.is_dir():continue
+    for license_file in sorted(set(component.glob('LICENSE*'))|set(component.glob('COPYING*'))):
+        if not license_file.is_file():continue
+        target=a.output/'licenses'/component.name/license_file.name
+        target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(license_file,target)
+        licenses[str(target.relative_to(a.output))]=hashlib.sha256(target.read_bytes()).hexdigest()
+record={'licenses':licenses,'target':'SM-G955N','status':'packaged only; not executed; not hardware qualified','destination':base,
         'files':elf,'symlinks':{str(f.relative_to(a.output)):str(f.readlink()) for f in a.output.rglob('*') if f.is_symlink()},
         'external_linux_dependencies':sorted(external),'process_private_environment':env,
         'requires':'independently supervised Android manager/allocator/composer plus exclusive display and restoration watchdog'}

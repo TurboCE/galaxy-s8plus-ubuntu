@@ -7,7 +7,7 @@ No row may become PASS from configuration or compilation alone.
 Runtime capture tooling exists in scripts/collect_linux.py; it refuses an
 unexpected kernel/DT. Stock dmesg was denied and kernel logcat returned no
 entries. Thus neither stock nor Ubuntu logs have been certified clean.
-Twenty-three host tests pass; these are tooling checks, not hardware acceptance tests.
+Twenty-eight host tests pass; these are tooling checks, not hardware acceptance tests.
 BOOT-only trials recovered concrete panic logs: the initial gzip decoder mismatch
 was fixed and unpacking succeeded on the second trial. That trial then panicked
 in ABOX regcache initialization and failed USB gadget binding. The third trial
@@ -25,7 +25,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Restored complete known-working kernel-15 BOOT with readback; Ubuntu/GDM/Wi-Fi returned, taint 512 remains. Cold-boot/suspend qualification pending |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Kernel24 with baseline fixes, bounded panic history and persistent native framebuffer ownership now boots; live build-id/config/DT match, initial WARNING/panic counts 0 and taint0. Prior kernel22 remains failed; cold-boot/suspend qualification and old corruption root cause pending |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: manual OSK login/desktop confirmed. Desktop remains llvmpipe and sluggish. Experimental damage-driven presenter is quarantined after kernel-22 failures; original presenter restored. Rotation/brightness/resume and account touch activation pending |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Partial: private libhybris Mali-G71 shader/readback passed 10000 frames at 1440x2960 in 21.989 seconds; native shared buffer passed three distinct full-frame Mali/mapper/CPU checks after fixing CPU ownership sync. Private HWC2/wlroots/tinywl staged and loader dependencies resolved, no compositor executed. Buffer/fence/presentation, thermal qualification and resume pending |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
@@ -114,3 +114,38 @@ registration/termination passed after private inode permissions were corrected.
 Host namespace/process/property state was restored and host hwbinder permissions
 were unchanged. This used no ION/GPU/display/audio node and called no allocation
 method; it does not qualify desktop acceleration or camera/audio drivers.
+
+
+### Native GPU-to-panel handoff checkpoint
+
+Kernel24 and the private Android/HWC compositor completed two bounded 8-second
+panel-pattern trials. The first clean ownership/IPC trial retained Mali-G71
+OpenGL ES3.2, accepted at least60 HWC presents, advanced the two DECON frame
+counters by78 each and DSIM by83, and received/waited real present fences.
+The test pattern intentionally changes at10Hz; this is not a frame-rate benchmark.
+Both trials restored GDM and the native presenter, removed private processes,
+retained host mount/property state, boot identity and taint0, and recorded no new
+kernel fault signatures. Physical color confirmation is separately pending.
+GNOME remains on its original CPU rendering path; a pattern compositor pass is
+not desktop/app/touch/suspend qualification or resolution of kernel22 corruption.
+
+Actual failures corrected during these trials:
+- Prepared the Android graphics/fb0 alias using the existing native fb0 rdev.
+- Supplied a separate private128MiB /dev/shm for17MiB scene buffers; increased
+  only the compositor file-size limit from4MiB to128MiB. Logs remain bounded.
+- Passed the output from scene rendering through the output-aware renderer
+  dispatch; the previous NULL target produced No native window set and invalid
+  framebuffer draws. Ordinary modern renderer dispatch remains available.
+- Captured original Android log datagrams and obtained a real FMQ CHECK failure;
+  syscall tracing proved /dev/ashmem EACCES followed by mmap EBADF. Set only the
+  new private Ashmem inode to graphics-group access for the composer scope.
+- Exposed the existing private fimg2d node for display scope. A second successful
+  run eliminated the prior repeated libacryl missing-device/performance errors.
+
+The coordinator uses exact source/library manifests, a systemd deadline and
+independent display restoration. Debugger/tracer runs cannot qualify a panel
+pass. Vendor/runtime outputs, syscall traces and device identifiers stay private.
+Private evidence: compositor-build/panel-{ashmem,g2d}-result.json, preceding
+failure/debug/trace results, output-dispatch-build.log and current-host-tests.log.
+Existing optional-extension/property/log-directory findings remain recorded;
+no blanket error filtering or fake HWC/fence/property success was introduced.

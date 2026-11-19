@@ -1,0 +1,51 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] tinywl: add explicit bounded-trial color pattern opt-in
+
+Keep upstream MIT attribution. Only G955N_PANEL_TEST_PATTERN=1 enables this
+fixture. The separately supervised runtime bounds duration and restores the
+original display. Ordinary sessions are unchanged; this is not a desktop shell.
+
+--- a/tinywl/tinywl.c
++++ b/tinywl/tinywl.c
+@@ -27,6 +27,21 @@
+ #include <xkbcommon/xkbcommon.h>
+ 
+ /* For brevity's sake, struct members are annotated where they are used. */
++/* Explicit lab pattern only; ordinary tinywl sessions are unchanged. */
++static struct wlr_scene_rect *g955n_pattern;
++static struct wl_event_source *g955n_pattern_timer;
++static int g955n_pattern_tick(void *data) {
++	static unsigned int frame;
++	static const float colors[3][4] = {
++		{0.8f, 0.1f, 0.1f, 1.f}, {0.1f, 0.8f, 0.1f, 1.f},
++		{0.1f, 0.1f, 0.8f, 1.f}
++	};
++	(void)data;
++	wlr_scene_rect_set_color(g955n_pattern, colors[frame++ % 3]);
++	wl_event_source_timer_update(g955n_pattern_timer, 100);
++	return 0;
++}
++
+ enum tinywl_cursor_mode {
+ 	TINYWL_CURSOR_PASSTHROUGH,
+ 	TINYWL_CURSOR_MOVE,
+@@ -1053,6 +1068,19 @@
+ 	 * frame events at the refresh rate, and so on. */
+ 	wlr_log(WLR_INFO, "Running Wayland compositor on WAYLAND_DISPLAY=%s",
+ 			socket);
++	if (getenv("G955N_PANEL_TEST_PATTERN") &&
++			!strcmp(getenv("G955N_PANEL_TEST_PATTERN"), "1")) {
++		const float initial[4] = {0.8f, 0.1f, 0.1f, 1.f};
++		g955n_pattern = wlr_scene_rect_create(&server.scene->tree,
++				1440, 2960, initial);
++		g955n_pattern_timer = wl_event_loop_add_timer(
++				wl_display_get_event_loop(server.wl_display), g955n_pattern_tick, NULL);
++		if (!g955n_pattern || !g955n_pattern_timer) {
++			wlr_log(WLR_ERROR, "G955N pattern allocation failed");
++			return 1;
++		}
++		wl_event_source_timer_update(g955n_pattern_timer, 100);
++	}
+ 	wl_display_run(server.wl_display);
+ 
+ 	/* Once wl_display_run returns, we destroy all clients then shut down the

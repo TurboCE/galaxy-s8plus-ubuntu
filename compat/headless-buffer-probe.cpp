@@ -46,7 +46,7 @@ static bool char_node(const char *path) {
     struct stat st;
     return lstat(path, &st) == 0 && S_ISCHR(st.st_mode);
 }
-static bool guard(int allocator_pid, const char *boot, bool gpu) {
+static bool guard(int allocator_pid, const char *boot, bool gpu, bool display=false) {
     if ((!contains("/sys/firmware/devicetree/base/model", "SM-G955N") &&
          !contains("/proc/device-tree/model", "SM-G955N")) ||
         !contains("/proc/sys/kernel/osrelease", "g955n-ubuntu") || strlen(boot) != 36 ||
@@ -63,7 +63,9 @@ static bool guard(int allocator_pid, const char *boot, bool gpu) {
     for (int cap : {16,17,21,22,27}) if (prctl(PR_CAPBSET_READ,cap,0,0,0) != 0) return false;
     for (const char *path : {"/proc","/sys","/system","/vendor"}) if (!readonly(path)) return false;
     for (const char *path : {"/efs","/proc/1/root/efs","/dev/block","/dev/snd","/dev/graphics","/dev/fb0","/dev/dri","/dev/video0","/dev/sw_sync"})
-        if (access(path,F_OK) == 0 || errno != ENOENT) return false;
+        if (!(display && (!strcmp(path,"/dev/graphics")||!strcmp(path,"/dev/fb0")||!strcmp(path,"/dev/sw_sync"))) &&
+            (access(path,F_OK) == 0 || errno != ENOENT)) return false;
+    if (display && (!char_node("/dev/fb0")||!char_node("/dev/graphics/fb0"))) return false;
     if (!char_node("/dev/ion") || (gpu ? !char_node("/dev/mali0") : (access("/dev/mali0",F_OK) == 0 || errno != ENOENT))) return false;
     char ready[PROP_VALUE_MAX] = {};
     if (__system_property_get("hwservicemanager.ready",ready) <= 0 || strcmp(ready,"true")) return false;
@@ -222,8 +224,8 @@ static int run(int expected_pid,bool gpu,const char *plugin,BufferOwner &owner) 
     return 0;
 }
 int main(int argc,char **argv) {
-    if(argc==3&&!strcmp(argv[1],"--list-services-gles")) {
-        if(!guard(0,argv[2],true))return 2;
+    if(argc==3&&(!strcmp(argv[1],"--list-services-gles")||!strcmp(argv[1],"--list-services-display"))) {
+        if(!guard(0,argv[2],true,!strcmp(argv[1],"--list-services-display")))return 2;
         alarm(5);setvbuf(stdout,nullptr,_IONBF,0);
         auto manager=android::hardware::defaultServiceManager();
         if(!manager)return 5;
@@ -234,14 +236,15 @@ int main(int argc,char **argv) {
         });
         return listing.isOk() ? 0:5;
     }
-    const bool gpu_query=argc>=2&&(!strcmp(argv[1],"--expect-allocator-absent-gles")||!strcmp(argv[1],"--registration-only-gles"));
+    const bool display_query=argc>=2&&(!strcmp(argv[1],"--expect-allocator-absent-display")||!strcmp(argv[1],"--registration-only-display"));
+    const bool gpu_query=display_query||(argc>=2&&(!strcmp(argv[1],"--expect-allocator-absent-gles")||!strcmp(argv[1],"--registration-only-gles")));
     const bool absent=argc==3&&(!strcmp(argv[1],"--expect-allocator-absent")||gpu_query);
     const bool query=argc==4&&(!strcmp(argv[1],"--registration-only")||gpu_query);
-    if(absent){if(!guard(0,argv[2],gpu_query))return 2;alarm(5);return registration_query(0,true);}
+    if(absent){if(!guard(0,argv[2],gpu_query,display_query))return 2;alarm(5);return registration_query(0,true);}
     const bool gpu=argc==5&&!strcmp(argv[1],"--gles-native-buffer");
     if(!(query || gpu || (argc==4&&!strcmp(argv[1],"--allocate-only")))) return 2;
     char *end=nullptr; errno=0;long pid=strtol(argv[2],&end,10);
-    if(errno||!end||*end||pid<=1||pid>2147483647||!guard(static_cast<int>(pid),argv[3],gpu||gpu_query)) return 2;
+    if(errno||!end||*end||pid<=1||pid>2147483647||!guard(static_cast<int>(pid),argv[3],gpu||gpu_query,display_query)) return 2;
     // Explicit only; no ABI-selftest path loads mapper/ION/Mali or starts HALs.
     setvbuf(stdout,nullptr,_IONBF,0);
     if(query){alarm(5);return registration_query(static_cast<int>(pid),false);}

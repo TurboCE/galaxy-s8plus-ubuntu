@@ -92,6 +92,7 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
     for name, mode, number in devices:
         target = root / 'dev' / name
         target.parent.mkdir(parents=True, exist_ok=True)
+        target.parent.chmod(0o755)
         os.mknod(target, stat.S_IFCHR | stat.S_IMODE(mode), number)
         target.chmod(stat.S_IMODE(mode))  # Preserve only this new private node's original access mode.
         if name == 'hwbinder':
@@ -99,8 +100,8 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
             # GID1003 service. Do not chmod/chown the original native node.
             os.chown(target, 0, 1003)
             target.chmod(0o660)
-        elif name == 'binder' and composer_ipc:
-            # Original composer uses standard Binder in addition to HWBinder.
+        elif name in ('binder', 'ashmem') and composer_ipc:
+            # Original composer/client use Binder and Ashmem-backed FMQ.
             # This newly-created inode only; host node ownership is untouched.
             os.chown(target, 0, 1003)
             target.chmod(0o660)
@@ -108,9 +109,18 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
             # Only the original system-UID allocator and supervised root probe.
             os.chown(target, 1000, 1000)
             target.chmod(0o600)
+        elif name in ('fb0', 'graphics/fb0', 'sw_sync', 'fimg2d'):
+            os.chown(target, 0, 1003)
+            target.chmod(0o660)
         elif name == 'mali0':
             os.chown(target, 0, 1003)
             target.chmod(0o660)
+    if any(name == 'fb0' for name, _, _ in devices):
+        # POSIX SHM is used by the Linux compositor's swapchain wrapper.
+        # Keep it separate from the small private device-node tmpfs.
+        shm = root / 'dev/shm'
+        shm.mkdir(mode=0o1777)
+        run('mount', '-t', 'tmpfs', '-o', 'mode=1777,size=128m,nosuid,nodev', 'g955n-private-shm', str(shm))
     properties = root / 'dev/__properties__'
     properties.mkdir(mode=0o711)
     properties.chmod(0o711)
@@ -254,7 +264,7 @@ def main():
         raise SystemExit('Supply verified original hardware-service contexts before another real trial')
     names = ['null', 'zero', 'random', 'urandom', 'binder', 'hwbinder', 'vndbinder', 'ashmem']
     if args.include_display_devices:
-        names += ['mali0', 'ion', 'fb0', 'graphics/fb0', 'sw_sync']
+        names += ['mali0', 'ion', 'fb0', 'graphics/fb0', 'sw_sync', 'fimg2d']
     if args.include_ion_device:
         names.append('ion')
     if args.include_mali_device:
@@ -264,9 +274,14 @@ def main():
         try:
             info = (Path('/dev') / name).stat()
         except FileNotFoundError:
-            if name in ('ion', 'mali0'):
+            if name == 'graphics/fb0' and args.include_display_devices:
+                # Native Ubuntu exposes fb0 without Android's directory alias.
+                # Reuse its rdev only on a new private node, never alter /dev.
+                info = Path('/dev/fb0').stat()
+            elif name in ('ion', 'mali0'):
                 raise SystemExit('Explicit requested headless device is unavailable: ' + name)
-            continue
+            else:
+                continue
         if not stat.S_ISCHR(info.st_mode):
             raise SystemExit('Expected a character device: ' + name)
         devices.append((name, info.st_mode, info.st_rdev))

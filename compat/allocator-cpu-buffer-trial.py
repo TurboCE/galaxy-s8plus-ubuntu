@@ -111,13 +111,13 @@ def query(binary, arguments, boot, seconds=5, gpu=False):
     return dict(exit_code=result.returncode, stdout=result.stdout, stderr=result.stderr)
 
 
-def setup_child(parent, service=False):
+def setup_child(parent, service=False, file_limit=MAX_TRACE):
     if service:
         os.setgroups([1026]); os.setgid(1003); os.setuid(1000)
     if ctypes.CDLL(None, use_errno=True).prctl(1, signal.SIGKILL, 0, 0, 0) or os.getppid() != parent:
         os._exit(125)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_TRACE, MAX_TRACE))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
 
 
 def stop_group(process):

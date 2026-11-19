@@ -70,6 +70,13 @@ Description: pinned public Android 9 headers
 Version: 9.0.0
 Cflags: -I$WORK/input/android9-headers -I$WORK/android-include
 PC
+for patch_file in "$SCRIPTS/patches/"000[567]-*.patch; do
+if patch -d "$WLROOTS" -p1 --forward --batch --dry-run --silent < "$patch_file"; then
+ patch -d "$WLROOTS" -p1 --forward --batch < "$patch_file"
+elif ! patch -d "$WLROOTS" -p1 --reverse --batch --dry-run --silent < "$patch_file"; then
+ echo 'Unrecognized wlroots present patch state' >&2; exit 1
+fi
+done
 WLROOTS_RECONFIGURE=()
 if test -f "$WORK/build-wlroots/meson-private/coredata.dat"; then WLROOTS_RECONFIGURE=(--reconfigure --clearcache); fi
 meson setup "${WLROOTS_RECONFIGURE[@]}" "$WORK/build-wlroots" "$WLROOTS" --cross-file "$CROSS" \

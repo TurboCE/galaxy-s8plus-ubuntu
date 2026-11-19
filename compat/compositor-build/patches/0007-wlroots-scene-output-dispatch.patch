@@ -1,0 +1,53 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] wlroots: retain output through scene buffer-pass dispatch
+
+The fork's Android renderer must bind the target native HWC window. Scene
+rendering called the output-less API, and the output-aware wrapper discarded
+its output argument for implementations which supplied that method. Pass the
+actual output through both paths. Preserve modern renderer behavior by using
+the ordinary buffer-pass API when no output-specific binding exists; do not
+force Vulkan/GLES modern renderers through legacy callbacks.
+Original upstream MIT notices are retained. No device operation in this patch.
+
+--- a/render/wlr_renderer.c
++++ b/render/wlr_renderer.c
+@@ -498,17 +498,20 @@
+ struct wlr_render_pass *wlr_renderer_begin_buffer_pass_for_output(struct wlr_renderer *renderer,
+ 		struct wlr_buffer *buffer, const struct wlr_buffer_pass_options *options,
+ 		struct wlr_output *output) {
+ 	if (!renderer->impl->begin_buffer_pass_for_output) {
+-		return begin_legacy_buffer_render_pass(renderer, buffer, output);
++		if (renderer->impl->bind_buffer_for_output) {
++			return begin_legacy_buffer_render_pass(renderer, buffer, output);
++		}
++		return wlr_renderer_begin_buffer_pass(renderer, buffer, options);
+ 	}
+ 
+ 	struct wlr_buffer_pass_options default_options = {0};
+ 	if (!options) {
+ 		options = &default_options;
+ 	}
+ 
+-	return renderer->impl->begin_buffer_pass_for_output(renderer, buffer, options, NULL);
++	return renderer->impl->begin_buffer_pass_for_output(renderer, buffer, options, output);
+ }
+ 
+ struct wlr_render_timer *wlr_render_timer_create(struct wlr_renderer *renderer) {
+ 	if (!renderer->impl->render_timer_create) {
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -1796,12 +1796,12 @@
+ 		timespec_sub(&duration, &end_time, &start_time);
+ 		timer->pre_render_duration = timespec_to_nsec(&duration);
+ 	}
+ 
+-	struct wlr_render_pass *render_pass = wlr_renderer_begin_buffer_pass(output->renderer, buffer,
++	struct wlr_render_pass *render_pass = wlr_renderer_begin_buffer_pass_for_output(output->renderer, buffer,
+ 			&(struct wlr_buffer_pass_options){
+ 		.timer = timer ? timer->render_timer : NULL,
+-	});
++	}, output);
+ 	if (render_pass == NULL) {
+ 		wlr_buffer_unlock(buffer);
+ 		return false;
+ 	}

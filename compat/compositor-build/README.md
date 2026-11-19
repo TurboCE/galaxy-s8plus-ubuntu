@@ -192,3 +192,46 @@ dependency resolution. This executes no compositor constructors or backend.
 Manifest variables override the build prefix for EGL/linker/plugin searches;
 global Ubuntu GL libraries remain unchanged. Physical display ownership and
 restoration supervision are still prerequisites for execution.
+
+The explicit panel candidate also applies bounded-present error handling and an
+opt-in color-pattern fixture. Failed HWC RPCs or timed-out prior fences terminate
+the supervised compositor instead of reusing uncertain buffers. Only
+G955N_PANEL_TEST_PATTERN=1 enables the fixture; ordinary tinywl behavior stays
+unchanged. The panel coordinator supplies a systemd deadline/restore action and
+requires real GPU log/present acceptance plus DECON/DSIM counter progress. These
+changes do not by themselves establish successful physical presentation.
+
+
+### Native GPU-to-panel handoff checkpoint
+
+Kernel24 and the private Android/HWC compositor completed two bounded 8-second
+panel-pattern trials. The first clean ownership/IPC trial retained Mali-G71
+OpenGL ES3.2, accepted at least60 HWC presents, advanced the two DECON frame
+counters by78 each and DSIM by83, and received/waited real present fences.
+The test pattern intentionally changes at10Hz; this is not a frame-rate benchmark.
+Both trials restored GDM and the native presenter, removed private processes,
+retained host mount/property state, boot identity and taint0, and recorded no new
+kernel fault signatures. Physical color confirmation is separately pending.
+GNOME remains on its original CPU rendering path; a pattern compositor pass is
+not desktop/app/touch/suspend qualification or resolution of kernel22 corruption.
+
+Actual failures corrected during these trials:
+- Prepared the Android graphics/fb0 alias using the existing native fb0 rdev.
+- Supplied a separate private128MiB /dev/shm for17MiB scene buffers; increased
+  only the compositor file-size limit from4MiB to128MiB. Logs remain bounded.
+- Passed the output from scene rendering through the output-aware renderer
+  dispatch; the previous NULL target produced No native window set and invalid
+  framebuffer draws. Ordinary modern renderer dispatch remains available.
+- Captured original Android log datagrams and obtained a real FMQ CHECK failure;
+  syscall tracing proved /dev/ashmem EACCES followed by mmap EBADF. Set only the
+  new private Ashmem inode to graphics-group access for the composer scope.
+- Exposed the existing private fimg2d node for display scope. A second successful
+  run eliminated the prior repeated libacryl missing-device/performance errors.
+
+The coordinator uses exact source/library manifests, a systemd deadline and
+independent display restoration. Debugger/tracer runs cannot qualify a panel
+pass. Vendor/runtime outputs, syscall traces and device identifiers stay private.
+Private evidence: compositor-build/panel-{ashmem,g2d}-result.json, preceding
+failure/debug/trace results, output-dispatch-build.log and current-host-tests.log.
+Existing optional-extension/property/log-directory findings remain recorded;
+no blanket error filtering or fake HWC/fence/property success was introduced.

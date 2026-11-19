@@ -1,0 +1,116 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PROPOSAL] fbdev: DECON: separate native fb lifetime from HWC frames
+
+The bootstrap framebuffer stores its sole ION handle/attachment/IOVA in the
+same slot that HWC WIN_CONFIG replaces and releases. fb_info retains the
+screen_base and smem_start, so native fbcon/pan/mmap can subsequently refer to
+freed kernel mapping or unmapped IOVA. This is a concrete native-console/HWC
+handoff defect; it is not established as the cause of the earlier kernel22
+crashes, which occurred before HWC/ION graphics trials.
+
+For framebuffer-console builds move that initial allocation into a persistent
+per-window owner, leaving HWC slots empty until their own first frame. mmap
+continues to map the native fb, independent of HWC slot changes. Teardown stops
+native scanout before unregister/release, then drops the persistent allocation.
+Non-console allocation behavior is retained. Applies after patch0023.
+Candidate only: requires actual build/model and handoff qualification.
+
+--- a/drivers/video/fbdev/exynos/dpu/decon.h
++++ b/drivers/video/fbdev/exynos/dpu/decon.h
+@@ -992,8 +992,10 @@
+ 	struct fb_info *fbinfo;
+ 
+ 	struct fb_videomode videomode;
+ 	struct decon_dma_buf_data dma_buf_data[MAX_PLANE_CNT];
++	/* Native fb mapping has framebuffer lifetime, not HWC frame lifetime. */
++	struct decon_dma_buf_data fb_dma_buf_data;
+ 	int plane_cnt;
+ 
+ 	int idx;
+ 	int dpp_id;
+--- a/drivers/video/fbdev/exynos/dpu/decon_core.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_core.c
+@@ -3645,10 +3645,30 @@
+ }
+ 
+ static void decon_release_windows(struct decon_win *win)
+ {
+-	if (win->fbinfo)
+-		framebuffer_release(win->fbinfo);
++	if (!win || !win->fbinfo)
++		return;
++	/* Probe unwind has no native scanout; remove stops DECON first and
++	 * unregisters fbcon before releasing this persistent allocation.
++	 */
++	if (win->fb_dma_buf_data.dma_addr) {
++		win->fbinfo->screen_base = NULL;
++		win->fbinfo->fix.smem_start = 0;
++		win->fbinfo->fix.smem_len = 0;
++		decon_free_dma_buf(win->decon, &win->fb_dma_buf_data);
++	}
++	framebuffer_release(win->fbinfo);
++}
++
++static void decon_keep_native_fb(struct decon_win *win)
++{
++	if (!IS_ENABLED(CONFIG_FRAMEBUFFER_CONSOLE))
++		return;
++	/* Move ownership, not a borrowed duplicate of the same ION reference. */
++	win->fb_dma_buf_data = win->dma_buf_data[0];
++	memset(&win->dma_buf_data[0], 0, sizeof(win->dma_buf_data[0]));
++	win->plane_cnt = 0;
+ }
+ 
+ static int decon_fb_alloc_memory(struct decon_device *decon, struct decon_win *win)
+ {
+@@ -3711,8 +3731,10 @@
+ 			handle, buf, win->idx);
+ 	if (!ret)
+ 		goto err_map;
+ 	map_dma = win->dma_buf_data[0].dma_addr;
++
++	decon_keep_native_fb(win);
+ 
+ 	dev_info(decon->dev, "alloated memory\n");
+ #else
+ 	fbi->screen_base = dma_alloc_writecombine(decon->dev, size,
+@@ -4309,8 +4331,16 @@
+ {
+ 	struct decon_device *decon = platform_get_drvdata(pdev);
+ 	int i;
+ 
++	/* The framebuffer's persistent IOVA must not be freed under scanout. */
++	if (decon->win[decon->dt.dft_win]->fb_dma_buf_data.dma_addr &&
++	    decon->state == DECON_STATE_ON) {
++		decon_hiber_block_exit(decon);
++		decon_disable(decon);
++		decon_hiber_unblock(decon);
++	}
++
+ 	decon->bts.ops->bts_deinit(decon);
+ 
+ 	pm_runtime_disable(&pdev->dev);
+ 	decon_put_clocks(decon);
+--- a/drivers/video/fbdev/exynos/dpu/decon_dsi.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_dsi.c
+@@ -1022,14 +1022,19 @@
+ {
+ #ifdef CONFIG_ION_EXYNOS
+ 	int ret;
+ 	struct decon_win *win = info->par;
++	struct dma_buf *buf;
+ 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+ 
+ 	/* fb offsets are relative to the framebuffer, in pages. Let dma-buf
+ 	 * and ION validate the requested offset/length against the allocation.
+ 	 */
+-	ret = dma_buf_mmap(win->dma_buf_data[0].dma_buf, vma, vma->vm_pgoff);
++	buf = win->fb_dma_buf_data.dma_buf ?
++		win->fb_dma_buf_data.dma_buf : win->dma_buf_data[0].dma_buf;
++	if (!buf)
++		return -ENODEV;
++	ret = dma_buf_mmap(buf, vma, vma->vm_pgoff);
+ 
+ 	return ret;
+ #else
+ 	return -ENODEV;

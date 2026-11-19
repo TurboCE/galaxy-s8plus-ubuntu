@@ -623,3 +623,64 @@
   baseline diagnostic candidate (#23), patches1..16 plus bounded ESS panic
   history, compiled and packed. Its configuration and DT match the prior build;
   deployment and runtime stability remain unverified. Source builds never flash.
+
+
+### Preserve the native framebuffer through hardware-composer handoff
+
+- Found a concrete lifetime defect before the first physical GPU handoff: the
+  initial console framebuffer shares the replaceable HWC scanout slot, whose
+  release drops the ION kernel mapping and IOVA while fb_info keeps its addresses.
+  It is not established as the cause of kernel22's earlier pre-HWC resets.
+- Added an explicit candidate ownership patch that moves the boot allocation
+  to a framebuffer-lifetime owner, keeps HWC frame slots separate, maps the
+  persistent buffer and stops native scanout before teardown. An actual-helper
+  ASan/UBSan model passed 128 three-plane handoffs and stable mmap selection; the
+  original-lifetime counterfactual triggers real heap-use-after-free.
+- Fresh kernel24 built from baseline patches1..16, mmap fix23, ownership
+  candidate28 and diagnostic27. Verified config/DT and every output hash, then
+  packed and wrote only BOOT with full readback. Fresh seven-partition backups
+  passed. EFS changes were only ext4 timestamps/count/write counter; PARAM only
+  expected normal/recovery history. MISC and calibration payloads were unchanged.
+- Native kernel24 booted with matching GNU build-id and active GDM/presenter/
+  Wi-Fi. Initial raw log has WARNING0/panic0 and taint0; existing other driver
+  findings and sustained stability still require qualification.
+- Added an exclusive bounded panel runtime with systemd deadline/restoration,
+  exact boot/build/hash checks, private devices and read-only context. Host tests
+  now total28. The first attempt refused a missing Android framebuffer alias
+  before starting the compositor and restored the original display services;
+  private alias preparation was corrected. Physical presentation remains pending.
+
+
+### Native GPU-to-panel handoff checkpoint
+
+Kernel24 and the private Android/HWC compositor completed two bounded 8-second
+panel-pattern trials. The first clean ownership/IPC trial retained Mali-G71
+OpenGL ES3.2, accepted at least60 HWC presents, advanced the two DECON frame
+counters by78 each and DSIM by83, and received/waited real present fences.
+The test pattern intentionally changes at10Hz; this is not a frame-rate benchmark.
+Both trials restored GDM and the native presenter, removed private processes,
+retained host mount/property state, boot identity and taint0, and recorded no new
+kernel fault signatures. Physical color confirmation is separately pending.
+GNOME remains on its original CPU rendering path; a pattern compositor pass is
+not desktop/app/touch/suspend qualification or resolution of kernel22 corruption.
+
+Actual failures corrected during these trials:
+- Prepared the Android graphics/fb0 alias using the existing native fb0 rdev.
+- Supplied a separate private128MiB /dev/shm for17MiB scene buffers; increased
+  only the compositor file-size limit from4MiB to128MiB. Logs remain bounded.
+- Passed the output from scene rendering through the output-aware renderer
+  dispatch; the previous NULL target produced No native window set and invalid
+  framebuffer draws. Ordinary modern renderer dispatch remains available.
+- Captured original Android log datagrams and obtained a real FMQ CHECK failure;
+  syscall tracing proved /dev/ashmem EACCES followed by mmap EBADF. Set only the
+  new private Ashmem inode to graphics-group access for the composer scope.
+- Exposed the existing private fimg2d node for display scope. A second successful
+  run eliminated the prior repeated libacryl missing-device/performance errors.
+
+The coordinator uses exact source/library manifests, a systemd deadline and
+independent display restoration. Debugger/tracer runs cannot qualify a panel
+pass. Vendor/runtime outputs, syscall traces and device identifiers stay private.
+Private evidence: compositor-build/panel-{ashmem,g2d}-result.json, preceding
+failure/debug/trace results, output-dispatch-build.log and current-host-tests.log.
+Existing optional-extension/property/log-directory findings remain recorded;
+no blanket error filtering or fake HWC/fence/property success was introduced.

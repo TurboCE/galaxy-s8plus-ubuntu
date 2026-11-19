@@ -1,0 +1,81 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] wlroots/hwc: bound present waits and stop on failed RPC
+
+Preserve original MIT attribution. This private candidate must not reuse a
+buffer after failed validation/client-target/present or uncompleted fence.
+Fail the supervised process rather than continue as though presentation worked.
+Log actual accepted RPC counts, not a physical display or GPU qualification.
+No hardware or runtime operation is performed by applying/building this patch.
+
+--- a/backend/hwcomposer/hwcomposer2.c
++++ b/backend/hwcomposer/hwcomposer2.c
+@@ -1,6 +1,7 @@
+ #include <android-config.h>
+ #include <assert.h>
+ #include <stdlib.h>
++#include <unistd.h>
+ #include <stdio.h>
+ #include <math.h>
+ #include <stddef.h>
+@@ -187,34 +188,53 @@
+ 	if (error != HWC2_ERROR_NONE && error != HWC2_ERROR_HAS_CHANGES) {
+ 		wlr_log(WLR_ERROR, "prepare: validate failed for display %ld: %d",
+ 			output->hwc_display_id, error);
+-		return;
++		_exit(31);
+ 	} else if ((error == HWC2_ERROR_HAS_CHANGES && num_types) || num_requests) {
+ 		wlr_log(WLR_ERROR, "prepare: validate required changes for display %ld: %d",
+ 			output->hwc_display_id, error);
+-		return;
++		_exit(31);
+ 	} else if (error == HWC2_ERROR_HAS_CHANGES) {
+ 		error = hwc2_compat_display_accept_changes(hwc_display);
+ 		if (error != HWC2_ERROR_NONE) {
+ 			wlr_log(WLR_ERROR, "prepare: acceptChanges failed: %d", error);
+-			return;
++			_exit(31);
+ 		}
+ 	}
+ 
+-	hwc2_compat_display_set_client_target(hwc_display, /* slot */0, buffer,
+-		acquireFenceFd,
+-		HAL_DATASPACE_UNKNOWN);
++	error = hwc2_compat_display_set_client_target(hwc_display, /* slot */0, buffer,
++		acquireFenceFd, HAL_DATASPACE_UNKNOWN);
++	if (error != HWC2_ERROR_NONE) {
++		wlr_log(WLR_ERROR, "G955N setClientTarget failed: %d", error);
++		_exit(31); /* No uncertain buffer reuse; outer supervisor reaps HALs. */
++	}
+ 
+ 	int present_fence = -1;
+-	hwc2_compat_display_present(hwc_display, &present_fence);
++	error = hwc2_compat_display_present(hwc_display, &present_fence);
++	if (error != HWC2_ERROR_NONE) {
++		wlr_log(WLR_ERROR, "G955N present failed: %d", error);
++		_exit(31);
++	}
+ 
+ 	if (hwc2_output->hwc2_last_present_fence != -1) {
+-		sync_wait(hwc2_output->hwc2_last_present_fence, -1);
++		if (sync_wait(hwc2_output->hwc2_last_present_fence, 1000) < 0) {
++			wlr_log(WLR_ERROR, "G955N previous present fence failed/timed out");
++			_exit(32);
++		}
+ 		close(hwc2_output->hwc2_last_present_fence);
+ 	}
+ 
+ 	hwc2_output->hwc2_last_present_fence = present_fence != -1 ? dup(present_fence) : -1;
+ 
++	if (present_fence != -1 && hwc2_output->hwc2_last_present_fence == -1) {
++		wlr_log(WLR_ERROR, "G955N unable to retain present fence");
++		_exit(32);
++	}
+ 	HWCNativeBufferSetFence(buffer, present_fence);
++	static unsigned int accepted;
++	accepted++;
++	if (accepted <= 3 || !(accepted % 60))
++		wlr_log(WLR_INFO, "G955N HWC present accepted=%u fence=%s", accepted,
++			present_fence == -1 ? "already-complete" : "returned");
+ }
+ 
+ static struct wlr_hwcomposer_output* hwcomposer2_add_output(struct wlr_hwcomposer_backend *hwc_backend, int display)

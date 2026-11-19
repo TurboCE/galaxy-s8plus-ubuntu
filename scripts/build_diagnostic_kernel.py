@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', action='store_true')
     parser.add_argument('--builder', default='s9-g965n-builder:24.04.3')
+    parser.add_argument('--native-fb-owner',action='store_true',help='Include explicit mmap/native-fb lifetime proposals in build24')
     args = parser.parse_args()
     if not args.build:
         parser.print_help();return
@@ -26,6 +27,8 @@ def main():
     output.mkdir(mode=0o700)
     patchfiles = sorted(p for p in (ROOT/'patches').glob('*.patch') if int(p.name[:4])<=16)
     if len(patchfiles)!=16:raise SystemExit('Requires exact baseline patch chain 1..16')
+    if args.native_fb_owner:
+        patchfiles += [ROOT/'patches/0023-decon-mmap-page-offset.patch',ROOT/'patches/proposals/0028-decon-native-fb-lifetime.patch']
     patchfiles.append(ROOT/'patches/proposals/0027-ess-work-tail-on-panic.patch')
     plan = {'target':'SM-G955N','source':expected,'builder':args.builder,'volume':volume,
             'patches':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in patchfiles},
@@ -46,7 +49,7 @@ def main():
         'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig',
         'cmp /work/out/.config /port/artifacts/kernel-audio-proc/kernel.config',
         'cp /work/out/.config /output/kernel.config',
-        'make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" KBUILD_BUILD_VERSION=23 Image dtbs',
+        'make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" KBUILD_BUILD_VERSION='+('24' if args.native_fb_owner else '23')+' Image dtbs',
         'cp /work/out/arch/arm64/boot/Image /output/Image.unqualified',
         'cp /work/out/vmlinux /work/out/System.map /output/',
         'cp /work/out/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dtb /output/']
