@@ -1,0 +1,49 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] sensorhub: return actual poll_delay sysfs transfer counts
+
+The actual IIO poll_delay read is empty because show_sensor_delay formats the
+value but always returns zero. Its store updates the period but also returns
+zero. Native clients correctly interpret that as EOF/no progress, so cannot
+snapshot or safely restore the sampling period. Return scnprintf's count and
+the consumed write length; reject an unknown sensor index with EINVAL before
+any mutation. Leave numeric parsing and the original delay/MCU implementation
+unchanged. Successful attribute operations no longer log at error priority;
+real parse/index errors remain failures. Original Samsung GPL notices retained.
+
+--- a/drivers/sensorhub/brcm/ssp_sysfs.c
++++ b/drivers/sensorhub/brcm/ssp_sysfs.c
+@@ -471,12 +471,10 @@
+ 	struct ssp_data *data = dev_get_drvdata(dev);
+ 	int index = get_index_by_name(indio_dev, data);
+ 
+-	if (index >= 0) {
+-		snprintf(buf, PAGE_SIZE, "%lld\n", data->adDelayBuf[index]);
+-	}
+-
+-	pr_err("[SSP]: %s, dev_name = %s index = %d\n", __func__, indio_dev->name, index);
+-	return 0;
++	if (index < 0)
++		return -EINVAL;
++
++	return scnprintf(buf, PAGE_SIZE, "%lld\n", data->adDelayBuf[index]);
+ }
+ 
+ static ssize_t set_sensor_delay(struct device *dev,
+@@ -490,12 +488,11 @@
+ 	if (kstrtoll(buf, 10, &delay) < 0)
+ 		return -EINVAL;
+ 
+-	if (index >= 0) {
+-		change_sensor_delay(data, index, delay);
+-	}
+-
+-	pr_err("[SSP]: %s, dev_name = %s index = %d\n", __func__, indio_dev->name, index);
+-	return 0;
++	if (index < 0)
++		return -EINVAL;
++
++	change_sensor_delay(data, index, delay);
++	return size;
+ }
+ 
+ static ssize_t show_acc_delay(struct device *dev,

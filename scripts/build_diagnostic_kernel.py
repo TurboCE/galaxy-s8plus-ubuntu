@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--native-panel-safety',action='store_true',help='Include DPP metadata ownership and native pan/DPMS serialization proposal')
     parser.add_argument('--native-panel-qos',action='store_true',help='Include primary-panel pre-enable QoS ordering and error rollback')
     parser.add_argument('--native-ondemand-safety',action='store_true',help='Hold and check CPU governor private-data lifetime during display events')
+    parser.add_argument('--ssp-sysfs-counts',action='store_true',help='Fix SSP IIO poll_delay sysfs EOF/no-progress return counts')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -52,6 +53,7 @@ def main():
         patchfiles += audio
     if args.native_fb_owner:
         patchfiles += [ROOT/'patches/0023-decon-mmap-page-offset.patch',ROOT/'patches/proposals/0028-decon-native-fb-lifetime.patch']
+    if args.ssp_sysfs_counts:patchfiles.append(ROOT/'patches/0026-ssp-poll-delay-sysfs-count.patch')
     patchfiles.append(ROOT/'patches/proposals/0027-ess-work-tail-on-panic.patch')
     if args.native_panel_safety:patchfiles.append(ROOT/'patches/proposals/0029-dpp-config-lifetime-and-pan-power-lock.patch')
     if args.native_panel_qos:patchfiles.append(ROOT/'patches/proposals/0030-primary-panel-qos-transaction.patch')
@@ -65,6 +67,7 @@ def main():
     plan = {'target':'SM-G955N','source':expected,'builder':args.builder,'volume':volume,
             'patches':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in patchfiles},
             'build_version':version,'builder_image_id':image_id,'compiler_version':compiler,
+            'ssp_sysfs_counts':args.ssp_sysfs_counts,
             'audio_safety':args.audio_safety,
             'native_panel_safety':args.native_panel_safety,
             'native_panel_qos':args.native_panel_qos,

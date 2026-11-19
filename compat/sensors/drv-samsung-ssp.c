@@ -126,7 +126,7 @@ static gboolean start(SSP *s){
  for(guint i=0;i<G_N_ELEMENTS(attributes);i++){
   g_autofree char *path=g_build_filename(s->path,attributes[i],NULL);
   s->saved[i]=read_text(path);
-  if(!s->saved[i]||(i==2&&strcmp(s->saved[i],"0")))goto failed;
+  if(!s->saved[i]||!*s->saved[i]||strlen(s->saved[i])>19||strspn(s->saved[i],"0123456789")!=strlen(s->saved[i])||(i==2&&strcmp(s->saved[i],"0")))goto failed;
  }
  if(!save_lease(s))goto failed;
  node=g_strdup_printf("/dev/%s",g_udev_device_get_name(s->dev));

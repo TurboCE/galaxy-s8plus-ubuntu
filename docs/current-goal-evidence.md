@@ -1,19 +1,18 @@
 # Current seven-requirement evidence audit
 
 This is an incomplete-goal checkpoint. No requirement is removed or weakened by
-this audit. After owner-assisted recovery,28 was tested and failed a longer display-power
-trial.29 reboot-looped due to a builtin archive build error;28 was restored.
-The corrected GCC7 candidate30 has now been written with full BOOT readback;
-boot/GDM authentication and three Mali GNOME trials passed, but its default
-display-power trial auto-rebooted. A bounded MIF-floor comparison passed100
-cycles on both28 and30; the explicit service mitigation is being qualified. Private recovery materials are preserved.
+this audit. The latest running kernel is31 with reviewed ABOX safety fixes and the
+reversible MIF-floor mitigation. Owner touch login and actual accelerated GNOME
+trials passed. Kernel32, adding a proven SSP sysfs return-count fix, is building.
+The initiating corruption without the floor and the remaining hardware/UI
+acceptance are still open. This is an incomplete-goal checkpoint.
 
 | Owner requirement | Evidence actually available | Remaining acceptance |
 | --- | --- | --- |
 | Boot, select account and enter GNOME by touch | Owner confirmed manual account/password/desktop after repaired GDM and a26 reboot; authentication/autologin settings unchanged | Repeated stable boots and long use; power-hang failures prevent overall pass |
 | Real accelerated GNOME and fast touch response | Actual normal GNOME Mali-G71, EGL/Exynos gralloc, no swrast; three26 composition/popup passes; real27 Mali login | Physical response/latency and sustained application/display-power workload; commits/sec are not FPS |
 | No kernel errors; fix real driver defects | Reproduced/fixed DPP metadata lifetime, pan/power serialization, QoS ordering and Ondemand lifetime source bugs; private real RCU/stack-check fault records | Actual initiating corruption remains unresolved.26/27/28 hang;29 never reached Ubuntu due to a build error. Corrected30 also auto-rebooted without the diagnostic floor. Proposal32 improves a recovery path only |
-| Accel, magnetic, pedometer and ambient-light operation | Earlier native accel/gyro records; pinned magnetic/step/light decoders; uninstalled journalled accel/light SensorProxy candidate | Boot-time genuine firmware/calibration, actual claim/SIGKILL cleanup, live magnetic/step/ALS and physical motion/light acceptance |
+| Accel, magnetic, pedometer and ambient-light operation | Real31 accel/gyro/magnetic/light records and one step0 record; genuine MCU/calibration initialization. Installed guarded SensorProxy is stopped for a proven poll_delay return-count defect | Boot-time genuine firmware/calibration, actual claim/SIGKILL cleanup, live magnetic/step/ALS and physical motion/light acceptance |
 | Microphone and speaker | Bounded selected speaker PCM progress; scoped audio policy experiment | Acoustic speaker and microphone acceptance, stable routing and safe default policy. WirePlumber remains masked |
 | LTE modem without driver errors | Original protected RADIO/calibration preserved; modem device nodes; no SIM supplied | Actual modem bootstrap/driver checks; native modem control. Later SIM registration, mobile-only data/reconnect; no-SIM is not a modem pass |
 | Automatic rotation/brightness and normal Ubuntu toggles | Packed sensor backend work, raw backlight interface, checked Xorg/fbdev rotation source | Runtime screen rotation with correct touch mapping, genuine light response/backlight control, and actual Ubuntu enable/disable behavior |
@@ -71,3 +70,8 @@ and its AArch64 build pass; actual sensor runtime/kill/reboot acceptance remains
 pending. Kernel31 with the four previously reviewed ABOX safety patches added
 also builds/packs with matched config/ramdisk/DTBH and genuine builtin LZ4; it is
 not yet installed. All unfinished requirements remain open.
+
+
+Latest sensor details and failed live-claim boundaries are recorded in
+ssp-sysfs-return-counts.md. No physical step increase, axis/matrix or changing-light
+response is claimed from the raw stationary capture or the failed user trial.

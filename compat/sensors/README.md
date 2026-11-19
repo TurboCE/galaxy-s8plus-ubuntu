@@ -1,7 +1,9 @@
 # Samsung SSP native sensor work
 
-This directory contains a **build-only, uninstalled prototype** backend for the
-Ubuntu iio-sensor-proxy 3.5 API. It is not hardware acceptance or a completed
+This directory contains a **runtime candidate** backend for the Ubuntu
+iio-sensor-proxy 3.5 API. It was installed on31, then stopped after a kernel
+poll_delay return-count defect blocked actual claims. The guarded daemon now
+refuses empty settings without mutation; fixed32 runtime acceptance is pending. It is not hardware acceptance or a completed
 rotation/brightness solution. Display-power stability remains separately tracked; a temporary MIF-floor
 mitigation is being qualified on30.
 
@@ -80,3 +82,14 @@ readiness or coefficients. Both helpers must be installed root-owned under
 `/opt/g955n-sensors`, with the reviewed `light-calibration-probe.py`; the built
 daemon goes under its `libexec` subdirectory. These files remain a candidate
 until actual runtime, abrupt-termination and reboot tests pass.
+
+
+## First live claim failure
+
+See `docs/ssp-sysfs-return-counts.md`. Real31 raw records and original calibration
+initialization succeeded, but SensorProxy's discovery properties did not mean
+streaming worked. The kernel returned0 from both poll_delay callbacks even when
+the store changed state. Patch0026 fixes that ABI behavior; the backend refuses
+empty/non-numeric snapshots before mutation. The installed guarded candidate is
+stopped until the corrected kernel is tested. The initial requested user motion
+trial produced no acceptance data and must not be counted as a pass.

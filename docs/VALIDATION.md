@@ -531,3 +531,20 @@ its request. An independent guard vote prevented a floor gap during that test.
 The runtime policy remains a mitigation, not a kernel corruption fix. Earlier
 long-on state failures and the later three60-second off/five-second on30 pass
 are distinguished in mif-desktop-stability.md.
+
+
+### Actual31 sensor capture and SSP sysfs defect
+
+Genuine MCU initialization, read-only original calibration and bounded native
+accel/gyro/magnetic/light/step0 records succeeded on31. SensorProxy discovery
+worked but actual claims failed; the requested user motion trial yielded no
+acceptance data. Both real IIO poll_delay reads were empty. Original show/store
+callbacks always returned0, including stores that changed the RAM period.
+
+Patch0026 fixes the counts and unknown-index errors. Extracted original/fixed
+functions reproduce/pass under address/undefined sanitizers. The rebuilt backend
+rejects empty/non-numeric snapshots before mutation; actual31 negative testing
+verified unchanged mask/FIFO/scan/current-period state and no residual lease.
+Real IIO rules now request service activation. Candidate service remains stopped
+pending32 (same31 chain plus0026), which is building. See
+ssp-sysfs-return-counts.md for the failed claim's period-restoration limitation.

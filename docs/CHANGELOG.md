@@ -1246,3 +1246,20 @@ periodic holder wakeups using blocked termination signals/sigwait. Actual31
 normal termination/SIGKILL cleanup and zero CPU ticks over five seconds pass;
 a temporary guard retained the same minimum during lifecycle testing. See
 mif-desktop-stability.md for precise display-power/policy boundaries.
+
+
+### Actual31 sensor capture and SSP sysfs defect
+
+Genuine MCU initialization, read-only original calibration and bounded native
+accel/gyro/magnetic/light/step0 records succeeded on31. SensorProxy discovery
+worked but actual claims failed; the requested user motion trial yielded no
+acceptance data. Both real IIO poll_delay reads were empty. Original show/store
+callbacks always returned0, including stores that changed the RAM period.
+
+Patch0026 fixes the counts and unknown-index errors. Extracted original/fixed
+functions reproduce/pass under address/undefined sanitizers. The rebuilt backend
+rejects empty/non-numeric snapshots before mutation; actual31 negative testing
+verified unchanged mask/FIFO/scan/current-period state and no residual lease.
+Real IIO rules now request service activation. Candidate service remains stopped
+pending32 (same31 chain plus0026), which is building. See
+ssp-sysfs-return-counts.md for the failed claim's period-restoration limitation.
