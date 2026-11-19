@@ -492,3 +492,36 @@
   the supervised child, termination/reap and registration disappearance passed,
   and host state was restored. No ION or rendering device was exposed and no
   buffer allocation/presentation was attempted; desktop GPU acceptance is pending.
+
+### Authorized kernel 22 deployment and desktop login
+
+- With the owner next to the handset and explicitly authorizing replacement,
+  saved and verified the complete working kernel-15 BOOT before a graceful TWRP
+  transition. Fresh protected backups passed full read/hash verification.
+  EFS differed only in ext4 mount/write timestamps, mount count +1 and write
+  counter +4; PARAM only appended the expected N,N,R boot history. Calibration
+  payload, RECOVERY, CPEFS, RADIO and MISC were unchanged.
+- The reviewed installer wrote only the normal BOOT image and verified its
+  prefix and full-partition hashes. USERDATA was not rewritten. Kernel #22
+  booted into the installed Ubuntu filesystem; live build-id and configuration
+  match the final pcie-clock-bounds artifacts, including patch 0025.
+- Initial and subsequent captures report taint 0, no new WARN/BUG/panic/SysMMU
+  fault, active GDM/presenter and zero failed system units. Five modern syscall
+  negotiations retain actual ENOSYS without dumping registers. Explicit MFC
+  format coverage, special PCM access and whole-device suspend were not tested.
+  Existing ISP/pinctrl/I2C/panel/P2P/thermal/hidepid/IPI findings remain; this is
+  not an error-free kernel qualification.
+- Wi-Fi 5 GHz wlan0-bound HTTPS returned 200 and 254968 bytes after boot. CPU
+  policy matched the baseline and both clusters accumulated idle residency.
+  The owner confirmed manual on-screen-keyboard login to the GNOME desktop.
+  The account row initially only focused; a Return activation opened the password
+  prompt. This workaround does not establish that the touch activation issue
+  is fixed. The kernel input device is correctly classified as direct touch.
+- Fixed the persistent locale target: boot-time compatibility setup makes
+  /etc/default/locale a symlink to /etc/locale.conf, so shipping only the former
+  creates a dangling link after reboot. Added the canonical file and matching
+  overlay symlink, verified native PAM can now read LANG=C.UTF-8 without
+  restarting the owner's desktop session.
+- The live GNOME renderer remains llvmpipe, Accelerated:no. Dragging is also
+  limited by the temporary full-frame CRC/pan presenter; desktop GPU acceleration
+  has not been enabled by the kernel replacement.
