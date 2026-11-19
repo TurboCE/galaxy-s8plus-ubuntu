@@ -1,9 +1,9 @@
 # Current seven-requirement evidence audit
 
 This is an incomplete-goal checkpoint. No requirement is removed or weakened by
-this audit. The latest running kernel is31 with reviewed ABOX safety fixes and the
-reversible MIF-floor mitigation. Owner touch login and actual accelerated GNOME
-trials passed. Kernel32, adding a proven SSP sysfs return-count fix, is building.
+this audit. The latest running kernel is32 with ABOX safety and SSP sysfs count fixes,
+plus the reversible MIF-floor mitigation. Native sensor/brightness response,
+actual Mali GNOME trials and100 sensor-active DPMS cycles have bounded passes.
 The initiating corruption without the floor and the remaining hardware/UI
 acceptance are still open. This is an incomplete-goal checkpoint.
 
@@ -12,10 +12,10 @@ acceptance are still open. This is an incomplete-goal checkpoint.
 | Boot, select account and enter GNOME by touch | Owner confirmed manual account/password/desktop after repaired GDM and a26 reboot; authentication/autologin settings unchanged | Repeated stable boots and long use; power-hang failures prevent overall pass |
 | Real accelerated GNOME and fast touch response | Actual normal GNOME Mali-G71, EGL/Exynos gralloc, no swrast; three26 composition/popup passes; real27 Mali login | Physical response/latency and sustained application/display-power workload; commits/sec are not FPS |
 | No kernel errors; fix real driver defects | Reproduced/fixed DPP metadata lifetime, pan/power serialization, QoS ordering and Ondemand lifetime source bugs; private real RCU/stack-check fault records | Actual initiating corruption remains unresolved.26/27/28 hang;29 never reached Ubuntu due to a build error. Corrected30 also auto-rebooted without the diagnostic floor. Proposal32 improves a recovery path only |
-| Accel, magnetic, pedometer and ambient-light operation | Real31 accel/gyro/magnetic/light records and one step0 record; genuine MCU/calibration initialization. Installed guarded SensorProxy is stopped for a proven poll_delay return-count defect | Boot-time genuine firmware/calibration, actual claim/SIGKILL cleanup, live magnetic/step/ALS and physical motion/light acceptance |
+| Accel, magnetic, pedometer and ambient-light operation | Real31 raw records;32 native accel/light stream, owner tilt/shade response, measured mount matrix and actual SIGKILL cleanup. Step increase and physical magnetic/gyro acceptance remain open | Boot-time genuine firmware/calibration, actual claim/SIGKILL cleanup, live magnetic/step/ALS and physical motion/light acceptance |
 | Microphone and speaker | Bounded selected speaker PCM progress; scoped audio policy experiment | Acoustic speaker and microphone acceptance, stable routing and safe default policy. WirePlumber remains masked |
 | LTE modem without driver errors | Original protected RADIO/calibration preserved; modem device nodes; no SIM supplied | Actual modem bootstrap/driver checks; native modem control. Later SIM registration, mobile-only data/reconnect; no-SIM is not a modem pass |
-| Automatic rotation/brightness and normal Ubuntu toggles | Packed sensor backend work, raw backlight interface, checked Xorg/fbdev rotation source | Runtime screen rotation with correct touch mapping, genuine light response/backlight control, and actual Ubuntu enable/disable behavior |
+| Automatic rotation/brightness and normal Ubuntu toggles | 32 actual reported light2..189lux and backlight1091..11961 response; standard brightness setting roundtrip. Sensor orientation corrected; fbdev dynamic rotation missing | Runtime screen rotation with correct touch mapping, genuine light response/backlight control, and actual Ubuntu enable/disable behavior |
 
 Supporting state: docs/VALIDATION.md, greeter-touch-validation.md,
 kernel26-power-investigation.md, ondemand-panel-lifetime.md,
@@ -75,3 +75,10 @@ not yet installed. All unfinished requirements remain open.
 Latest sensor details and failed live-claim boundaries are recorded in
 ssp-sysfs-return-counts.md. No physical step increase, axis/matrix or changing-light
 response is claimed from the raw stationary capture or the failed user trial.
+
+
+Latest32 acceptance supersedes the earlier stopped-sensor checkpoint: native
+claims now stream after the SSP count fix. Sensor orientation and brightness
+response work; actual display rotation is still a separate unfinished feature.
+See the latest VALIDATION section for physical actions, daemon cleanup, locked
+visibility handling and mitigation-bound desktop power evidence.

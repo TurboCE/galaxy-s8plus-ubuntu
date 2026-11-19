@@ -27,6 +27,12 @@ def main():
  if len(shells)!=1:raise RuntimeError('Exactly one owner GNOME shell required')
  proc=shells[0];start=(proc/'stat').read_text().split()[21];env=dict(x.split('=',1) for x in (proc/'environ').read_bytes().decode().split('\0') if '=' in x)
  if env.get('XDG_SESSION_DESKTOP')!='ubuntu-g955n' or env.get('COGL_RENDERER')!='EGL_XLIB':raise RuntimeError('Not the normal GPU login')
+ # Visibility assertions are invalid behind the lock-screen compositor.
+ # Query the real owner session; do not unlock it or change authentication.
+ visible=subprocess.run(['setpriv','--reuid=1000','--regid=1000','--init-groups','--no-new-privs','/usr/bin/gdbus','call','--session','--dest','org.gnome.ScreenSaver','--object-path','/org/gnome/ScreenSaver','--method','org.gnome.ScreenSaver.GetActive'],env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=5)
+ if visible.returncode or visible.stdout.strip()!='(false,)':
+  print(json.dumps({'status':'incomplete','reason':'owner desktop locked or visibility unavailable','trials_run':0}),flush=True)
+  return 2
  maps=(proc/'maps').read_text();boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
  checks={'mali_driver_loaded':'libGLES_mali.so' in maps,'exynos_gralloc_loaded':'gralloc.exynos5.so' in maps,'private_egl_loaded':str(PREFIX/'lib/libEGL') in maps,'no_swrast':'swrast_dri.so' not in maps,'no_property_daemon':not Path('/dev/__properties__').exists()}
  if not all(checks.values()):raise RuntimeError('Wrong actual loaded graphics stack: '+str(checks))

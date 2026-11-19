@@ -1263,3 +1263,17 @@ verified unchanged mask/FIFO/scan/current-period state and no residual lease.
 Real IIO rules now request service activation. Candidate service remains stopped
 pending32 (same31 chain plus0026), which is building. See
 ssp-sysfs-return-counts.md for the failed claim's period-restoration limitation.
+
+
+### Installed32: actual SSP response and bounded GPU/power passes
+
+Installed0026-only32 after a fresh full31 backup and protected/readback checks.
+Cold boot initializes MCU/SensorProxy automatically. Owner motion/shade actions
+produce actual orientation and2..189 lux plus backlight response. Measured two
+axis signs and applied diag(-1,-1,1); a maintained reference pose then reports
+correctly. Actual daemon SIGKILL restores both sensor journals completely.
+
+Added an actual screen-lock precondition to the pixel verifier: locked visibility
+is incomplete, not a graphics-driver failure. After owner unlock, three Mali
+GNOME trials and100 sensor-active DPMS cycles pass under the explicit MIF policy.
+Dynamic screen rotation and remaining acceptance are not claimed complete.

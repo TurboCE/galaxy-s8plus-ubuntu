@@ -1,5 +1,5 @@
 # This image targets SM-G955N only. hrm_sensor's ABS axes are heart-rate data.
 SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="hrm_sensor", ENV{ID_INPUT_ACCELEROMETER}="", ENV{IIO_SENSOR_PROXY_TYPE}=""
 # Samsung packs payload + timestamp into one nonstandard IIO scan channel.
-SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="accelerometer_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-accel", ENV{ACCEL_LOCATION}="display", ENV{ACCEL_MOUNT_MATRIX}="1,0,0;0,1,0;0,0,1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"
+SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="accelerometer_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-accel", ENV{ACCEL_LOCATION}="display", ENV{ACCEL_MOUNT_MATRIX}="-1,0,0;0,-1,0;0,0,1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"
 SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="light_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-als", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"

@@ -548,3 +548,35 @@ verified unchanged mask/FIFO/scan/current-period state and no residual lease.
 Real IIO rules now request service activation. Candidate service remains stopped
 pending32 (same31 chain plus0026), which is building. See
 ssp-sysfs-return-counts.md for the failed claim's period-restoration limitation.
+
+
+### Kernel32 live SSP, brightness and desktop acceptance
+
+32's only source addition over31 is0026; config and external ramdisk/DTBH match.
+Actual builtin codec, fresh independent full31 backup, BOOT readback and all
+protected-partition comparisons passed. On reboot the native MCU, SensorProxy
+and QoS holder start automatically. Actual poll_delay reads/writes work and the
+native accel/light claims run. Original calibration initialization preserves EFS.
+
+Owner-confirmed tilt/cover actions produced real SensorProxy orientation changes
+and2..189 reported lux. Concurrent read-only backlight capture observed31 distinct
+values over1091..11961 raw units. This is bounded automatic-brightness response,
+not absolute photometric accuracy. The standard ambient-enabled setting roundtrip
+and a five-second constant-brightness off interval were checked/restored; a
+separate physical shade-under-off acceptance remains open.
+
+Known upright and left-edge-up poses originally reported bottom-up/right-up.
+Changed the measured mount matrix to diag(-1,-1,1); the same maintained
+left-edge-up pose then reports left-up. This fixes sensor orientation, not the
+still-missing dynamic display rotation backend. Actual SIGKILL of the daemon
+restored both complete journals, original masks/FIFO/scan/period settings, and
+removed its leases; the service then restarted successfully, same boot/taint0.
+
+A first32 pixel fixture ran behind a genuine screen lock and failed visibility,
+without a kernel exception. The verifier now refuses locked/unknown visibility
+before any fixture. After owner unlock, all three actual Mali GNOME trials pass.
+With a real owner-session idle inhibitor and the MIF mitigation,100 further
+actual desktop DPMS off/on cycles passed, same boot and taint0, with native
+sensor enable masks recorded. The inhibitor is transient, not an authentication
+or permanent power-policy change. Core corruption without the mitigation,
+long-term/deep-suspend, audio, modem and physical step/heading work remain open.
