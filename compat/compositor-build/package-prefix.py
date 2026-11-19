@@ -11,6 +11,7 @@ import subprocess
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--work',type=Path,default=Path('/work'))
 p.add_argument('--output',type=Path,required=True)
+p.add_argument('--include-x11',action='store_true',help='Include the separately built private X11 candidate')
 a=p.parse_args()
 if a.work != Path('/work') or a.output.exists():raise SystemExit('Use dedicated /work and fresh output')
 prefix=a.work/'prefix'; a.output.mkdir(parents=True,mode=0o700)
@@ -18,6 +19,7 @@ required=['bin/tinywl-g955n-candidate','lib/libEGL.so.1','lib/libGLESv2.so.2',
           'lib/libhardware.so.2','lib/libgralloc.so.1','lib/libhwc2.so.1']
 # Actual upstream plugin names and versions are checked rather than invented.
 required += ['lib/libhybris/eglplatform_'+name+'.so' for name in ('null','hwcomposer','wayland')]
+if a.include_x11:required.append('lib/libhybris/eglplatform_x11.so')
 required += [str(f.relative_to(prefix)) for f in (prefix/'lib/libhybris/linker').glob('*.so')]
 seen=set(); external=set(); elf={}
 def copy(relative):
@@ -43,6 +45,14 @@ def copy(relative):
         if match.exists():copy('lib/'+dep)
         else:external.add(dep)
 for name in required:copy(name)
+if a.include_x11:
+    # The private core appends one callback to this internal plugin ABI.
+    # Reject any old plugin object instead of reading past its exported table.
+    for name in ('null','hwcomposer','wayland','x11'):
+        plugin=a.output/'lib/libhybris'/('eglplatform_'+name+'.so')
+        symbols=subprocess.check_output(['readelf','-Ws',str(plugin)],text=True)
+        sizes={int(line.split()[2]) for line in symbols.splitlines() if line.split() and line.split()[-1]=='ws_module_info'}
+        if sizes!={14*8}:raise SystemExit('Mixed private window-system ABI: '+name)
 for link in a.output.rglob('*'):
     if link.is_symlink() and not link.exists():raise SystemExit('Broken packaged link: '+str(link))
 android=a.output/'android';android.mkdir()
@@ -63,7 +73,7 @@ for component in [a.work/'input/libhybris', *sorted((a.work/'sources').glob('*')
         target=a.output/'licenses'/component.name/license_file.name
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(license_file,target)
         licenses[str(target.relative_to(a.output))]=hashlib.sha256(target.read_bytes()).hexdigest()
-record={'licenses':licenses,'target':'SM-G955N','status':'packaged only; not executed; not hardware qualified','destination':base,
+record={'licenses':licenses,'target':'SM-G955N','features':{'private_x11_candidate':a.include_x11},'status':'packaged only; not executed; not hardware qualified','destination':base,
         'files':elf,'symlinks':{str(f.relative_to(a.output)):str(f.readlink()) for f in a.output.rglob('*') if f.is_symlink()},
         'external_linux_dependencies':sorted(external),'process_private_environment':env,
         'requires':'independently supervised Android manager/allocator/composer plus exclusive display and restoration watchdog'}

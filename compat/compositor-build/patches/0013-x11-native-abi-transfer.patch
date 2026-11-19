@@ -1,0 +1,370 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] adapt reviewed X11 source to current native-window ABI
+
+Use the pinned current uint64 usage ABI; bound fences and dimensions; retain
+explicit CPU ownership for X11 transfer. This candidate deliberately uses
+XPutImage, without unqualified DRIHybris/SHM buffer sharing. Convert actual
+Android channel layout to the X visual with pixman, rather than copying RGBA
+bytes into a BGRX image. Original upstream LGPL-2.1 notices are retained.
+
+--- a/hybris/egl/platforms/x11/Makefile.am
++++ b/hybris/egl/platforms/x11/Makefile.am
+@@ -6,6 +6,7 @@
+ 	-I$(top_srcdir)/include \
+ 	-I$(top_srcdir)/egl \
+ 	-I$(top_srcdir)/egl/platforms/common \
++	-I$(top_srcdir)/platforms/common \
+ 	$(ANDROID_HEADERS_CFLAGS) \
+ 	$(X11_CFLAGS)
+ eglplatform_x11_la_CXXFLAGS =
+--- a/hybris/egl/platforms/x11/eglplatform_x11.cpp
++++ b/hybris/egl/platforms/x11/eglplatform_x11.cpp
+@@ -30,6 +30,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
++#include <unistd.h>
+ extern "C" {
+ #include <eglplatformcommon.h>
+ };
+@@ -89,7 +90,7 @@
+ 
+ extern "C" _EGLDisplay *x11ws_GetDisplay(EGLNativeDisplayType display)
+ {
+-	X11Display *xdpy = new X11Display;
++	X11Display *xdpy = new X11Display{};
+ 	xdpy->xl_display = (Display *)display;
+ 
+ 	return &xdpy->base;
+@@ -97,8 +98,13 @@
+ 
+ extern "C" void x11ws_Terminate(_EGLDisplay *dpy)
+ {
+-	X11Display *xdpy = (X11Display *)dpy;
+-	delete xdpy;
++	/* Mapping lifetime is longer than one eglInitialize/eglTerminate cycle. */
++	(void)dpy;
++}
++
++extern "C" void x11ws_releaseDisplay(_EGLDisplay *dpy)
++{
++	delete (X11Display *)dpy;
+ }
+ 
+ extern "C" EGLNativeWindowType x11ws_CreateWindow(EGLNativeWindowType win, _EGLDisplay *display)
+@@ -171,14 +177,20 @@
+ {
+ 	_init_egl_funcs(dpy);
+ 	X11NativeWindow *window = static_cast<X11NativeWindow *>((struct ANativeWindow *)win);
++	if (!_eglCreateSyncKHR) {
++		HYBRIS_ERROR("X11 transfer requires real EGL fence synchronization");
++		_exit(33);
++	}
+ 	if (_eglCreateSyncKHR) {
+ 		/* The buffer is copied or imported by the X server right after this,
+ 		 * so rendering must have finished on the GPU. */
+ 		EGLSyncKHR sync = (*_eglCreateSyncKHR)(dpy, EGL_SYNC_FENCE_KHR, NULL);
+-		if (sync != EGL_NO_SYNC_KHR) {
+-			(*_eglClientWaitSyncKHR)(dpy, sync, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, EGL_FOREVER_KHR);
+-			(*_eglDestroySyncKHR)(dpy, sync);
++		if (sync == EGL_NO_SYNC_KHR ||
++			(*_eglClientWaitSyncKHR)(dpy, sync, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, 1000000000ULL) != EGL_CONDITION_SATISFIED_KHR) {
++			HYBRIS_ERROR("X11 rendering fence failed/timed out");
++			_exit(33);
+ 		}
++		(*_eglDestroySyncKHR)(dpy, sync);
+ 	}
+ 	window->finishSwap();
+ }
+@@ -239,5 +251,7 @@
+ 	x11ws_prepareSwap,
+ 	x11ws_finishSwap,
+ 	x11ws_setSwapInterval,
++	x11ws_releaseDisplay,
++	NULL, /* eglInitialized */
+ 	x11ws_eglGetConfigAttrib
+ };
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -35,6 +35,8 @@
+ 
+ #include "logging.h"
+ #include <eglhybris.h>
++#include <pixman.h>
++#include <stdint.h>
+ #include "xcb_drihybris.h"
+ #include <X11/Xutil.h>
+ 
+@@ -79,7 +81,7 @@
+     this->m_image = 0;
+     memset(&this->m_shminfo, 0, sizeof(this->m_shminfo));
+     this->m_shminfo.shmid = -1;
+-    this->m_useShm = XShmQueryExtension(xl_display) ? true : false;
++    this->m_useShm = false; /* XPutImage-only candidate; no global SysV IPC. */
+     this->m_format = HAL_PIXEL_FORMAT_RGBA_8888;
+ 
+     const_cast<int&>(ANativeWindow::minSwapInterval) = 0;
+@@ -105,6 +107,7 @@
+         window_attributes.height,
+         window_attributes.depth);
+ 
++    m_visual = window_attributes.visual ? window_attributes.visual : DefaultVisual(m_display, DefaultScreen(m_display));
+     m_width = window_attributes.width;
+     m_height = window_attributes.height;
+     m_depth = window_attributes.depth;
+@@ -130,6 +133,11 @@
+         TRACE("forced height=%d", m_height);
+     }
+ 
++    if (!m_width || !m_height || m_width > 8192 || m_height > 8192 ||
++        (uint64_t)m_width * m_height > 16 * 1024 * 1024) {
++        HYBRIS_ERROR("Invalid X11 native window dimensions");
++        _exit(34);
++    }
+     m_defaultWidth = m_width;
+     m_defaultHeight = m_height;
+ 
+@@ -148,7 +156,7 @@
+ 
+     m_specialEvent = 0;
+     m_haveDRIHybris = false;
+-    tryEnableDRIHybris();
++    /* DRIHybris reuse/release synchronization is not qualified. */
+ 
+     m_usage=GRALLOC_USAGE_HW_RENDER | GRALLOC_USAGE_HW_TEXTURE | GRALLOC_USAGE_SW_READ_OFTEN;
+     pthread_mutex_init(&mutex, NULL);
+@@ -251,12 +259,12 @@
+ 
+     /* If the buffer doesn't match the window anymore, re-allocate */
+     if ((unsigned int)wnb->width != m_width || (unsigned int)wnb->height != m_height
+-        || (unsigned int)wnb->format != m_format || (unsigned int)wnb->usage != m_usage)
++        || (unsigned int)wnb->format != m_format || (uint64_t)wnb->usage != m_usage)
+     {
+         TRACE("wnb:%p,win:%p %i,%i %i,%i x%x,x%x x%x,x%x",
+             wnb,m_window,
+             wnb->width,m_width, wnb->height,m_height,
+-            wnb->format,m_format, wnb->usage,m_usage);
++            wnb->format,m_format, (unsigned int)wnb->usage,(unsigned int)m_usage);
+         if (wnb == m_lastBuffer)
+             m_lastBuffer = NULL;
+         destroyBuffer(wnb);
+@@ -293,8 +301,16 @@
+ {
+     xcb_generic_event_t *ev;
+ 
+-    if (!m_specialEvent)
++    if (!m_specialEvent) {
++        XWindowAttributes attributes;
++        if (XGetWindowAttributes(m_display, m_window, &attributes) &&
++            attributes.width > 0 && attributes.height > 0 &&
++            attributes.width <= 8192 && attributes.height <= 8192 &&
++            (uint64_t)attributes.width * attributes.height <= 16 * 1024 * 1024 &&
++            ((unsigned int)attributes.width != m_width || (unsigned int)attributes.height != m_height))
++            resize(attributes.width, attributes.height);
+         return;
++    }
+ 
+     while ((ev = xcb_poll_for_special_event(m_connection, m_specialEvent)) != NULL) {
+         handlePresentEvent((xcb_present_generic_event_t *) ev);
+@@ -406,7 +422,10 @@
+     HYBRIS_TRACE_BEGIN("x11-platform", "queueBuffer_waiting_for_fence", "-%p", wnb);
+     if (fenceFd >= 0)
+     {
+-        sync_wait(fenceFd, -1);
++        if (sync_wait(fenceFd, 1000) < 0) {
++            HYBRIS_ERROR("X11 acquire fence failed/timed out");
++            _exit(33);
++        }
+         close(fenceFd);
+     }
+     HYBRIS_TRACE_END("x11-platform", "queueBuffer_waiting_for_fence", "-%p", wnb);
+@@ -572,6 +591,8 @@
+ int X11NativeWindow::setBufferCount(int cnt) {
+     TRACE("cnt:%d", cnt);
+ 
++    if (cnt == 0) cnt = 3;
++    if (cnt < 2 || cnt > 8) return -EINVAL;
+     if ((int)m_bufList.size() == cnt)
+         return NO_ERROR;
+ 
+@@ -604,6 +625,9 @@
+ }
+ 
+ int X11NativeWindow::setBuffersDimensions(int width, int height) {
++    if (width == 0 && height == 0) { width = m_defaultWidth; height = m_defaultHeight; }
++    if (width <= 0 || height <= 0 || width > 8192 || height > 8192 ||
++        (uint64_t)width * height > 16 * 1024 * 1024) return -EINVAL;
+     if (m_width != (unsigned int)width || m_height != (unsigned int)height)
+     {
+         TRACE("old-size:%ix%i new-size:%ix%i", m_width, m_height, width, height);
+@@ -616,14 +640,14 @@
+     return NO_ERROR;
+ }
+ 
+-int X11NativeWindow::setUsage(int usage) {
++int X11NativeWindow::setUsage(uint64_t usage) {
+     /* Keep Samsung's requested producer usage unchanged. Adding SW_READ at
+      * allocation time makes Exynos gralloc choose a linear CPU buffer that
+      * Bifrost refuses as a render target. We request CPU read access only
+      * while presenting the completed buffer to X11. */
+-    const unsigned int requested = (unsigned int)usage;
++    const uint64_t requested = usage;
+     if (window_debug())
+-        fprintf(stderr, "libhybris-x11: usage old=0x%x requested=0x%x effective=0x%x\n", m_usage, usage, requested);
++        fprintf(stderr, "libhybris-x11: usage old=0x%x requested=0x%x effective=0x%x\n", (unsigned int)m_usage, (unsigned int)usage, (unsigned int)requested);
+     if (requested != m_usage)
+     {
+         m_usage = requested;
+@@ -638,7 +662,7 @@
+ {
+     if (m_useShm)
+     {
+-        m_image = XShmCreateImage(m_display, CopyFromParent, m_depth,
++        m_image = XShmCreateImage(m_display, m_visual, m_depth,
+                                   ZPixmap, 0, &m_shminfo, m_width, m_height);
+         if (m_image)
+         {
+@@ -672,9 +696,13 @@
+         m_useShm = false;
+     }
+ 
+-    m_image = XCreateImage(m_display, CopyFromParent, m_depth, ZPixmap, 0,
++    m_image = XCreateImage(m_display, m_visual, m_depth, ZPixmap, 0,
+                            NULL, m_width, m_height, m_depth <= 16 ? 16 : 32, 0);
+-    return m_image != NULL;
++    if (!m_image) return false;
++    const size_t bytes = (size_t)m_image->bytes_per_line * m_image->height;
++    m_image->data = (char *)calloc(1, bytes);
++    if (!m_image->data) { XDestroyImage(m_image); m_image = NULL; return false; }
++    return true;
+ }
+ 
+ void X11NativeWindow::destroyImage()
+@@ -689,10 +717,9 @@
+         shmdt(m_shminfo.shmaddr);
+         m_shminfo.shmaddr = NULL;
+         m_shminfo.shmid = -1;
+-    }
+-    /* The data pointer is either the SHM segment or a gralloc mapping; neither
+-     * belongs to Xlib. */
+-    m_image->data = NULL;
++        m_image->data = NULL;
++    }
++    /* Plain XImage storage is owned by Xlib; the gralloc mapping never is. */
+     XDestroyImage(m_image);
+     m_image = NULL;
+ }
+@@ -730,28 +757,35 @@
+     const unsigned int cols = (unsigned int)wnb->width < (unsigned int)m_image->width
+                             ? (unsigned int)wnb->width : (unsigned int)m_image->width;
+ 
+-    if (m_useShm)
+-    {
+-        const size_t copy_line = src_line < (size_t)m_image->bytes_per_line
+-                               ? src_line : (size_t)m_image->bytes_per_line;
+-        for (unsigned int y = 0; y < rows; ++y)
+-            memcpy(m_image->data + (size_t)y * m_image->bytes_per_line,
+-                   (char *)vaddr + (size_t)y * src_line, copy_line);
+-        hybris_gralloc_unlock(wnb->handle);
+-        XShmPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, cols, rows, False);
+-        /* Do not recycle the single SHM image while Xorg is still reading it. */
+-        XSync(m_display, False);
+-    }
+-    else
+-    {
+-        /* Present straight out of the gralloc mapping; the row pitch is the
+-         * buffer stride, not the window width. */
+-        m_image->data = (char *)vaddr;
+-        m_image->bytes_per_line = src_line;
+-        XPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, cols, rows);
+-        m_image->data = NULL;
+-        hybris_gralloc_unlock(wnb->handle);
+-    }
++    pixman_format_code_t source_format, target_format;
++    switch (wnb->format) {
++    case HAL_PIXEL_FORMAT_RGBA_8888: source_format = PIXMAN_a8b8g8r8; break;
++    case HAL_PIXEL_FORMAT_RGBX_8888: source_format = PIXMAN_x8b8g8r8; break;
++    case HAL_PIXEL_FORMAT_BGRA_8888: source_format = PIXMAN_a8r8g8b8; break;
++    case HAL_PIXEL_FORMAT_RGB_565: source_format = PIXMAN_r5g6b5; break;
++    default: HYBRIS_ERROR("Unsupported X11 source format"); _exit(34);
++    }
++    if (m_image->bits_per_pixel == 32 && m_image->red_mask == 0xff0000 &&
++        m_image->green_mask == 0xff00 && m_image->blue_mask == 0xff)
++        target_format = m_depth == 32 ? PIXMAN_a8r8g8b8 : PIXMAN_x8r8g8b8;
++    else if (m_image->bits_per_pixel == 32 && m_image->red_mask == 0xff &&
++             m_image->green_mask == 0xff00 && m_image->blue_mask == 0xff0000)
++        target_format = m_depth == 32 ? PIXMAN_a8b8g8r8 : PIXMAN_x8b8g8r8;
++    else if (m_image->bits_per_pixel == 16 && m_image->red_mask == 0xf800 &&
++             m_image->green_mask == 0x7e0 && m_image->blue_mask == 0x1f)
++        target_format = PIXMAN_r5g6b5;
++    else { HYBRIS_ERROR("Unsupported X11 visual masks"); _exit(34); }
++    if (wnb->stride < wnb->width || src_line > INT32_MAX) _exit(34);
++    pixman_image_t *source = pixman_image_create_bits(source_format, wnb->width, wnb->height,
++        (uint32_t *)vaddr, src_line);
++    pixman_image_t *target = pixman_image_create_bits(target_format, m_image->width, m_image->height,
++        (uint32_t *)m_image->data, m_image->bytes_per_line);
++    if (!source || !target) _exit(34);
++    pixman_image_composite32(PIXMAN_OP_SRC, source, NULL, target, 0, 0, 0, 0, 0, 0, cols, rows);
++    pixman_image_unref(source); pixman_image_unref(target);
++    if (hybris_gralloc_unlock(wnb->handle) != 0) _exit(34);
++    XPutImage(m_display, m_window, m_gc, m_image, 0, 0, 0, 0, cols, rows);
++    XSync(m_display, False);
+ }
+ 
+ void X11NativeWindow::tryEnableDRIHybris()
+--- a/hybris/egl/platforms/x11/x11_window.h
++++ b/hybris/egl/platforms/x11/x11_window.h
+@@ -26,7 +26,8 @@
+ 
+ #ifndef X11_WINDOW_H
+ #define X11_WINDOW_H
+-#include "nativewindowbase.h"
++#include "eglnativewindowbase.h"
++#include <hardware/gralloc.h>
+ #include <hybris/gralloc/gralloc.h>
+ extern "C" {
+ #include <X11/Xlib-xcb.h>
+@@ -78,7 +79,7 @@
+     ClientX11Buffer(        unsigned int width,
+                             unsigned int height,
+                             unsigned int format,
+-                            unsigned int usage,
++                            uint64_t usage,
+                             unsigned int windowDepth)
+     {
+         // Base members
+@@ -110,7 +111,7 @@
+     }
+ };
+ 
+-class X11NativeWindow : public BaseNativeWindow {
++class X11NativeWindow : public EGLBaseNativeWindow {
+ public:
+     X11NativeWindow(Display* xl_display, Window xl_window);
+     ~X11NativeWindow();
+@@ -139,7 +140,7 @@
+     virtual unsigned int transformHint() const;
+     virtual unsigned int getUsage() const;
+     // perform calls
+-    virtual int setUsage(int usage);
++    virtual int setUsage(uint64_t usage);
+     virtual int setBuffersFormat(int format);
+     virtual int setBuffersDimensions(int width, int height);
+     virtual int setBufferCount(int cnt);
+@@ -160,6 +161,7 @@
+     std::deque<X11NativeWindowBuffer *> queue;
+ 
+     Display* m_display;
++    Visual* m_visual;
+     Window m_window;
+     XImage *m_image;
+     XShmSegmentInfo m_shminfo;
+@@ -180,7 +182,7 @@
+     unsigned int m_format;
+     unsigned int m_defaultWidth;
+     unsigned int m_defaultHeight;
+-    unsigned int m_usage;
++    uint64_t m_usage;
+ 
+     pthread_mutex_t mutex;
+     int m_freeBufs;

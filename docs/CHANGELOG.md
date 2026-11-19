@@ -763,3 +763,58 @@ GTK4 failures; egl-report-build.log. The current GNOME session still uses its
 previous CPU path. Source for a potential X11 EGL connection was located in
 pinned Droidian/libhybris and a public same-GPU S8 reference; neither reference
 is device qualification or permission to copy another device's binaries.
+
+
+### X11 bridge, ownership repair and GNOME GPU startup
+
+The owner confirmed the repeated red/green/blue pattern on the physical panel.
+The optional private X11 bridge then passed48 every-pixel color readbacks, a
+96x64 to128x96 resize, two EGL initialization/termination cycles and full buffer
+teardown on Mali-G71. Real Xwayland/HWC presentation, private process cleanup,
+restored GDM/presenter, unchanged host state, same boot, taint0 and no new
+kernel fault signatures passed. It uses GPU drawing with synchronized CPU
+XPutImage transfer; zero-copy presentation and desktop performance are not
+qualified by this result.
+
+Only six LGPL-noticed X11 files are selected from the hash-pinned public
+mur44ev/postmarketos-samsung-s8-gpu reference, with its MIT modification license.
+No reference musl/linker/gralloc/kernel/firmware patches or foreign binaries are
+imported. Patch0013 adapts the current native-window ABI, bounded real fences,
+actual XVisual/channel conversion, resize/format checks and display lifetime.
+Patch0014 extends the private window-system callback table; packaging rejects
+mixed old/new plugin ABIs. Real driver config validation precedes X visual
+translation. Default builds do not enable the optional X11 route.
+
+An actual local-handle double free was traced to the common gralloc1 release
+branch. The Android gralloc1 contract and the owner's driver disassembly agree:
+locally allocated handles are deleted by the driver; imported handles require
+manual deletion only without RELEASE_IMPLY_DELETE. Patch0015 also preserves
+ownership on failed release. An ASan/UBSan model of the actual branch passed all
+eight local/imported, capability and error combinations; the original branch
+reproduced real ASan use-after-free. No blanket capability quirk is used.
+
+GNOME46 itself subsequently passed a20-second bounded X11 compositing-manager
+startup on Mali-G71/GLES3.2, with a real high-priority EGL context, GNOME Shell
+started message, live Xwayland/compositor, HWC/counter progress and all outer
+cleanup/restoration/kernel guards. The first trial stopped because its private
+environment lacked the real system bus. A second exposed Xwayland's inherited
+4MiB file limit during RandR resize. The reviewed GNOME-only scope now binds
+the actual native system bus socket, supplies a private monitor configuration
+and allows128MiB framebuffer files for Xwayland, as already done for tinywl.
+A socket bind is actual IPC access, not read-only IPC. Other scopes cannot
+enable this access. All new private child PIDs are cleaned, including DBus
+activation children outside the initial process groups.
+
+This is a startup/presentation checkpoint, not a finished accelerated login
+session. Current ordinary GNOME remains on the CPU path. Touch forwarding,
+application compositing, full-size performance and normal session integration
+remain pending. PID namespace versus native Polkit/logind identity causes
+authorization warnings in this test; calendar registry, portal/FUSE/PipeWire,
+DPMS and optional service warnings remain recorded, not hidden or claimed fixed.
+The gralloc repair is separate from the unresolved old kernel22 corruption.
+
+Validation:33 host guard tests, actual-branch ownership sanitizer model and
+final incremental X11 cross-build passed. Private evidence: panel-owner-repeat,
+panel-x11, panel-gnome, panel-gnome-x11 and panel-gnome-x11-sized result JSONs;
+x11-platform-final-build.log, x11-host-tests.log and
+gralloc-ownership-model-final.log under artifacts/compositor-build/.

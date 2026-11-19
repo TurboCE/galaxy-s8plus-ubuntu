@@ -41,7 +41,7 @@ def bind_readonly(source, destination):
 
 
 def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
-                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False):
+                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False, native_system_bus=False):
     libc = ctypes.CDLL(None, use_errno=True)
     # If the outer supervisor disappears, killing namespace PID 1 also kills
     # all of its descendants and releases their private mounts.
@@ -53,6 +53,13 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
         raise SystemExit('Child did not enter a fresh PID namespace')
     if libc.unshare(0x00020000):  # CLONE_NEWNS, only this child changes mounts.
         raise OSError(ctypes.get_errno(), 'Unable to create private mount namespace')
+    bus_fd = None
+    if native_system_bus:
+        bus = Path('/run/dbus/system_bus_socket')
+        if not stat.S_ISSOCK(bus.stat().st_mode):
+            raise RuntimeError('Native system bus socket missing')
+        # Keep only its directory open across the private /run mount.
+        bus_fd = os.open('/run/dbus', os.O_PATH | os.O_DIRECTORY)
     run('mount', '--make-rprivate', '/')
     run('mount', '-t', 'tmpfs', '-o', 'mode=0700,size=64m', 'g955n-private-run', '/run')
     root = Path('/run/g955n-android-root')
@@ -87,6 +94,17 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
     for name in ('data', 'tmp', 'run', 'dev'):
         (root / name).mkdir(mode=0o755)
         (root / name).chmod(0o755)
+    if bus_fd is not None:
+        bus_dir = root / 'run/dbus'
+        bus_dir.mkdir(mode=0o755)
+        bus_dir.chmod(0o755)
+        target = bus_dir / 'system_bus_socket'
+        target.touch(mode=0o600)
+        subprocess.run(['mount', '--bind', f'/proc/self/fd/{bus_fd}/system_bus_socket', str(target)], check=True, pass_fds=(bus_fd,))
+        os.close(bus_fd)
+        # A socket bind exposes the real IPC service, not read-only IPC.
+        if not stat.S_ISSOCK(target.stat().st_mode):
+            raise RuntimeError('Native system bus bind failed')
     (root / 'tmp').chmod(0o1777)
     run('mount', '-t', 'tmpfs', '-o', 'mode=0755,size=16m', 'g955n-private-dev', str(root / 'dev'))
     for name, mode, number in devices:
@@ -221,7 +239,11 @@ def main():
     parser.add_argument('--include-mali-device', action='store_true',
                         help='Explicit reviewed headless GLES trial only; needs ION, exposes no display')
     parser.add_argument('--include-composer-ipc', action='store_true')
+    parser.add_argument('--include-system-bus', action='store_true',
+                        help='Expose the actual native system bus only to a reviewed GNOME display trial')
     args = parser.parse_args()
+    if args.include_system_bus and not (args.run_trial and args.include_display_devices and args.include_composer_ipc):
+        parser.error('System bus requires an explicit display/composer trial')
     if args.include_composer_ipc and (not args.run_trial or not (args.include_mali_device or args.include_display_devices)):
         parser.error('Composer IPC requires an explicit graphics runtime')
     if ((args.include_ion_device or args.include_mali_device) and
@@ -321,7 +343,7 @@ def main():
     if not pid:
         try:
             prepare_child(runtime, info_bytes, system, devices, library_dirs, args.seconds,
-                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc)
+                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc, args.include_system_bus)
         except BaseException as error:
             print('Private namespace setup failed: ' + str(error), flush=True)
             os._exit(1)

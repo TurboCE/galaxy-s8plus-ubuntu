@@ -1,0 +1,29 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libhybris: honor gralloc1 allocated/imported handle ownership
+
+The gralloc1 release contract requires manual close/delete without the release-
+implies-delete capability only for handles not allocated locally. The original
+S8 gralloc1 capability callback advertises layered buffers only; its release
+callback deletes locally allocated final references itself. Unconditional manual
+close/delete therefore accesses an already deleted handle. Distinguish local and
+imported ownership, retain advertised capability behavior and preserve errors.
+No global vendor quirk, fake return, or unsupported capability is introduced.
+Original upstream notices are retained.
+
+--- a/hybris/gralloc/gralloc.c
++++ b/hybris/gralloc/gralloc.c
+@@ -250,9 +250,11 @@
+     ) else if GRALLOC1(
+         ret = gralloc1_release(gralloc1_device, handle);
+ 
+-        // this needs to happen if the last reference is gone, this function is
+-        // only called in such cases.
+-        if (!gralloc1_release_implies_delete) {
++        /* gralloc1.h release(): without RELEASE_IMPLY_DELETE, the caller
++         * closes/deletes only imported handles. Locally allocated handles
++         * are owned by the HAL, which releases them itself. On an error no
++         * ownership transfer was established, so leave the handle intact. */
++        if (ret == 0 && !gralloc1_release_implies_delete && !was_allocated) {
+             native_handle_close((native_handle_t*)handle);
+             native_handle_delete((native_handle_t*)handle);
+         }

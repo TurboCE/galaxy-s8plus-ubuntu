@@ -33,7 +33,7 @@ FILES={'run-panel-trial.py','run-cpu-buffer-trial.py','allocator-cpu-buffer-tria
        'android-property-runtime','headless-buffer-probe'}
 COMMANDS=('/system/bin/servicemanager','/system/bin/hwservicemanager',
  '/vendor/bin/hw/android.hardware.graphics.allocator@2.0-service',
- '/vendor/bin/hw/android.hardware.graphics.composer@2.1-service',str(PREFIX/'bin/tinywl-g955n-candidate'),'/usr/bin/es2gears_wayland',str(BASE/'es2gears-wayland-safe'))
+ '/vendor/bin/hw/android.hardware.graphics.composer@2.1-service',str(PREFIX/'bin/tinywl-g955n-candidate'),'/usr/bin/es2gears_wayland',str(BASE/'es2gears-wayland-safe'),str(BASE/'x11-pixel-probe'))
 
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -57,7 +57,7 @@ def build_id():
 def review(path,sha):
  if digest(path)!=sha:raise RuntimeError('Review digest changed')
  data=json.loads(path.read_text())
- if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s') or set(data.get('files',{}))!=FILES:
+ if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s') or set(data.get('files',{}))!=FILES:
   raise RuntimeError('Wrong/incomplete exclusive panel scope')
  for name,expected in data['files'].items():
   p=BASE/name
@@ -73,18 +73,24 @@ def review(path,sha):
   p=PREFIX/name
   if not p.is_symlink() or str(p.readlink())!=target or not p.resolve().is_relative_to(PREFIX) or not p.exists():raise RuntimeError('Changed/escaping compositor link')
  if data.get('client_probe'):
-  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe','gtk4-zenity':Path('/usr/bin/zenity')}
+  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe','gtk4-zenity':Path('/usr/bin/zenity'),'x11-pixels':BASE/'x11-pixel-probe','gnome-x11':Path('/usr/bin/gnome-shell')}
   client_path=clients.get(data['client_probe'])
   if client_path is None or digest(client_path)!=data.get('client_probe_sha256'):raise RuntimeError('Changed client fixture')
   package['client_probe']=True
   package['client_command_path']=str(client_path)
   package['client_kind']=data['client_probe']
+  if data['client_probe'] in ('x11-pixels','gnome-x11'):
+   if not package.get('features',{}).get('private_x11_candidate') or digest(Path('/usr/bin/Xwayland'))!=data.get('xwayland_sha256'):raise RuntimeError('Changed X11 transport/renderer bundle')
+  if data['client_probe']=='gnome-x11' and digest(Path('/usr/bin/dbus-run-session'))!=data.get('dbus_run_session_sha256'):raise RuntimeError('Changed private session launcher')
   package['client_debugger']=data.get('client_debugger') is True
   if data.get('client_preload_sha256'):
    if digest(BASE/'trace-client-gl.so')!=data['client_preload_sha256']:raise RuntimeError('Changed client diagnostic')
    package['client_preload']=True
  if data.get('scope')=='exclusive-hwc-panel-gtk20s' and data.get('client_probe')!='gtk4-zenity':raise RuntimeError('GTK20 scope requires its fixed client')
- package['observation_seconds']=20 if data.get('scope')=='exclusive-hwc-panel-gtk20s' else 8
+ if data.get('scope')=='exclusive-hwc-panel-gnome20s' and data.get('client_probe')!='gnome-x11':raise RuntimeError('GNOME20 scope requires its fixed client')
+ if bool(data.get('native_system_bus'))!=(data.get('scope')=='exclusive-hwc-panel-gnome20s'):raise RuntimeError('Native system bus is restricted to explicit GNOME20 scope')
+ package['native_system_bus']=data.get('native_system_bus') is True
+ package['observation_seconds']=8 if data.get('scope')=='exclusive-hwc-panel-8s' else 20
  return data,package
 
 def android_processes():
@@ -146,6 +152,11 @@ def inner(boot,package):
  inherited=set(android_processes())
  if len(inherited)!=1:raise RuntimeError('Expected only the supervised hardware manager')
  legacy=panel_guard(boot);ctypes.CDLL(None).prctl(36,1,0,0,0)
+ bus=Path('/run/dbus/system_bus_socket')
+ if bus.exists()!=bool(package.get('native_system_bus')) or (bus.exists() and not stat.S_ISSOCK(bus.stat().st_mode)):raise RuntimeError('System bus differs from reviewed scope')
+ # Enumerate only after proving private PID/proc provenance.
+ def private_pids():return {int(p.name) for p in Path('/proc').glob('[0-9]*') if p.is_dir()}
+ inherited_private=private_pids()
  parent=os.getpid();processes=[];report={'panel_presented':False,'desktop_qualified':False};handles=[]
  binary=BASE/'headless-buffer-probe'
  def listing():
@@ -155,7 +166,7 @@ def inner(boot,package):
  def launch(command,name,system=False,env=None):
   log=tempfile.TemporaryFile(dir='/run');handles.append(log)
   p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,close_fds=True,
-   cwd='/',preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name=='compositor' else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
+   cwd='/',preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name in ('compositor','xwayland') else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
   processes.append((name,p,log));return p
  try:
   manager=launch(['/system/bin/servicemanager'],'standard_manager')
@@ -202,6 +213,32 @@ def inner(boot,package):
      client_env.update(HOME=str(home),XDG_CACHE_HOME=str(home/'cache'),XDG_CONFIG_HOME=str(home/'config'),GSETTINGS_BACKEND='memory',
       GDK_BACKEND='wayland',GDK_GL='gles',G_MESSAGES_DEBUG='all',HYBRIS_EGL_REPORT_RENDERER='1',GSK_RENDERER='gl',GTK_A11Y='none')
      client_args=['--info','--text=Ubuntu display test','--title=Ubuntu']
+    if package.get('client_kind') in ('x11-pixels','gnome-x11'):
+     authority=runtime/'Xauthority';cookie=os.urandom(16)
+     authority.write_bytes(struct.pack('!H',65535)+b''.join(struct.pack('!H',len(v))+v for v in [b'',b'77',b'MIT-MAGIC-COOKIE-1',cookie]));authority.chmod(0o600);os.chown(authority,1000,1000)
+     server_env={key:env[key] for key in ('HOME','USER','LOGNAME','LANG','PATH','XDG_RUNTIME_DIR','XDG_SESSION_TYPE')}
+     server_env.update(WAYLAND_DISPLAY='wayland-0',XAUTHORITY=str(authority))
+     xdir=Path('/tmp/.X11-unix');xdir.mkdir(mode=0o1777,exist_ok=True);xdir.chmod(0o1777)
+     server=launch(['/usr/bin/Xwayland',':77','-displayfd','1','-geometry','480x800','-shm','-nolisten','tcp','-auth',str(authority),'-noreset'],'xwayland',True,server_env)
+     server_log=processes[-1][2];ready_deadline=time.monotonic()+4
+     while server.poll() is None and time.monotonic()<ready_deadline:
+      if re.search(rb'(?m)^77\r?$',os.pread(server_log.fileno(),legacy.MAX_TRACE,0)):break
+      time.sleep(.05)
+     else:raise RuntimeError('Xwayland did not report real display readiness')
+     report['xwayland_ready']=True
+     client_env.update(DISPLAY=':77',XAUTHORITY=str(authority),HYBRIS_EGLPLATFORM='x11',HYBRIS_X11_DISABLE_SHM='1',HYBRIS_EGL_REPORT_RENDERER='1',G955N_ANDROID_PRIVATE_RUNTIME='1')
+     client_args=['--run-x11-pixel-trial',boot]
+    if package.get('client_kind')=='gnome-x11':
+     home=runtime/'gnome-home';home.mkdir(mode=0o700);os.chown(home,1000,1000)
+     config=home/'config';config.mkdir(mode=0o700);os.chown(config,1000,1000)
+     monitors=config/'monitors.xml'
+     monitors.write_text('<monitors version="2"><configuration><logicalmonitor><x>0</x><y>0</y><scale>1</scale><primary>yes</primary><monitor><monitorspec><connector>XWAYLAND0</connector><vendor>unknown</vendor><product>unknown</product><serial>unknown</serial></monitorspec><mode><width>480</width><height>800</height><rate>59.783</rate></mode></monitor></logicalmonitor></configuration></monitors>')
+     monitors.chmod(0o600);os.chown(monitors,1000,1000)
+     client_env.update(HOME=str(home),XDG_CACHE_HOME=str(home/'cache'),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(home/'share'),
+      XDG_SESSION_TYPE='x11',GSETTINGS_BACKEND='memory',COGL_DRIVER='gles2',COGL_RENDERER='EGL_XLIB',COGL_DEBUG='winsys',
+      GDK_BACKEND='x11',GDK_GL='gles',GSK_RENDERER='gl',GTK_A11Y='none',MUTTER_DEBUG_DUMMY_MODE_SPECS='480x800')
+     client_path='/usr/bin/dbus-run-session'
+     client_args=['--','/usr/bin/gnome-shell','--x11','--replace','--sm-disable']
     client_command=['/usr/bin/stdbuf','-oL','-eL',client_path,*client_args]
     if package.get('client_preload'):
      client_env['LD_PRELOAD']=str(BASE/'trace-client-gl.so')
@@ -232,6 +269,9 @@ def inner(boot,package):
   if client is not None and Path('/proc',str(client.pid),'maps').exists():
    report['client_maps']=Path('/proc',str(client.pid),'maps').read_text()
   report['client_alive_at_end']=client is not None and client.poll() is None
+  if package.get('client_kind') in ('x11-pixels','gnome-x11'):
+   report['client_completed_ok']=client is not None and client.poll()==0
+   report['xwayland_alive_at_end']=server.poll() is None
   report['compositor_exit_before_cleanup']=compositor.poll()
   if Path('/proc',str(compositor.pid),'limits').exists():report['compositor_limits']=Path('/proc',str(compositor.pid),'limits').read_text()
  except Exception as error:report['exception']=repr(error)
@@ -239,6 +279,11 @@ def inner(boot,package):
   report['cleanup']={}
   for name,p,log in reversed(processes):
    report['cleanup'][name]=legacy.stop_group(p);report[name+'_stdout']=legacy.read_log(log)
+  for sig in (signal.SIGTERM,signal.SIGKILL):
+   for pid in private_pids()-inherited_private:
+    try:os.kill(pid,sig)
+    except ProcessLookupError:pass
+   time.sleep(.1)
   deadline=time.monotonic()+1
   while time.monotonic()<deadline:
    try:
@@ -246,12 +291,17 @@ def inner(boot,package):
     if not pid:time.sleep(.02)
    except ChildProcessError:break
   report['remaining_private_processes']=sorted(set(android_processes())-inherited)
-  report['cleanup_passed']=not report['remaining_private_processes'] and all(p.poll() is not None for _,p,_ in processes)
+  report['remaining_private_pids']=sorted(private_pids()-inherited_private)
+  report['cleanup_passed']=not report['remaining_private_pids'] and not report['remaining_private_processes'] and all(p.poll() is not None for _,p,_ in processes)
   report['logs_complete']=all(os.fstat(log.fileno()).st_size<legacy.MAX_TRACE for log in handles)
   for log in handles:log.close()
  text=report.get('compositor_stdout','')
  report['diagnostic_debugger']=bool(package.get('diagnostic_debugger') or package.get('diagnostic_trace') or package.get('client_debugger') or package.get('client_preload'))
  report['client_gpu_passed']=bool(report.get('client_alive_at_end') and 'Mali-G71' in report.get('client_stdout',''))
+ if package.get('client_kind')=='x11-pixels':
+  report['client_gpu_passed']=bool(report.get('client_completed_ok') and report.get('xwayland_ready') and report.get('xwayland_alive_at_end') and 'Mali-G71' in report.get('client_stdout','') and 'G955N_X11_PIXEL_PASS frames=48 resize=passed repeated_egl=passed teardown=passed' in report.get('client_stdout',''))
+ if package.get('client_kind')=='gnome-x11':
+  report['client_gpu_passed']=bool(report['client_gpu_passed'] and report.get('xwayland_alive_at_end') and 'GNOME Shell started' in report.get('client_stdout',''))
  report['panel_presented']=bool(not report['diagnostic_debugger'] and report.get('android_log_complete') and report.get('compositor_alive_8s') and report.get('logs_complete') and report.get('display_irq_progressed') and 'Mali-G71' in text and 'G955N HWC present accepted=' in text and report['cleanup_passed'])
  if package.get('client_probe'):report['panel_presented']=report['panel_presented'] and report['client_gpu_passed']
  return report
@@ -296,7 +346,7 @@ def execute(path,sha):
   result['display_irq_before']=display_irqs()
   process=subprocess.Popen(['python3',str(BASE/'android-runtime-namespace.py'),'--run-trial','--runtime',str(BASE/'android-property-runtime'),
    '--property-info',str(BASE/'property_info'),'--stock-contexts',str(BASE/'android-stock-service-contexts'),'--seconds','40',
-   '--include-display-devices','--include-composer-ipc'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
+   '--include-display-devices','--include-composer-ipc',*(['--include-system-bus'] if package.get('native_system_bus') else [])],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
   os.set_blocking(process.stdout.fileno(),False);watch=selectors.DefaultSelector();watch.register(process.stdout,selectors.EVENT_READ);invoked=False;deadline=time.monotonic()+55
   while time.monotonic()<deadline:
    for key,_ in watch.select(.1):

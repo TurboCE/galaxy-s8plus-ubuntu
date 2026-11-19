@@ -1,0 +1,99 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] privately integrate X11 platform routing and native visuals
+
+Append the optional platform attribute callback after the current ABI fields;
+rebuild every bundled plugin together. Route X11 platform requests, translate
+X visual IDs only for clients, and use the original Android visual when
+preparing a native window. Preserve native driver failures and other platforms.
+All upstream notices are retained. This is a private-prefix candidate.
+
+--- a/hybris/egl/ws.h
++++ b/hybris/egl/ws.h
+@@ -57,10 +57,13 @@
+ 	void (*setSwapInterval)(EGLDisplay dpy, EGLNativeWindowType win, EGLint interval);
+ 	void (*releaseDisplay)(struct _EGLDisplay *dpy);
+ 	void (*eglInitialized)(struct _EGLDisplay *dpy);
++	EGLBoolean (*eglGetConfigAttrib)(struct _EGLDisplay *, EGLConfig, EGLint, EGLint *);
+ };
+ 
+ EGLBoolean ws_init(const char * egl_platform);
+ EGLBoolean ws_is_wayland(void);
++EGLBoolean ws_is_x11(void);
++EGLBoolean ws_eglGetConfigAttrib(struct _EGLDisplay *, EGLConfig, EGLint, EGLint *);
+ void ws_eglInitialized(struct _EGLDisplay *dpy);
+ 
+ struct _EGLDisplay *ws_GetDisplay(EGLNativeDisplayType native);
+--- a/hybris/egl/ws.c
++++ b/hybris/egl/ws.c
+@@ -43,6 +43,18 @@
+ 	return ensureCorrectWs("wayland");
+ }
+ 
++EGLBoolean ws_is_x11(void)
++{
++	return ensureCorrectWs("x11");
++}
++
++EGLBoolean ws_eglGetConfigAttrib(struct _EGLDisplay *display, EGLConfig config, EGLint attribute, EGLint *value)
++{
++	if (ws && ws->eglGetConfigAttrib)
++		return ws->eglGetConfigAttrib(display, config, attribute, value);
++	return EGL_FALSE;
++}
++
+ /*
+  * ws_init() will be called from __eglHybrisGetPlatformDisplayCommon() to
+  * load the selected platform. That means the loading of ws is postponed until
+--- a/hybris/egl/egl.c
++++ b/hybris/egl/egl.c
+@@ -229,6 +229,10 @@
+ 			hybris_ws = _defaultEglPlatform();
+ 			break;
+ 
++		case EGL_PLATFORM_X11_EXT:
++			hybris_ws = "x11";
++			break;
++
+ 		case EGL_PLATFORM_ANDROID_KHR:
+ 			// "null" ws passthrough everything, which essentially means
+ 			// the Android platform. Not to be confused with NULL (0) value.
+@@ -329,7 +333,18 @@
+ 
+ HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglGetConfigs, EGLDisplay, EGLConfig *, EGLint, EGLint *);
+ HYBRIS_IMPLEMENT_FUNCTION5(egl, EGLBoolean, eglChooseConfig, EGLDisplay, const EGLint *, EGLConfig *, EGLint, EGLint *);
+-HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglGetConfigAttrib, EGLDisplay, EGLConfig, EGLint, EGLint *);
++static EGLBoolean (*_eglGetConfigAttrib)(EGLDisplay, EGLConfig, EGLint, EGLint *);
++EGLBoolean eglGetConfigAttrib(EGLDisplay dpy, EGLConfig config, EGLint attribute, EGLint *value)
++{
++	HYBRIS_DLSYSM(egl, &_eglGetConfigAttrib, "eglGetConfigAttrib");
++	EGLBoolean result = (*_eglGetConfigAttrib)(dpy, config, attribute, value);
++	if (!result)
++		return result;
++	struct _EGLDisplay *display = hybris_egl_display_get_mapping(dpy);
++	if (display)
++		ws_eglGetConfigAttrib(display, config, attribute, value);
++	return result;
++}
+ 
+ EGLSurface eglCreateWindowSurface(EGLDisplay dpy, EGLConfig config,
+ 		EGLNativeWindowType win,
+@@ -343,14 +358,15 @@
+ 
+ 	assert(((struct ANativeWindow *) win)->common.magic == ANDROID_NATIVE_WINDOW_MAGIC);
+ 
+-	/* Linux Wayland clients select EGLConfig, not Android window formats.
++	/* Linux window-system clients select EGLConfig, not Android window formats.
+ 	 * Match that config before Mali validates the native window visual. */
+-	if (ws_is_wayland()) {
++	if (ws_is_wayland() || ws_is_x11()) {
+ 		EGLint visual = 0;
+-		if (eglGetConfigAttrib(dpy, config, EGL_NATIVE_VISUAL_ID, &visual) && visual > 0) {
++		HYBRIS_DLSYSM(egl, &_eglGetConfigAttrib, "eglGetConfigAttrib");
++		if ((*_eglGetConfigAttrib)(dpy, config, EGL_NATIVE_VISUAL_ID, &visual) && visual > 0) {
+ 			int error = native_window_set_buffers_format((struct ANativeWindow *)win, visual);
+ 			if (error != 0)
+-				HYBRIS_ERROR("Wayland native visual %d rejected: %d", visual, error);
++				HYBRIS_ERROR("Native visual %d rejected: %d", visual, error);
+ 		}
+ 		/* The real driver still validates/reports EGL surface errors. */
+ 	}

@@ -55,5 +55,16 @@
     "archive_sha256": "8db8ad62ac351dcb6c920a8d21c1d59cd4b06311b4ea6330ecb690d79b0645cd",
     "scope": "eglut/es2gears fixture only; not installed system-wide",
     "license": "MIT per-file notices retained"
+  },
+  "x11-platform-reference": {
+    "base_url": "https://codeload.github.com/libhybris/libhybris/tar.gz/60100a70f03d91224340d0b7e741e6f44e0f9618",
+    "base_commit": "60100a70f03d91224340d0b7e741e6f44e0f9618",
+    "base_archive_sha256": "89e6f71d404b5d56d685a94adc107ee4883cfdcb254ce6f84cd0fdc301f666b2",
+    "patch_url": "https://raw.githubusercontent.com/mur44ev/postmarketos-samsung-s8-gpu/e0e971b8be11c28a794d9cb7b6c909a1d09eca0d/patches/libhybris-android9-musl-x11.patch",
+    "reference_commit": "e0e971b8be11c28a794d9cb7b6c909a1d09eca0d",
+    "reference_patch_sha256": "2b56b938c6e7e1c04f84b647dcbe11e06aae9e7ba28edb749cb696e60f1b1f5b",
+    "scope": "Only six X11 platform files; no musl, linker, gralloc, kernel or firmware changes imported",
+    "license": "Original X11 files LGPL-2.1; reference modifications MIT; retain original notices",
+    "reference_license_sha256": "4e015e061ece66e3c209d777c4406c0e5fe8668754563d404c74034c78426fff"
   }
 }

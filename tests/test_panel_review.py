@@ -52,4 +52,10 @@ class PanelReviewGuard(unittest.TestCase):
  def test_longer_scope_cannot_run_without_its_fixed_gtk_client(self):
   self.data['scope']='exclusive-hwc-panel-gtk20s';self.write()
   with self.assertRaisesRegex(RuntimeError,'GTK20 scope'):self.verify()
+ def test_gnome_scope_requires_its_fixed_client(self):
+  self.data['scope']='exclusive-hwc-panel-gnome20s';self.write()
+  with self.assertRaisesRegex(RuntimeError,'GNOME20 scope'):self.verify()
+ def test_system_bus_rejected_for_pattern_scope(self):
+  self.data['native_system_bus']=True;self.write()
+  with self.assertRaisesRegex(RuntimeError,'Native system bus'):self.verify()
 if __name__=='__main__':unittest.main()

@@ -42,7 +42,7 @@ find "$WORK/build-libdroid/src" -maxdepth 1 \( -type f -o -type l \) -name "libd
 mkdir -p "$PREFIX/include/libdroid"
 cp "$DROID/include/libdroid/"*.h "$WORK/build-libdroid/include/libdroid/libdroid-version.h" "$PREFIX/include/libdroid/"
 cp "$WORK/build-libdroid/meson-private/libdroid-0.pc" "$PREFIX/lib/pkgconfig/"
-for patch_file in "$SCRIPTS/patches/"000[38]-*.patch "$SCRIPTS/patches/"001[12]-*.patch; do
+for patch_file in "$SCRIPTS/patches/"000[38]-*.patch "$SCRIPTS/patches/"001[125]-*.patch; do
 if patch -d "$WORK/input/libhybris" -p1 --forward --batch --dry-run --silent < "$patch_file"; then
  patch -d "$WORK/input/libhybris" -p1 --forward --batch < "$patch_file"
 elif ! patch -d "$WORK/input/libhybris" -p1 --reverse --batch --dry-run --silent < "$patch_file"; then
