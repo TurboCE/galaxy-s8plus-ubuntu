@@ -410,3 +410,24 @@
   which has not been started. Original allocator/mapper files and manifest
   declarations are present. ION was intentionally unavailable; desktop GPU
   acceleration remains pending.
+
+### Autonomous reconnect and CPU observations
+
+- Added an explicit bounded Wi-Fi reconnect probe using existing profiles and
+  no credential reads. On kernel 15, three cycles at 5745 MHz passed in 38.180
+  seconds and three at 2467 MHz passed in 50.206 seconds. Each cycle performed
+  a wlan0-bound HTTPS download: HTTP 200 and 254968 bytes. The original 5 GHz
+  profile was restored automatically; the boot stayed unchanged. USB serial
+  provided independent observation during intentional network disconnects.
+  This is reconnect/traffic evidence, not whole-system suspend/resume acceptance.
+- Added a bounded two-worker, low-priority CPU observation with a 65 C stop.
+  CPU0 and CPU4 completed the six-second workload. Observed clocks included
+  455000–1690000 and 2158000–2314000 kHz respectively; both clusters changed
+  frequency, both exposed idle-state residency counters advanced, and governor
+  and min/max settings were unchanged. Peak observed temperature was 54 C.
+  No system power policy, thermal trip or suspend setting was written.
+- Patch 0020 serializes CPU/L2 vote table updates and L2 control, and fixes a
+  VSS runtime-PM reference lost during clear. Extracted actual functions passed
+  ASan/UBSan and ThreadSanitizer concurrent-table checks; the complete candidate
+  compiled. It has not been deployed. L2 ACK timeout recovery remains a documented
+  unresolved contract in an excluded proposal, not an automatically applied fix.

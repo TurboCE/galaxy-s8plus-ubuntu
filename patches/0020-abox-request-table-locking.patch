@@ -1,0 +1,241 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] ASoC: abox: serialize CPU and L2 request-table access
+
+CPU and L2 votes arrive from both firmware IRQ handling and PCM process
+context. Unsynchronized searches can allocate the same free slot to different
+IDs and overwrite a live vote. Protect each table search/update and reader
+snapshot with one per-device IRQ-safe spinlock. Bounds failures unlock before
+returning. Worker clock programming, IPC and waits remain outside this lock.
+
+CPU vote bookkeeping preserves old/new transition ordering under the lock.
+Its existing callbacks only queue boot work or use pm_runtime_get/put, which
+are asynchronous RPM_ASYNC operations in this pinned kernel. The synchronous
+wrapper flushes after releasing the lock. Snapshot the table before shutdown
+clear, then update through the normal request API. Do not prewrite the old
+vote: doing so lost the VSS active-to-idle runtime-PM transition.
+
+Serialize L2 worker and shutdown control with a process-context mutex, taking
+the table snapshot only after that mutex is held. Clear uses the same order:
+l2c_lock then request_lock, and drops the spinlock before firmware/SRAM work.
+Thus shutdown clear cannot be followed by a previously snapshotted enable.
+Firmware IRQ vote submission acquires only request_lock and never the mutex.
+
+This corrects table access and control overlap, not firmware ACK timeout
+recovery, concurrent open-versus-device-shutdown policy, or asynchronous
+clock-programming error propagation. It does not establish that the captured
+ABOX MMU fault is resolved. Applies after 0019; based on pinned Samsung code.
+
+diff --git a/sound/soc/samsung/abox/abox.h b/sound/soc/samsung/abox/abox.h
+--- a/sound/soc/samsung/abox/abox.h
++++ b/sound/soc/samsung/abox/abox.h
+@@ -557,6 +557,7 @@
+ 	struct clk *clk_dmic;
+ 	struct pinctrl *pinctrl;
+ 	unsigned int clk_ca7_gear;
++	spinlock_t request_lock; /* CPU and L2 vote tables, including IRQ users */
+ 	struct abox_qos_request ca7_gear_requests[32];
+ 	struct work_struct change_cpu_gear_work;
+ 	unsigned int mif_freq;
+@@ -588,6 +589,7 @@
+ 	bool l2c_enabled;
+ 	struct abox_l2c_request l2c_requests[8];
+ 	struct work_struct l2c_work;
++	struct mutex l2c_lock; /* serializes firmware/SRAM control, never in IRQ */
+ 	struct notifier_block pm_nb;
+ 	struct notifier_block modem_nb;
+ 	struct notifier_block itmon_nb;
+
+diff --git a/sound/soc/samsung/abox/abox.c b/sound/soc/samsung/abox/abox.c
+--- a/sound/soc/samsung/abox/abox.c
++++ b/sound/soc/samsung/abox/abox.c
+@@ -3133,17 +3133,23 @@
+ {
+ 	struct abox_qos_request *request;
+ 	size_t len = ARRAY_SIZE(data->ca7_gear_requests);
++	unsigned long flags;
++	bool idle = true;
+ 
+ 	dev_dbg(dev, "%s(%x)\n", __func__, id);
+ 
++	spin_lock_irqsave(&data->request_lock, flags);
+ 	for (request = data->ca7_gear_requests;
+ 			request - data->ca7_gear_requests < len && request->id;
+ 			request++) {
+-		if (id == request->id)
+-			return (request->value >= CPU_GEAR_LOWER_LIMIT);
+-	}
+-
+-	return true;
++		if (id == request->id) {
++			idle = (request->value >= CPU_GEAR_LOWER_LIMIT);
++			break;
++		}
++	}
++
++	spin_unlock_irqrestore(&data->request_lock, flags);
++	return idle;
+ }
+ 
+ static void abox_check_call_cpu_gear(struct device *dev,
+@@ -3216,9 +3222,11 @@
+ 	unsigned int gear = UINT_MAX;
+ 	int result;
+ 	bool increasing;
++	unsigned long flags;
+ 
+ 	dev_dbg(dev, "%s\n", __func__);
+ 
++	spin_lock_irqsave(&data->request_lock, flags);
+ 	for (request = data->ca7_gear_requests;
+ 			request - data->ca7_gear_requests < len && request->id;
+ 			request++) {
+@@ -3228,6 +3236,7 @@
+ 				request->id, request->value, gear);
+ 	}
+ 
++	spin_unlock_irqrestore(&data->request_lock, flags);
+ 	increasing = (gear < data->clk_ca7_gear);
+ 	data->clk_ca7_gear = gear;
+ 
+@@ -3298,9 +3307,11 @@
+ {
+ 	struct abox_qos_request *request;
+ 	size_t len = ARRAY_SIZE(data->ca7_gear_requests);
++	unsigned long flags;
+ 
+ 	dev_info(dev, "%s(%x, %u)\n", __func__, id, gear);
+ 
++	spin_lock_irqsave(&data->request_lock, flags);
+ 	for (request = data->ca7_gear_requests;
+ 			request - data->ca7_gear_requests < len
+ 			&& request->id && request->id != id;
+@@ -3308,17 +3319,22 @@
+ 	}
+ 
+ 	if (request - data->ca7_gear_requests >= len) {
++		spin_unlock_irqrestore(&data->request_lock, flags);
+ 		dev_err(dev, "%s: out of index. id=%x, gear=%u\n", __func__,
+ 				id, gear);
+ 		return -ENOMEM;
+ 	}
+ 
++	/* These callbacks only queue boot work or asynchronous runtime PM.
++	 * Keep the old/new vote transition ordered with concurrent writers.
++	 */
+ 	abox_check_call_cpu_gear(dev, data, request->id, request->value,
+ 			id, gear);
+ 
+ 	request->value = gear;
+ 	wmb(); /* value is read only when id is valid */
+ 	request->id = id;
++	spin_unlock_irqrestore(&data->request_lock, flags);
+ 
+ 	queue_work(system_freezable_wq, &data->change_cpu_gear_work);
+ 
+@@ -3340,16 +3356,20 @@
+ 		struct abox_data *data)
+ {
+ 	struct abox_qos_request *req;
++	struct abox_qos_request snapshot[ARRAY_SIZE(data->ca7_gear_requests)];
++	unsigned long flags;
+ 	size_t len = ARRAY_SIZE(data->ca7_gear_requests);
+ 
+ 	dev_info(dev, "%s\n", __func__);
+ 
+-	for (req = data->ca7_gear_requests; req - data->ca7_gear_requests < len
++	spin_lock_irqsave(&data->request_lock, flags);
++	memcpy(snapshot, data->ca7_gear_requests, sizeof(snapshot));
++	spin_unlock_irqrestore(&data->request_lock, flags);
++	for (req = snapshot; req - snapshot < len
+ 			&& req->id; req++) {
+-		if (req->value < CPU_GEAR_LOWER_LIMIT) {
+-			req->value = CPU_GEAR_LOWER_LIMIT;
+-			abox_request_cpu_gear(dev, data, req->id, req->value);
+-		}
++		if (req->value < CPU_GEAR_LOWER_LIMIT)
++			abox_request_cpu_gear(dev, data, req->id,
++					CPU_GEAR_LOWER_LIMIT);
+ 	}
+ }
+ 
+@@ -4993,9 +5013,12 @@
+ 	size_t length = ARRAY_SIZE(data->l2c_requests);
+ 	struct abox_l2c_request *request;
+ 	bool enable = false;
++	unsigned long flags;
+ 
+ 	dev_dbg(dev, "%s\n", __func__);
+ 
++	mutex_lock(&data->l2c_lock);
++	spin_lock_irqsave(&data->request_lock, flags);
+ 	for (request = data->l2c_requests;
+ 			request - data->l2c_requests < length
+ 			&& request->id;
+@@ -5006,7 +5029,9 @@
+ 		}
+ 	}
+ 
++	spin_unlock_irqrestore(&data->request_lock, flags);
+ 	__abox_control_l2c(data, enable);
++	mutex_unlock(&data->l2c_lock);
+ }
+ 
+ int abox_request_l2c(struct device *dev, struct abox_data *data,
+@@ -5014,9 +5039,11 @@
+ {
+ 	struct abox_l2c_request *request;
+ 	size_t length = ARRAY_SIZE(data->l2c_requests);
++	unsigned long flags;
+ 
+ 	dev_info(dev, "%s(%#lx, %d)\n", __func__, (unsigned long)id, on);
+ 
++	spin_lock_irqsave(&data->request_lock, flags);
+ 	for (request = data->l2c_requests;
+ 			request - data->l2c_requests < length
+ 			&& request->id && request->id != id;
+@@ -5024,6 +5051,7 @@
+ 	}
+ 
+ 	if (request - data->l2c_requests >= ARRAY_SIZE(data->l2c_requests)) {
++		spin_unlock_irqrestore(&data->request_lock, flags);
+ 		dev_err(dev, "%s: out of index. id=%#lx, on=%d\n",
+ 				__func__, (unsigned long)id, on);
+ 		return -ENOMEM;
+@@ -5032,6 +5060,7 @@
+ 	request->on = on;
+ 	wmb(); /* value is read only when id is valid */
+ 	request->id = id;
++	spin_unlock_irqrestore(&data->request_lock, flags);
+ 
+ 	schedule_work(&data->l2c_work);
+ 
+@@ -5057,15 +5086,20 @@
+ {
+ 	struct abox_l2c_request *req;
+ 	size_t len = ARRAY_SIZE(data->l2c_requests);
++	unsigned long flags;
+ 
+ 	dev_info(dev, "%s\n", __func__);
+ 
++	mutex_lock(&data->l2c_lock);
++	spin_lock_irqsave(&data->request_lock, flags);
+ 	for (req = data->l2c_requests; req - data->l2c_requests < len &&
+ 			req->id; req++) {
+ 		req->on = false;
+ 	}
+ 
++	spin_unlock_irqrestore(&data->request_lock, flags);
+ 	__abox_control_l2c(data, false);
++	mutex_unlock(&data->l2c_lock);
+ }
+ 
+ static int abox_enable(struct device *dev)
+@@ -5448,6 +5482,8 @@
+ 
+ 	init_waitqueue_head(&data->ipc_wait_queue);
+ 	spin_lock_init(&data->ipc_spinlock);
++	spin_lock_init(&data->request_lock);
++	mutex_init(&data->l2c_lock);
+ 	mutex_init(&data->ipc_mutex);
+ 	wake_lock_init(&data->wake_lock, WAKE_LOCK_SUSPEND, "abox");
+ 	for (i = SET_MIXER_SAMPLE_RATE; i <= SET_INMUX4_SAMPLE_RATE; i++)
