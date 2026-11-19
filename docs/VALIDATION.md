@@ -7,7 +7,7 @@ No row may become PASS from configuration or compilation alone.
 Runtime capture tooling exists in scripts/collect_linux.py; it refuses an
 unexpected kernel/DT. Stock dmesg was denied and kernel logcat returned no
 entries. Thus neither stock nor Ubuntu logs have been certified clean.
-Sixteen host tests pass; these are tooling checks, not hardware acceptance tests.
+Twenty-three host tests pass; these are tooling checks, not hardware acceptance tests.
 BOOT-only trials recovered concrete panic logs: the initial gzip decoder mismatch
 was fixed and unpacking succeeded on the second trial. That trial then panicked
 in ABOX regcache initialization and failed USB gadget binding. The third trial
@@ -25,9 +25,9 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 
 | Feature | Android baseline evidence | Ubuntu acceptance test | Ubuntu status |
 | --- | --- | --- | --- |
-| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Partial: kernel 22 BOOT-only replacement/readback and Ubuntu USB/network/manual desktop login passed, live build-id/config match; taint 0 but actual driver findings remain. Cold-boot/suspend qualification pending |
-| Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: owner confirmed GDM login, touch/OSK authentication and GNOME desktop on kernel 11; CPU/fbdev only, rotation/brightness/resume pending |
-| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Partial: private libhybris Mali-G71 shader/readback passed 10000 frames at 1440x2960 in 21.989 seconds; desktop presentation, thermal qualification and resume pending |
+| Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | Failed kernel-22 stability: three unexpected reboots; two have pointer/state corruption traces and the third has a watchdog/safe-panic reset record, despite initially passing boot/login. Restored complete known-working kernel-15 BOOT with readback; Ubuntu/GDM/Wi-Fi returned, taint 512 remains. Cold-boot/suspend qualification pending |
+| Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | Partial: manual OSK login/desktop confirmed. Desktop remains llvmpipe and sluggish. Experimental damage-driven presenter is quarantined after kernel-22 failures; original presenter restored. Rotation/brightness/resume and account touch activation pending |
+| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | Partial: private libhybris Mali-G71 shader/readback passed 10000 frames at 1440x2960 in 21.989 seconds; private HWC2/wlroots/tinywl cross-link completed only, never executed on phone. Buffer/fence/presentation, thermal qualification and resume pending |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: three explicit disconnect/reconnect cycles per band, each with bound-interface TLS HTTP 200 and 254968-byte download at 2467/5745 MHz; original profile restored, same boot. Full suspend/resume pending |

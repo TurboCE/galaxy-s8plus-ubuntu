@@ -1,0 +1,83 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PROPOSAL] trace: exynos-ss: retain bounded work history in panic log
+
+Diagnostic candidate only; excluded from the automatic patches/*.patch chain.
+No claim of fixing the worker/RCU corruption observed in kernel #22.
+
+The existing ESS work ring records callback start/end even in minimized mode,
+but is cleared on the next boot. Copy its last 32 records per CPU to the normal
+panic log before the large task dump, so the existing last_kmsg can preserve a
+bounded recent history without enabling full function tracing or changing the
+normal workqueue hot path. Dump only once and only after verifying the ring's
+initialized mapping/size. Do not re-enable logging after show_regs stopped it.
+
+Records are best-effort value snapshots: another CPU might have been writing an
+entry when stopped. Recorded worker/task/function pointers must never be
+followed in the panic dumper; print raw pointer values for offline symbolization.
+Bound task names explicitly. No allocation, new lock, control-register write,
+service operation, or new memory reservation is introduced. The existing atomic
+once guard and printk path are used only on panic. Current and other CPUs are
+all included because corruption may originate on a different CPU.
+
+Validation must check bounded/wrapped indexing, empty/uninitialized rings,
+nonterminated names, invalid recorded pointers and one-time output. A successful
+build/model test does not establish live panic persistence or the corruption's
+root cause. The addresses/logs must remain private with the device evidence.
+
+diff --git a/drivers/trace/exynos-ss.c b/drivers/trace/exynos-ss.c
+--- a/drivers/trace/exynos-ss.c
++++ b/drivers/trace/exynos-ss.c
+@@ -2166,6 +2166,45 @@
+ 	return 0;
+ }
+ 
++/* Diagnostic only: bounded value snapshots, never follow recorded pointers.
++ * The work ring already exists in minimized mode and show_regs may have
++ * disabled new writes before this panic notifier runs.
++ */
++static void exynos_ss_dump_work_tail(void)
++{
++	static atomic64_t dumped = ATOMIC64_INIT(0);
++	struct exynos_ss_item *item;
++	unsigned int cpu, n, slot;
++	unsigned int mask = ARRAY_SIZE(ess_log->work[0]) - 1;
++	int head;
++	struct work_log record;
++
++	if (!ess_base.enabled || !ess_log)
++		return;
++	item = &ess_items[ess_desc.kevents_num];
++	if (!item->entry.enabled_init || !item->entry.vaddr ||
++			item->entry.size < ESS_HEADER_TOTAL_SZ + sizeof(*ess_log) ||
++			(unsigned long)ess_log != item->entry.vaddr + ESS_HEADER_TOTAL_SZ)
++		return;
++	if (atomic64_cmpxchg(&dumped, 0, 1))
++		return;
++
++	pr_emerg("ESS_WORK_TAIL v1 last=32_per_cpu best_effort raw_pointers_only\n");
++	for (cpu = 0; cpu < ARRAY_SIZE(ess_log->work); cpu++) {
++		head = atomic_read(&ess_idx.work_log_idx[cpu]);
++		for (n = 32; n > 0; n--) {
++			slot = ((unsigned int)head - (n - 1)) & mask;
++			memcpy(&record, &ess_log->work[cpu][slot], sizeof(record));
++			if (!record.time)
++				continue;
++			record.task_comm[TASK_COMM_LEN - 1] = '\0';
++			pr_emerg("ESS_WORK cpu=%u slot=%u time_ns=%llu worker=%p fn=%p sp=%lx en=%d comm=%.*s\n",
++				cpu, slot, record.time, record.worker, record.fn,
++				record.sp, record.en, TASK_COMM_LEN - 1, record.task_comm);
++		}
++	}
++}
++
+ static int exynos_ss_panic_handler(struct notifier_block *nb,
+ 				   unsigned long l, void *buf)
+ {
+@@ -2183,6 +2222,7 @@
+ #else
+ 	pr_emerg("exynos-snapshot: panic - normal[%s]\n", __func__);
+ #endif
++	exynos_ss_dump_work_tail();
+ 	exynos_ss_dump_task_info();
+ 	flush_cache_all();
+ #ifdef CONFIG_SEC_DEBUG

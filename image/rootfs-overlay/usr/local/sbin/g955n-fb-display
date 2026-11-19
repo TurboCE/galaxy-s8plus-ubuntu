@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import signal
 import struct
+import sys
 import time
 import zlib
 
@@ -40,13 +41,97 @@ try:
     struct.pack_into('II', var, 16, 0, 0)
     fcntl.ioctl(fd, 0x4611, 0)  # FBIOBLANK / UNBLANK
     with mmap.mmap(fd, size, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ) as pixels:
-        previous = None
-        print('Native framebuffer presentation active; GPU remains unqualified', flush=True)
-        while running:
-            checksum = zlib.crc32(pixels)
-            if checksum != previous:
-                fcntl.ioctl(fd, 0x4606, var, True)  # FBIOPAN_DISPLAY / scanout
-                previous = checksum
-            time.sleep(0.2)
+        if os.environ.get('G955N_FB_XDAMAGE') != '1':
+            # Keep the previously working baseline until the later kernel
+            # corruption is diagnosed. The faster path is explicit opt-in.
+            previous = None
+            print('Native CPU framebuffer legacy presentation active; GPU remains unqualified', flush=True)
+            while running:
+                checksum = zlib.crc32(pixels)
+                if checksum != previous:
+                    fcntl.ioctl(fd, 0x4606, var, True)
+                    previous = checksum
+                time.sleep(0.2)
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            # Observe X damage in disposable subprocesses. Never let X server
+            # shutdown close this framebuffer fd or exit the presenter itself.
+            monitor = None
+            try:
+                sys.path.insert(0, '/usr/local/lib/g955n')
+                from g955n_xdamage import DamageMonitor
+                monitor = DamageMonitor()
+            except Exception as error:
+                print('X damage unavailable; retaining checksum fallback: ' + type(error).__name__, flush=True)
+            previous = sparse_previous = None
+            pending = True
+            next_pan = next_check = next_sparse = 0.0
+            mode = None
+            pans = damages = full_checks = 0
+            stats_at = time.monotonic()
+            # Full-frame WC-memory reads are expensive. Keep safety scans off the
+            # presentation loop, and use them infrequently while X damage works.
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix='fb-check') as executor:
+                future = None
+                try:
+                    print('Native CPU framebuffer presentation active; GPU remains unqualified', flush=True)
+                    while running:
+                        dirty = False
+                        if monitor is not None:
+                            try:
+                                dirty = monitor.poll()
+                            except Exception as error:
+                                print('Damage observer failed; checksum fallback: ' + type(error).__name__, flush=True)
+                                monitor.close()
+                                monitor = None
+                        ready = monitor is not None and monitor.ready
+                        current_mode = 'xdamage-30hz' if ready else 'checksum-fallback'
+                        if current_mode != mode:
+                            print('Framebuffer mode: ' + current_mode, flush=True)
+                            mode = current_mode
+                            next_check = 0.0
+                            pending = True
+                        now = time.monotonic()
+                        if dirty:
+                            pending = True
+                            damages += 1
+                        if ready and now >= next_sparse:
+                            # Sample all RGB byte lanes at fixed page intervals.
+                            # This is only a low-cost safety signal; it cannot replace
+                            # X damage or the periodic complete checksum.
+                            sample = 0
+                            for lane in range(3):
+                                sample = zlib.crc32(pixels[lane::4096], sample)
+                            if sample != sparse_previous:
+                                pending = True
+                                sparse_previous = sample
+                            next_sparse = now + 0.2
+                        if future is not None and future.done():
+                            checksum = future.result()
+                            future = None
+                            full_checks += 1
+                            if checksum != previous:
+                                pending = True
+                                previous = checksum
+                            next_check = time.monotonic() + (2.0 if ready else 0.2)
+                        if future is None and now >= next_check:
+                            future = executor.submit(zlib.crc32, pixels)
+                        if pending and now >= next_pan:
+                            pan_started = time.monotonic()
+                            fcntl.ioctl(fd, 0x4606, var, True)
+                            pending = False
+                            pans += 1
+                            # Space request starts, rather than adding another full
+                            # interval after a blocking driver/vblank wait.
+                            next_pan = pan_started + 1.0 / 30.0
+                        if now - stats_at >= 60:
+                            print('Framebuffer interval: mode=%s pan_requests=%d damage_batches=%d full_checks=%d; requests are not measured panel FPS' %
+                                  (mode, pans, damages, full_checks), flush=True)
+                            stats_at = now
+                            pans = damages = full_checks = 0
+                        time.sleep(1.0 / 60.0)
+                finally:
+                    if monitor is not None:
+                        monitor.close()
 finally:
     os.close(fd)

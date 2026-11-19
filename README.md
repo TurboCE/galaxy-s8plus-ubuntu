@@ -36,9 +36,19 @@ under active bring-up. No SIM is present for cellular end-to-end tests.
 
 Ubuntu Desktop packages are now installed on the test handset. A framebuffer
 presentation path produced physical console text confirmed by the owner. GNOME
-login is being configured using temporary CPU/fbdev rendering; this is not a
+login and manual on-screen-keyboard authentication reached the desktop using
+temporary CPU/fbdev rendering. GNOME remains llvmpipe and sluggish; this is not a
 Mali acceleration pass. The owner has a private local login credential; automatic
 login is disabled and SSH remains key-only. Never put credentials in Git.
+
+Current recovery status (2026-11-19): kernel 22 failed sustained operation with
+three unexpected resets. The complete known-working kernel-15 BOOT was restored
+and verified, preserving USERDATA and recovery/calibration partitions. Ubuntu,
+GDM and Wi-Fi returned, but existing kernel warnings remain. The experimental
+faster presenter is quarantined and disabled by default. Private HWC2/wlroots
+compositor candidates cross-link; they have never run on the handset. See the
+[kernel investigation](docs/kernel22-stability-investigation.md) and
+[graphics build boundary](compat/compositor-build/README.md).
 
 ## Approach
 

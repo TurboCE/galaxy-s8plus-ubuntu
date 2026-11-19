@@ -525,3 +525,73 @@
 - The live GNOME renderer remains llvmpipe, Accelerated:no. Dragging is also
   limited by the temporary full-frame CRC/pan presenter; desktop GPU acceleration
   has not been enabled by the kernel replacement.
+
+### Reduce CPU framebuffer presentation overhead
+
+- Replaced repeated synchronous whole-frame reads with an isolated active-X11
+  DAMAGE observer and coalesced pan requests, capped at 30 request starts per
+  second. The main process retains the framebuffer fd while session discovery
+  and Xlib I/O run in disposable subprocesses. Worker failure/reconnect tests
+  passed without signalling Xorg or ending the owner's desktop session.
+- Whole-frame CRC remains as a low-rate asynchronous safety scan; missing
+  observation restores the prior checksum fallback. Sparse RGB samples are an
+  additional safety signal, not a correctness replacement. No GPU renderer or
+  global GL library was changed. Image finalization stages the observer module.
+- Natural idle observations measured the whole new service at about 14.74% of
+  one core versus 43.59% for the earlier presenter sample. These were not a
+  perfectly controlled identical-scene benchmark. A first animation sample was
+  behind the lock screen and was explicitly excluded from visible-update claims.
+- After confirming unlocked state, one temporary owned-window test observed
+  38 successful FBIOPAN_DISPLAY returns, matching 38 DSIM and both DECON
+  frame-done interrupt increments; all test resources were cleaned up and taint
+  remained 0. Notification counts/request limits are not a measured 30 FPS
+  guarantee. The owner reports some improvement but continued sluggishness.
+- GNOME is still llvmpipe/CPU rendered. The improvement reduces the temporary
+  presentation bottleneck; it does not complete desktop GPU acceleration.
+
+
+### Kernel-22 stability failure and full BOOT rollback
+
+- Subsequent operation produced three unexpected reboots. Preserved complete
+  private previous-kernel buffers and persistent journals; initial taint-0
+  captures did not qualify sustained stability. Latest faults include workqueue
+  worker/stack pointer corruption and scheduler/RCU faults. Earlier sections in
+  Samsung's retained buffers belong to older boots and must not be counted as
+  new faults. A particular driver, governor, display path or idle state has not
+  been established as the cause. No new ION/GPU/HWC buffer trial was executed.
+- Stopped live graphics experiments. Restored the exact original framebuffer
+  presenter and made the new damage/threaded mode an explicit, disabled-by-default
+  source option. Its performance measurements remain historical; the user still
+  reports lag and GNOME remains llvmpipe, Accelerated:no.
+- Added an explicit full-partition BOOT rollback tool. It verifies the working
+  backup hash/length/model, normal reference-image hash and matching prefix,
+  current predecessor receipt, exact recovery identity/capacity, protected
+  backups and live hashes before writing only BOOT. Complete readback and
+  protected-partition hashes passed; USERDATA was not rewritten. Seven new
+  guard tests pass, bringing the host suite to 23. This is tooling verification,
+  not whole-device hardware acceptance.
+- Fresh recovery backup differences were limited to ext4 EFS mount/write
+  metadata and expected PARAM boot history; calibration payload and other
+  protected partitions were unchanged. Complete kernel-15 BOOT was restored
+  from its pre-trial backup. Native uname confirms kernel 15, GDM and original
+  presenter are active, Wi-Fi has an address and no system units are failed.
+  Existing taint 512 remains; no clean-kernel or long-duration acceptance claimed.
+- Added an inactive bounded ESS work-history-on-panic proposal and validation
+  notes. Strict patch application, actual object compilation and extracted-helper
+  ASan/UBSan checks passed; it remains excluded from automatic patches, without
+  a full integrated kernel build, deployment or live panic-persistence test.
+  CPU idle review has not proved a suspend-register defect; changing idle states
+  would be a separate diagnostic, not an established fix.
+
+### Offline graphics preparation; runtime held
+
+- Added bounded private allocator CPU-buffer and optional EGLImage/GLES readback
+  probes with model, boot-ID, reviewed hash manifest, private-node/namespace,
+  actual registration, trace and cleanup checks. No new buffer probe has been
+  run on this phone. Prior-boot review manifests cannot authorize a later boot.
+- Cross-linked private ARM64 Android9 HWC2 compatibility, Hybris/libdroid and
+  Droidian wlroots/tinywl candidates from pinned public sources and own private
+  link inputs. Source patches preserve attribution; vendor binaries and build
+  outputs are excluded from Git. Compilation is not phone presentation evidence.
+  Kernel stability, allocator/fence proof and an exclusive bounded display trial
+  remain prerequisites. Existing GNOME and global GL libraries are unchanged.
