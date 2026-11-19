@@ -1,0 +1,15 @@
+--- a/hybris/platforms/common/nativewindowbase.cpp
++++ b/hybris/platforms/common/nativewindowbase.cpp
+@@ -349,8 +349,10 @@
+ 			*value = 1;
+ 			return NO_ERROR;
+ 		case NATIVE_WINDOW_BUFFER_AGE:
+-			// sure :)
+-			*value = 2;
++			/* No backend-specific retained-content history is tracked. Zero
++			 * means unknown/new contents: require a complete redraw. Never
++			 * fabricate a retained age across resize/cancel/reallocation. */
++			*value = 0;
+ 			return NO_ERROR;
+ #endif
+ #if ANDROID_VERSION_MAJOR>=9

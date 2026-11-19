@@ -1,0 +1,19 @@
+--- a/tinywl/tinywl.c
++++ b/tinywl/tinywl.c
+@@ -2,6 +2,7 @@
+ #include <assert.h>
+ #include <getopt.h>
+ #include <stdbool.h>
++#include <string.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <time.h>
+@@ -743,6 +744,8 @@
+ 	struct wlr_output_state state;
+ 	wlr_output_state_init(&state);
+ 	wlr_output_state_set_enabled(&state, true);
++	const char *scale = getenv("G955N_PANEL_SCALE");
++	if (scale && !strcmp(scale, "2")) wlr_output_state_set_scale(&state, 2.f);
+ 
+ 	/* Some backends don't have modes. DRM+KMS does, and we need to set a mode
+ 	 * before we can use the output. The mode is a tuple of (width, height,

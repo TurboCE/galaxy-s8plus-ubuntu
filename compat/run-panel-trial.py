@@ -6,6 +6,7 @@ The systemd unit owns the deadline and an independent ExecStopPost restoration.
 No flashing, partition write, global GL replacement or automatic login.
 """
 import argparse
+import base64
 import socket
 import ctypes
 import fcntl
@@ -57,7 +58,7 @@ def build_id():
 def review(path,sha):
  if digest(path)!=sha:raise RuntimeError('Review digest changed')
  data=json.loads(path.read_text())
- if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s') or set(data.get('files',{}))!=FILES:
+ if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s','exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s') or set(data.get('files',{}))!=FILES:
   raise RuntimeError('Wrong/incomplete exclusive panel scope')
  for name,expected in data['files'].items():
   p=BASE/name
@@ -72,6 +73,7 @@ def review(path,sha):
  for name,target in package['symlinks'].items():
   p=PREFIX/name
   if not p.is_symlink() or str(p.readlink())!=target or not p.resolve().is_relative_to(PREFIX) or not p.exists():raise RuntimeError('Changed/escaping compositor link')
+ if data.get('popup_probe') and (not data.get('composite_probe') or data.get('client_probe')!='gnome-x11'):raise RuntimeError('Popup proof requires the fixed GNOME composite fixture')
  if data.get('client_probe'):
   clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe','gtk4-zenity':Path('/usr/bin/zenity'),'x11-pixels':BASE/'x11-pixel-probe','gnome-x11':Path('/usr/bin/gnome-shell')}
   client_path=clients.get(data['client_probe'])
@@ -82,15 +84,26 @@ def review(path,sha):
   if data['client_probe'] in ('x11-pixels','gnome-x11'):
    if not package.get('features',{}).get('private_x11_candidate') or digest(Path('/usr/bin/Xwayland'))!=data.get('xwayland_sha256'):raise RuntimeError('Changed X11 transport/renderer bundle')
   if data['client_probe']=='gnome-x11' and digest(Path('/usr/bin/dbus-run-session'))!=data.get('dbus_run_session_sha256'):raise RuntimeError('Changed private session launcher')
+  if data.get('composite_probe'):
+   if data['client_probe']!='gnome-x11' or digest(BASE/'x11-pixel-probe')!=data.get('composite_probe_sha256'):raise RuntimeError('Changed GNOME composite fixture')
+   package['composite_probe']=True
+   package['popup_probe']=data.get('popup_probe') is True
   package['client_debugger']=data.get('client_debugger') is True
   if data.get('client_preload_sha256'):
    if digest(BASE/'trace-client-gl.so')!=data['client_preload_sha256']:raise RuntimeError('Changed client diagnostic')
    package['client_preload']=True
  if data.get('scope')=='exclusive-hwc-panel-gtk20s' and data.get('client_probe')!='gtk4-zenity':raise RuntimeError('GTK20 scope requires its fixed client')
- if data.get('scope')=='exclusive-hwc-panel-gnome20s' and data.get('client_probe')!='gnome-x11':raise RuntimeError('GNOME20 scope requires its fixed client')
- if bool(data.get('native_system_bus'))!=(data.get('scope')=='exclusive-hwc-panel-gnome20s'):raise RuntimeError('Native system bus is restricted to explicit GNOME20 scope')
+ if data.get('scope') in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s') and data.get('client_probe')!='gnome-x11':raise RuntimeError('GNOME20 scope requires its fixed client')
+ if bool(data.get('native_system_bus'))!=(data.get('scope') in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s')):raise RuntimeError('Native system bus is restricted to explicit GNOME20 scope')
+ if data.get('touch_input'):
+  if data.get('scope') not in ('exclusive-hwc-panel-gnome20s','exclusive-hwc-panel-gnome60s') or digest(BASE/'seatd')!=data.get('seatd_sha256'):raise RuntimeError('Touch requires reviewed GNOME scope and seat broker')
+  package['touch_input']=True
  package['native_system_bus']=data.get('native_system_bus') is True
- package['observation_seconds']=8 if data.get('scope')=='exclusive-hwc-panel-8s' else 20
+ if data.get('scope')=='exclusive-hwc-panel-gnome60s' and not data.get('touch_input'):raise RuntimeError('GNOME60 scope requires its reviewed touchscreen')
+ if data.get('gnome_geometry'):
+  if data.get('client_probe')!='gnome-x11' or data['gnome_geometry']!='720x1480':raise RuntimeError('Unsupported GNOME geometry')
+  package['gnome_geometry']=data['gnome_geometry']
+ package['observation_seconds']=8 if data.get('scope')=='exclusive-hwc-panel-8s' else 60 if data.get('scope')=='exclusive-hwc-panel-gnome60s' else 20
  return data,package
 
 def android_processes():
@@ -126,7 +139,7 @@ def restore():
  saved['restored']=all(not was or active(unit) for unit,was in saved['services'].items());save_state(saved)
  if not saved['restored']:raise RuntimeError('Display services did not restore')
 
-def panel_guard(boot):
+def panel_guard(boot,touch=False):
  identity(boot)
  if os.getcwd()!='/' or (os.stat('.').st_dev,os.stat('.').st_ino)!=(os.stat('/').st_dev,os.stat('/').st_ino):raise RuntimeError('Working directory must be the private root')
  if os.environ.get('G955N_ANDROID_PRIVATE_RUNTIME')!='1' or os.getpid()==1:raise RuntimeError('Private runtime required')
@@ -137,8 +150,9 @@ def panel_guard(boot):
  nnp=ctypes.CDLL(None).prctl(39,0,0,0,0)
  if not legacy.legacy.nnp_verified(nnp,fields) or any(int(fields.get(k,'ffffffff'),16)&legacy.DANGEROUS for k in ('CapEff','CapPrm','CapBnd')):raise RuntimeError('Capabilities/NNP not removed')
  allowed={'null','zero','random','urandom','binder','hwbinder','vndbinder','ashmem','__properties__','socket','ion','mali0','fb0','graphics','sw_sync','fimg2d','shm'}
+ if touch:allowed.add('input')
  if set(p.name for p in Path('/dev').iterdir())-allowed:raise RuntimeError('Unreviewed device entry')
- for p in ('/efs','/proc/1/root/efs','/dev/block','/dev/snd','/dev/dri','/dev/video0','/dev/input'):
+ for p in ('/efs','/proc/1/root/efs','/dev/block','/dev/snd','/dev/dri','/dev/video0',*(() if touch else ('/dev/input',))):
   if Path(p).exists():raise RuntimeError('Forbidden panel device/path')
  for name,uid,gid,mode in [('binder',0,1003,0o660),('ashmem',0,1003,0o660),('hwbinder',0,1003,0o660),('ion',1000,1000,0o600),('mali0',0,1003,0o660),('fb0',0,1003,0o660),('graphics/fb0',0,1003,0o660)]:
   st=Path('/dev',name).lstat()
@@ -146,12 +160,16 @@ def panel_guard(boot):
  if not any(' /dev/shm ' in line and ' - tmpfs ' in line for line in Path('/proc/self/mountinfo').read_text().splitlines()):raise RuntimeError('Private compositor SHM mount missing')
  if Path('/dev/fb0').stat().st_rdev!=Path('/dev/graphics/fb0').stat().st_rdev:raise RuntimeError('Framebuffer aliases differ')
  if any(not os.statvfs(p).f_flag&os.ST_RDONLY for p in ('/proc','/sys','/system','/vendor','/home')):raise RuntimeError('Read-only context missing')
+ if touch:
+  if set(p.name for p in Path('/dev/input').iterdir())!={'event0'} or Path('/sys/class/input/event0/device/name').read_text().strip()!='sec_touchscreen':raise RuntimeError('Unreviewed input device')
+  node=Path('/dev/input/event0').stat()
+  if not stat.S_ISCHR(node.st_mode) or (node.st_uid,node.st_gid,stat.S_IMODE(node.st_mode))!=(0,0,0o600) or Path('/sys/class/input/event0/dev').read_text().strip()!=f'{os.major(node.st_rdev)}:{os.minor(node.st_rdev)}' or not os.statvfs('/run/udev').f_flag&os.ST_RDONLY:raise RuntimeError('Touchscreen/metadata provenance failed')
  return legacy
 
 def inner(boot,package):
  inherited=set(android_processes())
  if len(inherited)!=1:raise RuntimeError('Expected only the supervised hardware manager')
- legacy=panel_guard(boot);ctypes.CDLL(None).prctl(36,1,0,0,0)
+ legacy=panel_guard(boot,package.get('touch_input'));ctypes.CDLL(None).prctl(36,1,0,0,0)
  bus=Path('/run/dbus/system_bus_socket')
  if bus.exists()!=bool(package.get('native_system_bus')) or (bus.exists() and not stat.S_ISSOCK(bus.stat().st_mode)):raise RuntimeError('System bus differs from reviewed scope')
  # Enumerate only after proving private PID/proc provenance.
@@ -166,7 +184,7 @@ def inner(boot,package):
  def launch(command,name,system=False,env=None):
   log=tempfile.TemporaryFile(dir='/run');handles.append(log)
   p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,close_fds=True,
-   cwd='/',preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name in ('compositor','xwayland') else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
+   cwd='/',preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name in ('compositor','xwayland','client') else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
   processes.append((name,p,log));return p
  try:
   manager=launch(['/system/bin/servicemanager'],'standard_manager')
@@ -188,6 +206,15 @@ def inner(boot,package):
   runtime=Path('/run/g955n-compositor');runtime.mkdir(mode=0o700);os.chown(runtime,1000,1000)
   env={'HOME':'/home/ubuntu','USER':'ubuntu','LOGNAME':'ubuntu','LANG':'C.UTF-8','PATH':'/usr/bin:/bin',
        'XDG_RUNTIME_DIR':str(runtime),'XDG_SESSION_TYPE':'wayland','G955N_PANEL_TEST_PATTERN':'1',**package['process_private_environment']}
+  if package.get('touch_input'):
+   seatd=launch([str(BASE/'seatd'),'-u','ubuntu','-l','info','-n','1'],'seatd',False,{k:v for k,v in {**os.environ,'SEATD_VTBOUND':'0'}.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
+   until=time.monotonic()+3
+   while time.monotonic()<until and seatd.poll() is None:
+    if Path('/run/seatd.sock').is_socket():break
+    time.sleep(.05)
+   else:raise RuntimeError('Actual private seat broker not ready')
+   env.update(WLR_BACKENDS='hwcomposer,libinput',LIBSEAT_BACKEND='seatd',SEATD_SOCK='/run/seatd.sock')
+  if package.get('gnome_geometry'):env['G955N_PANEL_SCALE']='2'
   report['display_irq_before']=display_irqs()
   command=[str(PREFIX/'bin/tinywl-g955n-candidate')]
   if package.get('diagnostic_debugger'):
@@ -201,7 +228,7 @@ def inner(boot,package):
   android_log.bind('/dev/socket/logdw');os.chmod('/dev/socket/logdw',0o666)
   android_log.setblocking(False);captured=[];captured_bytes=0
   compositor=launch(command,'compositor',True,env)
-  client=None
+  client=None;composite_probe=None
   start=time.monotonic()
   while time.monotonic()-start<package['observation_seconds'] and compositor.poll() is None:
    if package.get('client_probe') and client is None and (runtime/'wayland-0').exists():
@@ -219,7 +246,7 @@ def inner(boot,package):
      server_env={key:env[key] for key in ('HOME','USER','LOGNAME','LANG','PATH','XDG_RUNTIME_DIR','XDG_SESSION_TYPE')}
      server_env.update(WAYLAND_DISPLAY='wayland-0',XAUTHORITY=str(authority))
      xdir=Path('/tmp/.X11-unix');xdir.mkdir(mode=0o1777,exist_ok=True);xdir.chmod(0o1777)
-     server=launch(['/usr/bin/Xwayland',':77','-displayfd','1','-geometry','480x800','-shm','-nolisten','tcp','-auth',str(authority),'-noreset'],'xwayland',True,server_env)
+     server=launch(['/usr/bin/Xwayland',':77','-displayfd','1','-geometry',package.get('gnome_geometry','480x800'),'-shm','-extension','MIT-SHM','-nolisten','tcp','-auth',str(authority),'-noreset'],'xwayland',True,server_env)
      server_log=processes[-1][2];ready_deadline=time.monotonic()+4
      while server.poll() is None and time.monotonic()<ready_deadline:
       if re.search(rb'(?m)^77\r?$',os.pread(server_log.fileno(),legacy.MAX_TRACE,0)):break
@@ -232,7 +259,14 @@ def inner(boot,package):
      home=runtime/'gnome-home';home.mkdir(mode=0o700);os.chown(home,1000,1000)
      config=home/'config';config.mkdir(mode=0o700);os.chown(config,1000,1000)
      monitors=config/'monitors.xml'
-     monitors.write_text('<monitors version="2"><configuration><logicalmonitor><x>0</x><y>0</y><scale>1</scale><primary>yes</primary><monitor><monitorspec><connector>XWAYLAND0</connector><vendor>unknown</vendor><product>unknown</product><serial>unknown</serial></monitorspec><mode><width>480</width><height>800</height><rate>59.783</rate></mode></monitor></logicalmonitor></configuration></monitors>')
+     width,height=package.get('gnome_geometry','480x800').split('x')
+     randr=subprocess.run(['/usr/bin/xrandr','--verbose'],env={**server_env,'DISPLAY':':77'},capture_output=True,text=True,timeout=2,preexec_fn=lambda:legacy.setup_child(parent,True))
+     report['xrandr_before_gnome']=randr.stdout
+     mode=re.search(r'^\s+'+width+'x'+height+r'\s+\([^)]*\)\s+([0-9.]+)MHz[^\n]*\*current[^\n]*\n[^\n]*total\s+(\d+)[^\n]*\n[^\n]*total\s+(\d+)',randr.stdout,re.M)
+     if randr.returncode or mode is None:raise RuntimeError('Actual X11 geometry/rate differs')
+     refresh=float(mode[1])*1000000/(int(mode[2])*int(mode[3]))
+     report['gnome_requested_mode']={'width':int(width),'height':int(height),'refresh':refresh}
+     monitors.write_text(f'<monitors version="2"><configuration><logicalmonitor><x>0</x><y>0</y><scale>1</scale><primary>yes</primary><monitor><monitorspec><connector>XWAYLAND0</connector><vendor>unknown</vendor><product>unknown</product><serial>unknown</serial></monitorspec><mode><width>{width}</width><height>{height}</height><rate>{refresh:.9f}</rate></mode></monitor></logicalmonitor></configuration></monitors>')
      monitors.chmod(0o600);os.chown(monitors,1000,1000)
      client_env.update(HOME=str(home),XDG_CACHE_HOME=str(home/'cache'),XDG_CONFIG_HOME=str(config),XDG_DATA_HOME=str(home/'share'),
       XDG_SESSION_TYPE='x11',GSETTINGS_BACKEND='memory',COGL_DRIVER='gles2',COGL_RENDERER='EGL_XLIB',COGL_DEBUG='winsys',
@@ -249,6 +283,10 @@ def inner(boot,package):
       '-ex','thread apply all bt','-ex','info registers','-ex','x/32gx $sp',
       '--args',client_path,*client_args]
     client=launch(client_command,'client',True,client_env)
+   if package.get('composite_probe') and client is not None and composite_probe is None:
+    client_log=next(log for name,_,log in processes if name=='client')
+    if b'GNOME Shell started' in os.pread(client_log.fileno(),legacy.MAX_TRACE,0):
+     composite_probe=launch([str(BASE/'x11-pixel-probe'),'--run-x11-composite-trial' if package.get('popup_probe') else '--run-x11-composite-no-popup-trial',boot],'composite_probe',True,client_env)
    while True:
     try:message=android_log.recv(65536)
     except BlockingIOError:break
@@ -272,6 +310,7 @@ def inner(boot,package):
   if package.get('client_kind') in ('x11-pixels','gnome-x11'):
    report['client_completed_ok']=client is not None and client.poll()==0
    report['xwayland_alive_at_end']=server.poll() is None
+  if package.get('composite_probe'):report['composite_probe_exit_before_cleanup']=composite_probe.poll() if composite_probe else None
   report['compositor_exit_before_cleanup']=compositor.poll()
   if Path('/proc',str(compositor.pid),'limits').exists():report['compositor_limits']=Path('/proc',str(compositor.pid),'limits').read_text()
  except Exception as error:report['exception']=repr(error)
@@ -290,6 +329,8 @@ def inner(boot,package):
     pid,_=os.waitpid(-1,os.WNOHANG)
     if not pid:time.sleep(.02)
    except ChildProcessError:break
+  failure=Path('/run/g955n-compositor/composite-failure.ppm')
+  if failure.is_file() and failure.stat().st_size<legacy.MAX_TRACE:report['composite_failure_ppm_base64']=base64.b64encode(failure.read_bytes()).decode()
   report['remaining_private_processes']=sorted(set(android_processes())-inherited)
   report['remaining_private_pids']=sorted(private_pids()-inherited_private)
   report['cleanup_passed']=not report['remaining_private_pids'] and not report['remaining_private_processes'] and all(p.poll() is not None for _,p,_ in processes)
@@ -302,7 +343,19 @@ def inner(boot,package):
   report['client_gpu_passed']=bool(report.get('client_completed_ok') and report.get('xwayland_ready') and report.get('xwayland_alive_at_end') and 'Mali-G71' in report.get('client_stdout','') and 'G955N_X11_PIXEL_PASS frames=48 resize=passed repeated_egl=passed teardown=passed' in report.get('client_stdout',''))
  if package.get('client_kind')=='gnome-x11':
   report['client_gpu_passed']=bool(report['client_gpu_passed'] and report.get('xwayland_alive_at_end') and 'GNOME Shell started' in report.get('client_stdout',''))
+ if package.get('composite_probe'):
+  report['composite_pixels_passed']=bool(report.get('composite_probe_exit_before_cleanup')==0 and 'G955N_X11_COMPOSITE_PASS frames=6 overlay_pixels=passed' in report.get('composite_probe_stdout',''))
+  report['client_gpu_passed']=report['client_gpu_passed'] and report['composite_pixels_passed']
+  if package.get('popup_probe'):
+   report['gnome_popup_passed']='G955N_GNOME_POPUP_PASS samples=20 stable=passed' in report.get('composite_probe_stdout','')
+   report['client_gpu_passed']=report['client_gpu_passed'] and report['gnome_popup_passed']
  report['panel_presented']=bool(not report['diagnostic_debugger'] and report.get('android_log_complete') and report.get('compositor_alive_8s') and report.get('logs_complete') and report.get('display_irq_progressed') and 'Mali-G71' in text and 'G955N HWC present accepted=' in text and report['cleanup_passed'])
+ if package.get('touch_input'):
+  report['real_touch_attached']='G955N real touchscreen attached: sec_touchscreen' in text
+  report['real_touch_down_count']=text.count('G955N real touch down id=')
+  report['delivered_touch_down_count']=len(re.findall(r'G955N real touch down id=[0-9]+ serial=[1-9][0-9]* ',text))
+  report['panel_presented']=report['panel_presented'] and report['real_touch_attached']
+  if package['observation_seconds']==60:report['panel_presented']=report['panel_presented'] and report['delivered_touch_down_count']>0
  if package.get('client_probe'):report['panel_presented']=report['panel_presented'] and report['client_gpu_passed']
  return report
 
@@ -345,9 +398,9 @@ def execute(path,sha):
   before=panel_snapshot();result['namespace_before']=before
   result['display_irq_before']=display_irqs()
   process=subprocess.Popen(['python3',str(BASE/'android-runtime-namespace.py'),'--run-trial','--runtime',str(BASE/'android-property-runtime'),
-   '--property-info',str(BASE/'property_info'),'--stock-contexts',str(BASE/'android-stock-service-contexts'),'--seconds','40',
-   '--include-display-devices','--include-composer-ipc',*(['--include-system-bus'] if package.get('native_system_bus') else [])],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
-  os.set_blocking(process.stdout.fileno(),False);watch=selectors.DefaultSelector();watch.register(process.stdout,selectors.EVENT_READ);invoked=False;deadline=time.monotonic()+55
+   '--property-info',str(BASE/'property_info'),'--stock-contexts',str(BASE/'android-stock-service-contexts'),'--seconds',str(package['observation_seconds']+20),
+   '--include-display-devices','--include-composer-ipc',*(['--include-system-bus'] if package.get('native_system_bus') else []),*(['--include-touch-input'] if package.get('touch_input') else [])],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,bufsize=0)
+  os.set_blocking(process.stdout.fileno(),False);watch=selectors.DefaultSelector();watch.register(process.stdout,selectors.EVENT_READ);invoked=False;deadline=time.monotonic()+package['observation_seconds']+35
   while time.monotonic()<deadline:
    for key,_ in watch.select(.1):
     part=os.read(key.fd,65536)
@@ -364,7 +417,7 @@ def execute(path,sha):
     cmd=['nsenter','--target',child,'--mount','--pid','--root','--wdns=/','/usr/bin/setpriv','--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot','--inh-caps=-all','--ambient-caps=-all','--no-new-privs',
      '/usr/bin/env','-i','HOME=/home/ubuntu','PATH=/usr/sbin:/usr/bin:/sbin:/bin','G955N_ANDROID_PRIVATE_RUNTIME=1','G955N_PARENT_PID_NS='+os.readlink('/proc/self/ns/pid'),'G955N_PARENT_MOUNT_NS='+os.readlink('/proc/self/ns/mnt'),
      '/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--inner','--reviewed-manifest',str(path),'--manifest-sha256',sha]
-    p=subprocess.run(cmd,capture_output=True,text=True,timeout=28);result['inner_exit']=p.returncode;result['inner_stdout']=p.stdout;result['inner_stderr']=p.stderr
+    p=subprocess.run(cmd,capture_output=True,text=True,timeout=package['observation_seconds']+8);result['inner_exit']=p.returncode;result['inner_stdout']=p.stdout;result['inner_stderr']=p.stderr
     if p.stdout.strip():result['panel']=json.loads(p.stdout)
     result['display_irq_after']=display_irqs()
     result['display_irq_progressed']=all(result['display_irq_after'][key]>value for key,value in result['display_irq_before'].items())
@@ -400,8 +453,8 @@ def main():
  if not a.reviewed_manifest or not re.fullmatch(r'[0-9a-f]{64}',a.manifest_sha256 or ''):p.error('Exact reviewed manifest/hash required')
  os.umask(0o077)
  if a.launch:
-  identity();review(a.reviewed_manifest,a.manifest_sha256)
-  return subprocess.run(['systemd-run','--unit=g955n-panel-trial','--wait','--collect','--property=RuntimeMaxSec=85','--property=TimeoutStopSec=5','--property=KillMode=control-group',
+  identity();_,package=review(a.reviewed_manifest,a.manifest_sha256)
+  return subprocess.run(['systemd-run','--unit=g955n-panel-trial','--wait','--collect','--property=RuntimeMaxSec='+str(max(85,package['observation_seconds']+65)),'--property=TimeoutStopSec=5','--property=KillMode=control-group',
    '--property=ExecStopPost=/usr/bin/python3 '+str(BASE/'run-panel-trial.py')+' --restore','/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--run','--reviewed-manifest',str(a.reviewed_manifest),'--manifest-sha256',a.manifest_sha256]).returncode
  if a.inner:
   data,package=review(a.reviewed_manifest,a.manifest_sha256);identity(data['boot_id'])

@@ -66,5 +66,14 @@
     "scope": "Only six X11 platform files; no musl, linker, gralloc, kernel or firmware changes imported",
     "license": "Original X11 files LGPL-2.1; reference modifications MIT; retain original notices",
     "reference_license_sha256": "4e015e061ece66e3c209d777c4406c0e5fe8668754563d404c74034c78426fff"
+  },
+  "seat-broker": {
+    "package": "seatd:arm64",
+    "version": "0.8.0-1",
+    "origin": "Ubuntu noble/universe ports.ubuntu.com",
+    "deb_sha256": "1c4df0e6ba800e37c70e2e02f6bb7a043cfa018b33f2ccaa70c6bc7a5eb5982c",
+    "binary_path": "usr/sbin/seatd",
+    "binary_sha256": "7731473c3c87b990b83e3fc783d0a172b7e12320b3ca54861cb3abc443a74c6e",
+    "scope": "Private extracted executable only; no package installation or host service activation; actual VT-unbound seat broker for exact touchscreen"
   }
 }

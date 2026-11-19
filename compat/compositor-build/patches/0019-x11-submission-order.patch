@@ -1,0 +1,104 @@
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -276,7 +276,6 @@
+     *buffer = wnb;
+     if (fenceFd)
+         *fenceFd = -1;
+-    queue.push_back(wnb);
+     --m_freeBufs;
+ 
+     HYBRIS_TRACE_COUNTER("x11-platform", "m_freeBufs", "%i", m_freeBufs);
+@@ -331,19 +330,19 @@
+     static int serial = 0;
+     lock();
+ 
+-    /* The driver queued the oldest dequeued buffer. An eglSwapBuffers without
+-     * a new frame re-presents the previous one. */
+-    X11NativeWindowBuffer *wnb = NULL;
+-    bool fromQueue = !queue.empty();
+-    if (fromQueue) {
+-        wnb = queue.front();
+-        queue.pop_front();
+-    } else {
+-        wnb = m_lastBuffer;
+-    }
+-    if (!wnb) {
++    /* Present only buffers actually submitted by queueBuffer, in submission
++     * order. A producer may dequeue/prefetch more than one buffer. */
++    if (queue.empty()) {
++        /* No actual submission: retain the existing X11 image. Never read
++         * a cached buffer that the producer may have dequeued again. */
+         unlock();
+         return;
++    }
++    X11NativeWindowBuffer *wnb = queue.front();
++    queue.pop_front();
++    if (wnb->busy != 2) {
++        HYBRIS_ERROR("X11 invalid queued buffer ownership");
++        _exit(34);
+     }
+     m_lastBuffer = wnb;
+ 
+@@ -375,9 +374,6 @@
+         copyToX11(wnb);
+     }
+ 
+-    if (!fromQueue)
+-        return;
+-
+     lock();
+ 
+     ++m_freeBufs;
+@@ -402,6 +398,13 @@
+ 
+     HYBRIS_TRACE_BEGIN("x11-platform", "queueBuffer", "-%p", wnb);
+     lock();
++    bool owned = false;
++    for (X11NativeWindowBuffer *candidate : m_bufList) if (candidate == wnb) owned = true;
++    if (!owned || wnb->busy != 1) {
++        unlock();
++        if (fenceFd >= 0) close(fenceFd);
++        return -EINVAL;
++    }
+ 
+     if (debugenvchecked == 0)
+     {
+@@ -431,6 +434,8 @@
+     HYBRIS_TRACE_END("x11-platform", "queueBuffer_waiting_for_fence", "-%p", wnb);
+ #endif
+ 
++    wnb->busy = 2;
++    queue.push_back(wnb);
+     HYBRIS_TRACE_END("x11-platform", "queueBuffer", "-%p", wnb);
+ 
+     unlock();
+@@ -451,19 +456,18 @@
+         if ((*it) == wnb)
+             break;
+     }
+-    assert(it != m_bufList.end());
+-
+-    /* A cancelled buffer will not be queued, so it must not be presented. */
+-    for (std::deque<X11NativeWindowBuffer *>::iterator q = queue.begin(); q != queue.end(); ++q)
+-    {
+-        if (*q == wnb) {
+-            queue.erase(q);
+-            break;
++    if (it == m_bufList.end() || wnb->busy != 1) {
++        unlock();
++        if (fenceFd >= 0) close(fenceFd);
++        return -EINVAL;
++    }
++    if (fenceFd >= 0) {
++        if (sync_wait(fenceFd, 1000) < 0) {
++            HYBRIS_ERROR("X11 cancel fence failed/timed out");
++            _exit(33);
+         }
+-    }
+-
+-    if (fenceFd >= 0)
+         close(fenceFd);
++    }
+ 
+     wnb->busy = 0;
+     ++m_freeBufs;

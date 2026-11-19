@@ -41,7 +41,7 @@ def bind_readonly(source, destination):
 
 
 def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
-                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False, native_system_bus=False):
+                  namespace_selftest, permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, composer_ipc=False, native_system_bus=False, touch_input=False):
     libc = ctypes.CDLL(None, use_errno=True)
     # If the outer supervisor disappears, killing namespace PID 1 also kills
     # all of its descendants and releases their private mounts.
@@ -53,6 +53,15 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
         raise SystemExit('Child did not enter a fresh PID namespace')
     if libc.unshare(0x00020000):  # CLONE_NEWNS, only this child changes mounts.
         raise OSError(ctypes.get_errno(), 'Unable to create private mount namespace')
+    touch_database = None
+    if touch_input:
+        node = Path('/dev/input/event0').stat()
+        number = f'{os.major(node.st_rdev)}:{os.minor(node.st_rdev)}'
+        if Path('/sys/class/input/event0/dev').read_text().strip()!=number:
+            raise RuntimeError('Touch node differs from sysfs identity')
+        touch_database = (f'c{number}', Path(f'/run/udev/data/c{number}').read_bytes())
+        if b'E:ID_INPUT_TOUCHSCREEN=1\n' not in touch_database[1]:
+            raise RuntimeError('Real udev touchscreen metadata missing')
     bus_fd = None
     if native_system_bus:
         bus = Path('/run/dbus/system_bus_socket')
@@ -107,6 +116,12 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
             raise RuntimeError('Native system bus bind failed')
     (root / 'tmp').chmod(0o1777)
     run('mount', '-t', 'tmpfs', '-o', 'mode=0755,size=16m', 'g955n-private-dev', str(root / 'dev'))
+    if touch_input:
+        target=root / 'run/udev';target.mkdir(mode=0o755);target.chmod(0o755)
+        data=target/'data';data.mkdir(mode=0o755);data.chmod(0o755)
+        record=data/touch_database[0];record.write_bytes(touch_database[1]);record.chmod(0o444)
+        run('mount','--bind',str(target),str(target))
+        run('mount','-o','remount,bind,ro',str(target))
     for name, mode, number in devices:
         target = root / 'dev' / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -123,6 +138,8 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
             # This newly-created inode only; host node ownership is untouched.
             os.chown(target, 0, 1003)
             target.chmod(0o660)
+        elif name == 'input/event0':
+            os.chown(target,0,0);target.chmod(0o600)
         elif name == 'ion':
             # Only the original system-UID allocator and supervised root probe.
             os.chown(target, 1000, 1000)
@@ -241,7 +258,10 @@ def main():
     parser.add_argument('--include-composer-ipc', action='store_true')
     parser.add_argument('--include-system-bus', action='store_true',
                         help='Expose the actual native system bus only to a reviewed GNOME display trial')
+    parser.add_argument('--include-touch-input',action='store_true',help='Only the verified sec_touchscreen event0 for a GNOME display/input trial')
     args = parser.parse_args()
+    if args.include_touch_input and not (args.run_trial and args.include_display_devices and args.include_composer_ipc and args.include_system_bus):
+        parser.error('Touch input requires the explicit GNOME display/system-bus scope')
     if args.include_system_bus and not (args.run_trial and args.include_display_devices and args.include_composer_ipc):
         parser.error('System bus requires an explicit display/composer trial')
     if args.include_composer_ipc and (not args.run_trial or not (args.include_mali_device or args.include_display_devices)):
@@ -298,6 +318,10 @@ def main():
         names.append('ion')
     if args.include_mali_device:
         names.append('mali0')
+    if args.include_touch_input:
+        if Path('/sys/class/input/event0/device/name').read_text().strip()!='sec_touchscreen':
+            raise SystemExit('Exact touchscreen identity differs')
+        names.append('input/event0')
     devices = []
     for name in names:
         try:
@@ -343,7 +367,7 @@ def main():
     if not pid:
         try:
             prepare_child(runtime, info_bytes, system, devices, library_dirs, args.seconds,
-                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc, args.include_system_bus)
+                          args.namespace_selftest, args.permissions_selftest, parent_pid, parent_pid_ns, parent_mount_ns, contexts, args.include_composer_ipc, args.include_system_bus, args.include_touch_input)
         except BaseException as error:
             print('Private namespace setup failed: ' + str(error), flush=True)
             os._exit(1)

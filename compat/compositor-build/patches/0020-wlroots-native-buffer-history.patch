@@ -1,0 +1,42 @@
+--- a/render/android/renderer.c
++++ b/render/android/renderer.c
+@@ -383,11 +383,12 @@
+ 		wlr_addon_find(&wlr_buffer->addons, renderer, &buffer_addon_impl);
+ 	if (addon) {
+ 		struct wlr_android_buffer *buffer = wl_container_of(addon, buffer, addon);
+-		// TODO: try to investigate why
+-		return buffer->buffer_age + 1;
+-	}
+-
+-	// always assume we support buffer_age
++		/* EGL reports the actual native buffer history, independently of
++		 * the wlroots swapchain token. Unknown/new contents stay zero. */
++		return buffer->buffer_age > 0 ? buffer->buffer_age : 0;
++	}
++
++	// Missing native history requires a full repaint.
+ 	return 0;
+ }
+ 
+--- a/types/scene/wlr_scene.c
++++ b/types/scene/wlr_scene.c
+@@ -1806,6 +1806,19 @@
+ 		return false;
+ 	}
+ 
++	/* A legacy EGL renderer may rotate native buffers behind one wlroots
++	 * swapchain token. Its history takes precedence, including unknown=0.
++	 * Modern renderers without this hook keep the swapchain's own history. */
++	int renderer_buffer_age = wlr_renderer_get_buffer_age(output->renderer, buffer);
++	if (renderer_buffer_age >= 0) {
++		static unsigned int reports;
++		if (reports < 12) {
++			wlr_log(WLR_DEBUG, "Native frame history: swapchain=%d renderer=%d", buffer_age, renderer_buffer_age);
++			reports++;
++		}
++		buffer_age = renderer_buffer_age;
++	}
++
+ 	render_data.render_pass = render_pass;
+ 	pixman_region32_init(&render_data.damage);
+ 	wlr_damage_ring_get_buffer_damage(&scene_output->damage_ring,

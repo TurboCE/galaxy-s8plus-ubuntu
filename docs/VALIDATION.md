@@ -283,3 +283,69 @@ final incremental X11 cross-build passed. Private evidence: panel-owner-repeat,
 panel-x11, panel-gnome, panel-gnome-x11 and panel-gnome-x11-sized result JSONs;
 x11-platform-final-build.log, x11-host-tests.log and
 gralloc-ownership-model-final.log under artifacts/compositor-build/.
+
+
+### Real touch, full-panel geometry and physical popup coherency
+
+The owner confirmed the physical RGB pattern, then a720x1480 GNOME desktop
+scaled by the parent to the1440x2960 panel with real touchscreen interaction.
+The60-second interactive trial recorded13 actual contacts delivered with
+nonzero Wayland serials. The actual Mali-G71 client also passed six complete
+window-to-GNOME-overlay pixel comparisons. This is an experimental standalone
+GNOME session, not permanent GDM integration or all-feature acceptance.
+
+Patch0016 forwards genuine touchscreen down/motion/up/frame/cancel events, keeps
+contact motion on the original surface, tracks device destruction and advertises
+only currently present touch/keyboard/pointer devices. The private scope exposes
+only the sysfs/rdev-verified sec_touchscreen event0, root-only, with an unchanged
+copy of its real udev record on a private read-only metadata mount. A hash-pinned
+Ubuntu seatd0.8.0-1 executable brokers actual input descriptors; its package is
+only extracted privately, with no host package/service activation. No uinput or
+synthetic touchscreen device is used. XTest actions in the separate pixel/UI
+fixture are explicitly synthetic and cannot qualify physical input.
+
+Patch0017 offers a process-private2x output scale. GNOME initially rejected the
+private monitor configuration because xrandr's two-decimal refresh rate lost
+precision, then selected the advertised5120x2880 preferred mode. The owner saw
+cropped content and unresponsive controls despite16 real touch events. The
+controller now derives the precise rate from actual pixel clock/totals; the
+next trial retained720x1480 and the owner confirmed geometry and basic touch.
+GNOME60 requires the fixed client, reviewed native bus/input/broker and actual
+delivered contacts, with enlarged bounded runtime/independent restoration.
+
+Two genuine X11 producer defects were also repaired: patch0018 reports unknown
+retained contents as age0 instead of the hardcoded age2; patch0019 presents real
+queueBuffer submissions in submission order, validates ownership, waits actual
+cancel fences and avoids reading a loaned cached buffer on a no-submit swap.
+Actual-method ASan/UBSan checks passed out-of-order submission, duplicate/foreign
+rejection, cancellation and no-submit retention. The old methods reproduced a
+wrong-buffer presentation. These repairs alone did not cure physical flicker.
+
+The owner's calendar popup still alternated with its old background even while
+automated GNOME-overlay samples were stable. The final fault was downstream:
+one wlroots swapchain token wraps an EGL surface that rotates native buffers,
+but the modern scene path used only the outer token's history. Patch0020 reads
+the renderer's native history after binding, including unknown=0, before
+computing repaint damage; Android's unjustified age+1 adjustment is removed.
+Modern renderers without this hook retain their own swapchain history. An
+actual-selection sanitizer model reproduced background/popup alternation with
+the old path on its second native frame and passed eight alternating frames
+with the fix. The owner then confirmed the calendar remains visible without
+flicker on the real panel. X11/internal-only checks had missed this final stage;
+that earlier result is not presented as physical popup qualification.
+
+Automatic popup checking and owner checking are separate modes: the owner mode
+never opens/closes the calendar automatically. The fixture retains Xlib
+extension libraries until XCloseDisplay, fixing its own diagnostic teardown
+fault. Xwayland no longer advertises MIT-SHM on this SYSVIPC-disabled kernel;
+Wayland SHM transport still works. Private namespace cleanup includes all new
+child PIDs, including session-service activations outside initial process groups.
+
+Validation:38 host guard tests, X11 submission/native-history sanitizer models
+and final target builds passed. Private evidence: panel-gnome-{composite-final,
+touch,interactive,touch-final,scaled-mode,submission,popup,native-history}-result
+JSONs and corresponding manifests/build logs under artifacts/compositor-build/.
+The ordinary login session still uses the prior CPU path pending normal-session
+integration. The pre-existing account-row touch-activation workaround, native
+Polkit/session identity, optional calendar/portal services, long-term stability
+and other hardware features remain open; no blanket error-free claim is made.
