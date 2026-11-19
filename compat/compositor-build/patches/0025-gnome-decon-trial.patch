@@ -1,0 +1,175 @@
+Subject: Route the verified GNOME overlay buffer to DECON for bounded trials
+
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -40,6 +40,12 @@
+ #include "xcb_drihybris.h"
+ #include <X11/Xutil.h>
+ #include <dlfcn.h>
++#include <fcntl.h>
++#include <sys/file.h>
++#include <sys/stat.h>
++extern "C" {
++#include "decon-output.h"
++}
+ 
+ #if ANDROID_VERSION_MAJOR>=4 && ANDROID_VERSION_MINOR>=2 || ANDROID_VERSION_MAJOR>=5
+ extern "C" {
+@@ -379,6 +385,114 @@
+     dlclose(lib);
+ }
+ 
++/* The root-owned test supervisor supplies an exclusive lease and disables
++ * the legacy pan pump before authorizing this experimental path. */
++static bool direct_panel_frame(Display *display, Window window,
++                               const X11NativeWindowBuffer *buffer)
++{
++    static int panel = -1, lease = -1, previous_fence = -1;
++    static unsigned retired;
++    static Window output = None;
++    static bool rejected;
++    if (rejected || !getenv("G955N_DIRECT_PANEL_TRIAL"))
++        return false;
++    if (output != None && output != window)
++        return false;
++    if (output == None) {
++        char executable[256];
++        ssize_t length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
++        if (length < 0)
++            return false;
++        executable[length] = 0;
++        if (strcmp(executable, "/usr/bin/gnome-shell"))
++            return false;
++        void *lib = dlopen("libXcomposite.so.1", RTLD_LAZY | RTLD_LOCAL);
++        if (!lib)
++            return false;
++        auto get = reinterpret_cast<Window (*)(Display *, Window)>(
++            dlsym(lib, "XCompositeGetOverlayWindow"));
++        auto release = reinterpret_cast<void (*)(Display *, Window)>(
++            dlsym(lib, "XCompositeReleaseOverlayWindow"));
++        Window root = DefaultRootWindow(display), parent = None, geometry_root;
++        Window *children = nullptr;
++        unsigned count;
++        Window overlay = get && release ? get(display, root) : None;
++        bool match = overlay && XQueryTree(display, window, &geometry_root,
++                         &parent, &children, &count) && parent == overlay;
++        if (children)
++            XFree(children);
++        if (overlay)
++            release(display, root);
++        dlclose(lib);
++        if (!match)
++            return false;
++    }
++    const native_handle_t *handle = buffer->handle;
++    uint32_t magic = 0;
++    uint64_t internal = 0;
++    if (handle && handle->version == sizeof(native_handle_t) &&
++        handle->numFds == 1 && handle->numInts == 46) {
++        const auto *bytes = reinterpret_cast<const unsigned char *>(handle);
++        memcpy(&magic, bytes + 24, sizeof(magic));
++        memcpy(&internal, bytes + 56, sizeof(internal));
++    }
++    if (buffer->width != 1440 || buffer->height != 2960 || buffer->stride != 1440 ||
++        buffer->format != HAL_PIXEL_FORMAT_RGBX_8888 || magic != 0x03141592 ||
++        internal != HAL_PIXEL_FORMAT_RGBX_8888) {
++        if (output != None)
++            _exit(35);
++        return false;
++    }
++    if (output == None) {
++        struct stat policy;
++        lease = open("/run/lock/g955n-direct-panel-trial", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
++        if (lease < 0)
++            return false;
++        if (fstat(lease, &policy) || !S_ISREG(policy.st_mode) ||
++            policy.st_uid != 0 || (policy.st_mode & 022) || flock(lease, LOCK_EX | LOCK_NB)) {
++            close(lease);
++            return false;
++        }
++        panel = open("/dev/fb0", O_RDWR | O_CLOEXEC | O_NOFOLLOW);
++        if (panel < 0) {
++            close(lease);
++            return false;
++        }
++    }
++    const g955n_panel_frame frame = {handle->data[0], -1, 1440, 2960, G955N_DECON_RGBX8888};
++    int fence, submitted;
++    const int fd_flags = fcntl(frame.dma_buf, F_GETFD);
++    int error = g955n_decon_submit(panel, &frame, &fence, &submitted);
++    if (error) {
++        fprintf(stderr, "G955N DECON frame failed: errno=%d ioctl=%d valid_fd=%d\n",
++                -error, submitted, fd_flags != -1);
++        if (!submitted && output == None) {
++            rejected = true;
++            close(panel);
++            close(lease);
++            return false;
++        }
++        _exit(35);  /* The supervisor restores fbdev after an ambiguous submission. */
++    }
++    /* DECON command mode starts timeline_max at 1. The fence from
++     * submission N is signalled when N+1 replaces that buffer. */
++    if (previous_fence >= 0) {
++        const int ready = sync_wait(previous_fence, 850);
++        const int fence_error = ready < 0 ? errno : 0;
++        close(previous_fence);
++        if (ready != 0) {
++            close(fence);
++            fprintf(stderr, "G955N DECON retirement failed: errno=%d\n", fence_error);
++            _exit(35);
++        }
++        if (++retired == 1 || retired == 60)
++            fprintf(stderr, "G955N DECON retired %u GNOME frames without CPU pixel transfer\n", retired);
++    }
++    previous_fence = fence;
++    output = window;
++    return true;
++}
++
+ void X11NativeWindow::finishSwap()
+ {
+     static int serial = 0;
+@@ -398,6 +512,7 @@
+         HYBRIS_ERROR("X11 invalid queued buffer ownership");
+         _exit(34);
+     }
++    X11NativeWindowBuffer *previous = m_lastBuffer;
+     m_lastBuffer = wnb;
+ 
+     m_damage_rects = NULL;
+@@ -405,7 +520,10 @@
+     unlock();
+ 
+     report_panel_layout(m_display, m_window, wnb);
+-    if (m_haveDRIHybris) {
++    const bool direct = direct_panel_frame(m_display, m_window, wnb);
++    if (direct) {
++        /* The completion is for the replacement, and retires the old frame. */
++    } else if (m_haveDRIHybris) {
+         if (wnb->pixmap == 0)
+             wnb->pixmap_from_buffer(m_connection, m_window);
+ 
+@@ -431,7 +549,12 @@
+ 
+     lock();
+ 
+-    ++m_freeBufs;
++    if (!direct)
++        ++m_freeBufs;
++    else if (previous && previous->busy == 3) {
++        previous->busy = 0;
++        ++m_freeBufs;
++    }
+     HYBRIS_TRACE_COUNTER("x11-platform", "m_freeBufs", "%i", m_freeBufs);
+ 
+     std::list<X11NativeWindowBuffer *>::iterator it;
+@@ -440,7 +563,7 @@
+         (*it)->youngest = 0;
+     }
+     wnb->youngest = 1;
+-    wnb->busy = 0;
++    wnb->busy = direct ? 3 : 0;
+ 
+     unlock();
+ }

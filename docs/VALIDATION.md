@@ -620,3 +620,17 @@ The AArch64 DECON helper and a fixture extracted from the pinned kernel
 compiled with warnings treated as errors. The fixture checked structure sizes,
 the source offset and accepted format enum values. No panel ioctl, on-device
 direct presentation or before/after drag measurement was performed.
+
+
+### GNOME direct-panel trial
+
+Connected the ordinary GNOME Shell's full-screen RGBX overlay output to the
+primary Samsung DECON display through its real DMA-BUF. Fixed the aligned
+ioctl payload and verified member offsets against the pinned vendor header.
+Wait for the previous buffer's release after queuing a replacement on the
+DSI timeline. During the explicit trial the old framebuffer pan honors the
+same exclusive lease. Kernel32 advanced real retire fences and primary panel
+frame interrupts, with taint0. The three-by-three same-boot GNOME drag A/B
+measured16.04% to11.15% overall CPU busy and501.5ms to33ms window-coordinate
+median update intervals. See gnome-direct-panel-output.md for scope and
+measurement limitations. The supervised trial restored the ordinary output.

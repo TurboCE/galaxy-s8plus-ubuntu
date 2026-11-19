@@ -65,8 +65,60 @@ Both the helper and an independent fixture extracted from the pinned Samsung
 kernel declarations compiled for AArch64 with warnings treated as errors.
 The fixture checked the window size, source offset, ioctl payload size and
 RGB format enum values. No panel ioctl was executed by this build check.
-The remaining integration work is the GNOME producer hook, verification of
-the gralloc layout, and ownership across framebuffer handoff, blanking and
-fence completion. Completing the new frame does not authorize immediate
-reuse of that same frame. The previous buffer can be retired after a verified
-replacement. The installed X11 session has not been modified by this helper.
+The subsequent GNOME integration and device results are below.
+
+
+## Direct output on the ordinary Ubuntu GNOME session
+
+The X11 EGL backend identifies the fullscreen child of the X Composite overlay
+in the actual GNOME Shell process. The live Exynos gralloc handle was one
+DMA-BUF plus 46 words, with linear RGBX8888, 1440-pixel stride and 1440×2960
+visible dimensions. The direct path accepts only that verified layout after
+the EGL producer fence has completed. Other X11 surfaces use the existing
+window transport. The match is gated by the root-owned runtime trial lease.
+
+The first direct submit uncovered a wire layout defect. The kernel's
+8-byte-aligned window union starts four bytes after the state member, so equal
+outer struct sizes alone had hidden the misplaced fd and format. The live
+kernel reported an import of fd -1. Fixed those offsets and added an
+independent AArch64 comparison against all accessed vendor members, register
+formats and the ioctl number.
+
+The primary DSI timeline begins at one, and the point returned for frame N is
+signaled after N+1. Waiting on the just-submitted fence stalled the first
+replacement. The bridge now queues the replacement, waits on the preceding
+frame's fence and retains the current buffer. It aborts a trial after an
+ambiguous submission or retirement. The old framebuffer service only skips its
+pan when the same lease is held. The mobile panel stays available to GDM before
+GNOME takes over. A phone-local timer restores the original prefix and restarts
+the ordinary greeter after the trial.
+
+The real kernel32 device reported 60 retired GNOME buffers and sustained
+timeline progress with the framebuffer pan paused by the lease. In a sampled
+interval the primary DECON start and finish interrupts both advanced by 17,
+with DSIM interrupts increasing by 28 and an outstanding replacement fence.
+Kernel taint stayed 0. This establishes that the real display path processed
+GNOME buffers. The test does not observe rendered pixels optically or certify
+X11 cursor drawing, long-term display power behavior or suspend.
+
+The same-boot A/B trial ran the same fixture three times per path. CPU usage is
+whole-device busy time including fixture setup, averaged over three trials.
+
+| Workload | X11 CPU transfer | Direct DECON |
+| --- | ---: | ---: |
+| Synthetic GNOME drag CPU | 16.04% | 11.15% |
+| Drag median of trial median X window update gaps | 501.5 ms | 33 ms |
+| Drag changes observed out of 180 commands | 8, 7, 6 | 94, 92, 77 |
+| Scripted window moves CPU | 17.85% | 11.15% |
+| Scripted move median X window update gap | 17 ms | 17 ms |
+
+The geometry intervals measure GNOME's response to input, not panel FPS or
+physical finger-to-photon latency. One earlier direct drag run did not grab the
+window and was excluded. The same-boot A/B followed successful grabs in each
+of its six drag trials. The direct path is a supervised candidate. The
+ordinary X11 output is restored after the trial.
+
+A reproducible, explicit trial entry point is provided in
+`compat/native-gnome/direct-panel/trial.py`. It expects the rebuilt private
+EGL module and a root-owned installation of the supervisor and the updated
+framebuffer service. The candidate stays outside the public repository.

@@ -35,7 +35,8 @@ static bool position(Display *display, Window window, int *x, int *y)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2 || strcmp(argv[1], "--run"))
+    bool scripted_move = argc == 2 && !strcmp(argv[1], "--move-window");
+    if (!scripted_move && (argc != 2 || strcmp(argv[1], "--run")))
         return 2;
     Display *display = XOpenDisplay(NULL);
     if (!display)
@@ -49,6 +50,10 @@ int main(int argc, char **argv)
     }
     Window window = XCreateSimpleWindow(display, root, 280, 360, 384, 256, 0,
                                         BlackPixel(display, screen), WhitePixel(display, screen));
+    if (scripted_move) {
+        XSetWindowAttributes attributes = {.override_redirect = True};
+        XChangeWindowAttributes(display, window, CWOverrideRedirect, &attributes);
+    }
     XStoreName(display, window, "SM-G955N drag measurement");
     XMapRaised(display, window);
     XSync(display, False);
@@ -72,10 +77,12 @@ int main(int argc, char **argv)
     int start_x = initial_x + 120;
     int start_y = initial_y + 80;
     int step = start_x + 240 < DisplayWidth(display, screen) ? 4 : -4;
-    XTestFakeMotionEvent(display, screen, start_x, start_y, 0);
-    XTestFakeKeyEvent(display, super, True, 0);
-    XTestFakeButtonEvent(display, 1, True, 0);
-    pressed = true;
+    if (!scripted_move) {
+        XTestFakeMotionEvent(display, screen, start_x, start_y, 0);
+        XTestFakeKeyEvent(display, super, True, 0);
+        XTestFakeButtonEvent(display, 1, True, 0);
+        pressed = true;
+    }
     XSync(display, False);
     pause_ms(150);
 
@@ -84,7 +91,10 @@ int main(int argc, char **argv)
     for (int i = 1; i <= 180; i++) {
         int phase = i % 120;
         int offset = phase <= 60 ? phase : 120 - phase;
-        XTestFakeMotionEvent(display, screen, start_x + offset * step, start_y, 0);
+        if (scripted_move)
+            XMoveWindow(display, window, initial_x + offset * step, initial_y);
+        else
+            XTestFakeMotionEvent(display, screen, start_x + offset * step, start_y, 0);
         XFlush(display);
         pause_ms(16);
         int x, y;

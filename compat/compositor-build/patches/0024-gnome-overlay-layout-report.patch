@@ -1,0 +1,80 @@
+Subject: Report actual GNOME output scanout metadata on request
+
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -39,6 +39,7 @@
+ #include <stdint.h>
+ #include "xcb_drihybris.h"
+ #include <X11/Xutil.h>
++#include <dlfcn.h>
+ 
+ #if ANDROID_VERSION_MAJOR>=4 && ANDROID_VERSION_MINOR>=2 || ANDROID_VERSION_MAJOR>=5
+ extern "C" {
+@@ -325,6 +326,59 @@
+     unlock();
+ }
+ 
++/* Review the vendor handle on the real Mutter output only, after queueBuffer
++ * has completed the producer fence. No pixels or file descriptor identities
++ * are disclosed by this opt-in diagnostic. */
++static void report_panel_layout(Display *display, Window window,
++                                const X11NativeWindowBuffer *buffer)
++{
++    static unsigned reports;
++    if (reports >= 6 || !getenv("G955N_REPORT_PANEL_LAYOUT"))
++        return;
++    char executable[256];
++    ssize_t length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
++    if (length < 0)
++        return;
++    executable[length] = 0;
++    if (strcmp(executable, "/usr/bin/gnome-shell"))
++        return;
++    void *lib = dlopen("libXcomposite.so.1", RTLD_LAZY | RTLD_LOCAL);
++    if (!lib)
++        return;
++    auto get = reinterpret_cast<Window (*)(Display *, Window)>(
++        dlsym(lib, "XCompositeGetOverlayWindow"));
++    auto release = reinterpret_cast<void (*)(Display *, Window)>(
++        dlsym(lib, "XCompositeReleaseOverlayWindow"));
++    if (get && release) {
++        Window root = DefaultRootWindow(display);
++        Window overlay = get(display, root);
++        if (overlay)
++            release(display, root);
++        Window geometry_root, parent, *children = nullptr;
++        unsigned count;
++        bool tree = XQueryTree(display, window, &geometry_root, &parent, &children, &count);
++        if (children)
++            XFree(children);
++        if (tree && reports < 6 && buffer->handle) {
++            ++reports;
++            const native_handle_t *handle = buffer->handle;
++            uint32_t magic = 0;
++            uint64_t internal = 0;
++            if (handle->version == sizeof(native_handle_t) && handle->numFds == 1 &&
++                handle->numInts == 46) {
++                const auto *bytes = reinterpret_cast<const unsigned char *>(handle);
++                memcpy(&magic, bytes + 24, sizeof(magic));
++                if (magic == 0x03141592)
++                    memcpy(&internal, bytes + 56, sizeof(internal));
++            }
++            fprintf(stderr, "G955N overlay layout: %dx%d stride=%d HAL=%d fds=%d words=%d magic=%x internal=%llx overlay=%d overlay_child=%d\n",
++                    buffer->width, buffer->height, buffer->stride, buffer->format,
++                    handle->numFds, handle->numInts, magic, (unsigned long long)internal, window == overlay, parent == overlay);
++        }
++    }
++    dlclose(lib);
++}
++
+ void X11NativeWindow::finishSwap()
+ {
+     static int serial = 0;
+@@ -350,6 +404,7 @@
+     m_damage_n_rects = 0;
+     unlock();
+ 
++    report_panel_layout(m_display, m_window, wnb);
+     if (m_haveDRIHybris) {
+         if (wnb->pixmap == 0)
+             wnb->pixmap_from_buffer(m_connection, m_window);

@@ -18,6 +18,28 @@ import sys
 import time
 import zlib
 
+def pan_with_trial_lease(fd, var):
+    """Keep the legacy scanout ready while an explicit test owns the panel."""
+    path = '/run/lock/g955n-direct-panel-trial'
+    try:
+        lease = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        fcntl.ioctl(fd, 0x4606, var, True)
+        return True
+    try:
+        policy = os.fstat(lease)
+        if not stat.S_ISREG(policy.st_mode) or policy.st_uid != 0 or policy.st_mode & 0o022:
+            raise RuntimeError('Invalid direct panel trial lease')
+        try:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        fcntl.ioctl(fd, 0x4606, var, True)
+        return True
+    finally:
+        os.close(lease)
+
+
 def x11_panel_off():
     """Read the native X server's real DPMS state; empty Samsung sysfs is unknown.
 
@@ -111,8 +133,7 @@ try:
                     time.sleep(0.25)
                     next_pan = time.monotonic()
                     continue
-                fcntl.ioctl(fd, 0x4606, var, True)
-                pans += 1
+                pans += pan_with_trial_lease(fd, var)
                 next_pan = max(next_pan + 1.0 / 60.0, time.monotonic())
                 time.sleep(max(0.001, next_pan - time.monotonic()))
                 if now - stats_at >= 30:

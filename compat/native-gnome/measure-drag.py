@@ -14,10 +14,10 @@ def cpu():
     return list(map(int, fields))
 
 
-def measure(fixture, env, runner):
+def measure(fixture, env, runner, mode):
     before = cpu()
     start = time.monotonic()
-    output = subprocess.check_output([*runner, fixture, '--run'], env=env, text=True, timeout=15)
+    output = subprocess.check_output([*runner, fixture, mode], env=env, text=True, timeout=15)
     duration = time.monotonic() - start
     after = cpu()
     ticks = [b - a for a, b in zip(before, after)]
@@ -40,6 +40,7 @@ def measure(fixture, env, runner):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fixture', type=Path, required=True)
+    parser.add_argument('--move-window', action='store_true', help='Use deterministic X11 move requests instead of pointer input')
     args = parser.parse_args()
     if os.geteuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise RuntimeError('Run as root on the selected SM-G955N')
@@ -69,15 +70,15 @@ def main():
     modifier = subprocess.check_output([*runner, 'gsettings', 'get',
         'org.gnome.desktop.wm.preferences', 'mouse-button-modifier'],
         env=env, text=True, timeout=5).strip()
-    if modifier != "'<Super>'":
+    if not args.move_window and modifier != "'<Super>'":
         raise RuntimeError('Fixture requires the GNOME Super mouse modifier')
     before = status()
     require_visible()
-    trials = [measure(str(args.fixture.resolve(strict=True)), env, runner) for _ in range(3)]
+    trials = [measure(str(args.fixture.resolve(strict=True)), env, runner, '--move-window' if args.move_window else '--run') for _ in range(3)]
     require_visible()
     if before != status() or before[1] != '0':
         raise RuntimeError('Kernel health or boot identity changed during measurement')
-    print(json.dumps({'scope': 'synthetic X11 drag, window geometry only; no panel FPS',
+    print(json.dumps({'scope': ('scripted X11 window moves' if args.move_window else 'synthetic X11 drag') + ', window geometry only; no panel FPS',
                       'trials': trials}, indent=2))
 
 

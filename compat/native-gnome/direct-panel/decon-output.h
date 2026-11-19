@@ -21,10 +21,12 @@ struct g955n_panel_frame {
 /* The caller owns the verified primary-panel fd and a linear single-plane
  * buffer with checked layout. The caller must exclusively own presentation
  * and retain submitted buffers. The returned fence is owned by the caller.
- * A completed replacement retires the preceding frame, subject to the
- * caller verifying that the panel remained active and accepted the update.
- * An ambiguous result never gives permission to reuse a submitted buffer. */
+ * The returned fence belongs to this frame and is signalled after a later
+ * replacement on the primary command-mode panel.
+ * An ambiguous result never gives permission to reuse a submitted buffer.
+ * submitted is set immediately before the ioctl, so preflight failures can
+ * be distinguished from failures after entering the driver. */
 int g955n_decon_submit(int panel_fd, const struct g955n_panel_frame *frame,
-                      int *completion_fence);
+                      int *completion_fence, int *submitted);
 
 #endif

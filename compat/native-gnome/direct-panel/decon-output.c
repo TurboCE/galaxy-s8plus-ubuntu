@@ -32,6 +32,8 @@ struct decon_dpp {
 
 struct decon_window {
     uint32_t state;
+    /* Kernel state is followed by an 8-byte-aligned union. */
+    uint32_t union_alignment;
     int32_t dma_buf[3];
     int32_t fence, alpha;
     uint32_t blend, channel, format;
@@ -49,15 +51,19 @@ struct decon_config {
 #define DECON_WIN_CONFIG _IOW('F', 209, struct decon_config)
 
 _Static_assert(sizeof(struct decon_window) == 184, "Exynos8895 window ABI");
+_Static_assert(offsetof(struct decon_window, dma_buf) == 8, "Exynos8895 DMA-BUF offset");
+_Static_assert(offsetof(struct decon_window, fence) == 20, "Exynos8895 fence offset");
+_Static_assert(offsetof(struct decon_window, format) == 36, "Exynos8895 format offset");
 _Static_assert(offsetof(struct decon_window, source) == 128, "Exynos8895 source offset");
 _Static_assert(sizeof(struct decon_config) == 1480, "Exynos8895 ioctl ABI");
 
 int g955n_decon_submit(int panel_fd, const struct g955n_panel_frame *frame,
-                      int *completion_fence)
+                      int *completion_fence, int *submitted)
 {
-    if (!completion_fence)
+    if (!completion_fence || !submitted)
         return -EINVAL;
     *completion_fence = -1;
+    *submitted = 0;
     if (!frame || panel_fd < 0 || frame->dma_buf < 0 || frame->acquire_fence < -1 ||
         frame->stride_pixels < PANEL_WIDTH || frame->stride_pixels > 4096 ||
         frame->allocation_height < PANEL_HEIGHT || frame->allocation_height > 4096 ||
@@ -94,6 +100,7 @@ int g955n_decon_submit(int panel_fd, const struct g955n_panel_frame *frame,
         .full_height = PANEL_HEIGHT,
     };
 
+    *submitted = 1;
     if (ioctl(panel_fd, DECON_WIN_CONFIG, &config) < 0)
         return -errno;
     if (config.fence < 0)
