@@ -56,3 +56,11 @@ do not claim a new deployment or successful device test without reconnection.
 Private evidence remains under artifacts/panel-safety: power-hang26-*;
 desktop-power-cycles26-live.log; desktop-power-cycles26-20.log;
 kernel26-live-follow2.raw. Neither raw logs nor credentials are committed.
+
+The explicit `compat/idle-isolation.py` runtime tool is retained for reproducible
+C2-only diagnosis, not production startup. It verifies all eight actual state1
+C2 descriptions, saves original values in a protected exclusive record, and
+restores only a same-boot matching set. A reboot resets the runtime change; a
+stale record from an older boot is refused. Earlier C2-only and genuine built-in
+cpuidle-off trials did not prevent resets, so neither is a stability fix. The
+current normal-idle candidate does not run this tool.
