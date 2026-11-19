@@ -116,6 +116,13 @@ def prepare_child(runtime, info_bytes, system, devices, library_dirs, seconds,
             os.chown(target, 0, 1003)
             target.chmod(0o660)
     if any(name == 'fb0' for name, _, _ in devices):
+        font_cache = Path('/var/cache/fontconfig')
+        if font_cache.is_dir():
+            target = root / 'var/cache/fontconfig'
+            target.mkdir(parents=True, mode=0o755)
+            (root / 'var').chmod(0o755)
+            (root / 'var/cache').chmod(0o755)
+            bind_readonly(font_cache, target)
         # POSIX SHM is used by the Linux compositor's swapchain wrapper.
         # Keep it separate from the small private device-node tmpfs.
         shm = root / 'dev/shm'

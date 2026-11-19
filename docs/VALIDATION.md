@@ -191,3 +191,40 @@ keyboard-model/, client-build.log and pthread-key-build.log. GNOME46's source
 selects the X11 nested backend for --nested; launching it directly as a Wayland
 client of this HWC compositor is not an available integration route. A working
 accelerated client/compositor does not silently replace the current GNOME session.
+
+
+### GTK4 and private working-directory correction
+
+The unchanged system GTK4/Zenity application completed a separately reviewed
+20-second HWC trial, reporting actual Mali-G71 binding from the private EGL
+library, with no preload or debugger. Client/compositor remained alive, real
+presentation/counter progress, namespace cleanup, display restoration, same boot,
+taint0 and no new kernel fault signatures passed. Fontconfig errors disappeared.
+The ordinary8-second renderer/client scopes remain separate; the20-second scope
+requires the fixed hash-pinned GTK client. Host guard tests now total31.
+
+The font errors were not allocation exhaustion or solved by cache alone:
+nsenter --wd=/ opens that directory before namespace entry. It retained a
+working directory outside the chroot and getcwd failed (also seen in earlier
+gdb logs). Fontconfig canonicalizes its relative reject globs and mislabeled
+that path failure as out of memory. All property/buffer/panel nsenter entry
+points now use --wdns=/, resolved after namespace/root entry. The panel guard
+checks actual root/CWD identity and every child explicitly starts at /. Font
+cache is separately read-only; no host cache is rewritten.
+
+Enabling GTK4's OPENGL debug flag exposed another upstream diagnostic-only bug:
+find_egl_device unconditionally requests eglQueryDisplayAttribEXT even when the
+required EGL device-query extension is absent; libepoxy aborts correctly. That
+flag was introduced only for this diagnostic and is not part of normal startup.
+Normal GTK GPU drawing works without it. Optional private EGL reporting uses
+real driver glGetString only after successful eglMakeCurrent, once per thread/
+context, preserving results and all capability lists. It supplies the required
+renderer evidence without using that unsupported diagnostic route. No fake
+extension/device or error-return override was added; the GTK debug-path issue
+remains separately recorded, not claimed fixed in the system GTK library.
+
+Private evidence: compositor-build/panel-gtk4-cwd-result.json and preceding
+GTK4 failures; egl-report-build.log. The current GNOME session still uses its
+previous CPU path. Source for a potential X11 EGL connection was located in
+pinned Droidian/libhybris and a public same-GPU S8 reference; neither reference
+is device qualification or permission to copy another device's binaries.

@@ -109,7 +109,7 @@ def run_inner(child, build, boot, hashes, runtime, runtime_log, gpu=False, compo
                     G955N_PARENT_MOUNT_NS=os.readlink('/proc/self/ns/mnt'))
     if any(env.get(key) != value for key, value in expected.items()):
         raise RuntimeError('Private environment provenance mismatch')
-    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wd=/',
+    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wdns=/',
                '/usr/bin/setpriv', '--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot',
                '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs', '/usr/bin/env', '-i',
                'HOME=/home/ubuntu', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin', 'ANDROID_ROOT=/system', 'ANDROID_DATA=/data',

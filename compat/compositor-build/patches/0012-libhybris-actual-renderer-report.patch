@@ -1,0 +1,40 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libhybris: optionally report actual current GL renderer
+
+Report GL_RENDERER only after successful real context binding when explicitly
+requested via HYBRIS_EGL_REPORT_RENDERER=1, once per thread/context. This uses
+the driver's glGetString and needs no EGL device-enumeration extensions.
+Preserve the native return value; no context/fence/result overrides or global
+GL changes. Normal operation is unchanged without the environment flag.
+Original upstream license notices are retained.
+
+--- a/hybris/egl/egl.c
++++ b/hybris/egl/egl.c
+@@ -459,7 +459,26 @@
+ }
+ 
+ HYBRIS_IMPLEMENT_FUNCTION2(egl, EGLBoolean, eglDestroyContext, EGLDisplay, EGLContext);
+-HYBRIS_IMPLEMENT_FUNCTION4(egl, EGLBoolean, eglMakeCurrent, EGLDisplay, EGLSurface, EGLSurface, EGLContext);
++/* Optional actual renderer reporting, without requiring EGL device extensions. */
++static EGLBoolean (*_eglMakeCurrent)(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
++EGLBoolean eglMakeCurrent(EGLDisplay dpy, EGLSurface draw, EGLSurface read, EGLContext ctx)
++{
++	HYBRIS_DLSYSM(egl, &_eglMakeCurrent, "eglMakeCurrent");
++	EGLBoolean result = (*_eglMakeCurrent)(dpy, draw, read, ctx);
++	static __thread EGLContext reported_context;
++	const char *report = getenv("HYBRIS_EGL_REPORT_RENDERER");
++	if (result && ctx != EGL_NO_CONTEXT && ctx != reported_context &&
++			report && strcmp(report, "1") == 0) {
++		HYBRIS_DLSYSM(egl, &_eglGetProcAddress, "eglGetProcAddress");
++		const GLubyte *(*get_string)(GLenum) = (void *)(*_eglGetProcAddress)("glGetString");
++		if (get_string) {
++			const GLubyte *renderer = get_string(GL_RENDERER);
++			fprintf(stderr, "Hybris actual GL_RENDERER = %s\n", renderer ? (const char *)renderer : "unavailable");
++		}
++		reported_context = ctx;
++	}
++	return result;
++}
+ HYBRIS_IMPLEMENT_FUNCTION0(egl, EGLContext, eglGetCurrentContext);
+ HYBRIS_IMPLEMENT_FUNCTION1(egl, EGLSurface, eglGetCurrentSurface, EGLint);
+ HYBRIS_IMPLEMENT_FUNCTION0(egl, EGLDisplay, eglGetCurrentDisplay);

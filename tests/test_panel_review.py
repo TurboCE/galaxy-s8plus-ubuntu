@@ -49,4 +49,7 @@ class PanelReviewGuard(unittest.TestCase):
  def test_arbitrary_client_path_rejected(self):
   self.data.update(client_probe='/usr/bin/arbitrary',client_probe_sha256='0'*64);self.write()
   with self.assertRaisesRegex(RuntimeError,'Changed client fixture'):self.verify()
+ def test_longer_scope_cannot_run_without_its_fixed_gtk_client(self):
+  self.data['scope']='exclusive-hwc-panel-gtk20s';self.write()
+  with self.assertRaisesRegex(RuntimeError,'GTK20 scope'):self.verify()
 if __name__=='__main__':unittest.main()

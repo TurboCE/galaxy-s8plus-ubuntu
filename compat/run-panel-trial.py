@@ -57,7 +57,7 @@ def build_id():
 def review(path,sha):
  if digest(path)!=sha:raise RuntimeError('Review digest changed')
  data=json.loads(path.read_text())
- if data.get('target')!='SM-G955N' or data.get('scope')!='exclusive-hwc-panel-8s' or set(data.get('files',{}))!=FILES:
+ if data.get('target')!='SM-G955N' or data.get('scope') not in ('exclusive-hwc-panel-8s','exclusive-hwc-panel-gtk20s') or set(data.get('files',{}))!=FILES:
   raise RuntimeError('Wrong/incomplete exclusive panel scope')
  for name,expected in data['files'].items():
   p=BASE/name
@@ -73,15 +73,18 @@ def review(path,sha):
   p=PREFIX/name
   if not p.is_symlink() or str(p.readlink())!=target or not p.resolve().is_relative_to(PREFIX) or not p.exists():raise RuntimeError('Changed/escaping compositor link')
  if data.get('client_probe'):
-  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe'}
+  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe','gtk4-zenity':Path('/usr/bin/zenity')}
   client_path=clients.get(data['client_probe'])
   if client_path is None or digest(client_path)!=data.get('client_probe_sha256'):raise RuntimeError('Changed client fixture')
   package['client_probe']=True
   package['client_command_path']=str(client_path)
+  package['client_kind']=data['client_probe']
   package['client_debugger']=data.get('client_debugger') is True
   if data.get('client_preload_sha256'):
    if digest(BASE/'trace-client-gl.so')!=data['client_preload_sha256']:raise RuntimeError('Changed client diagnostic')
    package['client_preload']=True
+ if data.get('scope')=='exclusive-hwc-panel-gtk20s' and data.get('client_probe')!='gtk4-zenity':raise RuntimeError('GTK20 scope requires its fixed client')
+ package['observation_seconds']=20 if data.get('scope')=='exclusive-hwc-panel-gtk20s' else 8
  return data,package
 
 def android_processes():
@@ -119,6 +122,7 @@ def restore():
 
 def panel_guard(boot):
  identity(boot)
+ if os.getcwd()!='/' or (os.stat('.').st_dev,os.stat('.').st_ino)!=(os.stat('/').st_dev,os.stat('/').st_ino):raise RuntimeError('Working directory must be the private root')
  if os.environ.get('G955N_ANDROID_PRIVATE_RUNTIME')!='1' or os.getpid()==1:raise RuntimeError('Private runtime required')
  for kind,key in [('pid','G955N_PARENT_PID_NS'),('mnt','G955N_PARENT_MOUNT_NS')]:
   if not os.environ.get(key) or os.readlink('/proc/self/ns/'+kind)==os.environ[key]:raise RuntimeError('Namespace provenance failed')
@@ -151,7 +155,7 @@ def inner(boot,package):
  def launch(command,name,system=False,env=None):
   log=tempfile.TemporaryFile(dir='/run');handles.append(log)
   p=subprocess.Popen(command,stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,close_fds=True,
-   preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name=='compositor' else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
+   cwd='/',preexec_fn=lambda:legacy.setup_child(parent,system,128*1024*1024 if name=='compositor' else legacy.MAX_TRACE),env=env or {k:v for k,v in os.environ.items() if k not in ('LD_PRELOAD','LD_LIBRARY_PATH') and not k.startswith('HYBRIS_')})
   processes.append((name,p,log));return p
  try:
   manager=launch(['/system/bin/servicemanager'],'standard_manager')
@@ -188,19 +192,25 @@ def inner(boot,package):
   compositor=launch(command,'compositor',True,env)
   client=None
   start=time.monotonic()
-  while time.monotonic()-start<8 and compositor.poll() is None:
+  while time.monotonic()-start<package['observation_seconds'] and compositor.poll() is None:
    if package.get('client_probe') and client is None and (runtime/'wayland-0').exists():
     client_env={**env,'WAYLAND_DISPLAY':'wayland-0','HYBRIS_EGLPLATFORM':'wayland'}
     client_path=package['client_command_path']
-    client_command=['/usr/bin/stdbuf','-oL','-eL',client_path,'-info']
+    client_args=['-info']
+    if package.get('client_kind')=='gtk4-zenity':
+     home=runtime/'gtk-home';home.mkdir(mode=0o700);os.chown(home,1000,1000)
+     client_env.update(HOME=str(home),XDG_CACHE_HOME=str(home/'cache'),XDG_CONFIG_HOME=str(home/'config'),GSETTINGS_BACKEND='memory',
+      GDK_BACKEND='wayland',GDK_GL='gles',G_MESSAGES_DEBUG='all',HYBRIS_EGL_REPORT_RENDERER='1',GSK_RENDERER='gl',GTK_A11Y='none')
+     client_args=['--info','--text=Ubuntu display test','--title=Ubuntu']
+    client_command=['/usr/bin/stdbuf','-oL','-eL',client_path,*client_args]
     if package.get('client_preload'):
      client_env['LD_PRELOAD']=str(BASE/'trace-client-gl.so')
-     client_command=[client_path,'-info']
+     client_command=[client_path,*client_args]
     if package.get('client_debugger'):
      client_command=['/usr/bin/gdb','--batch','--nx','-ex','set auto-load off','-ex','set pagination off',
       '-ex','set startup-with-shell off','-ex','run','-ex','info proc mappings',
       '-ex','thread apply all bt','-ex','info registers','-ex','x/32gx $sp',
-      '--args',client_path,'-info']
+      '--args',client_path,*client_args]
     client=launch(client_command,'client',True,client_env)
    while True:
     try:message=android_log.recv(65536)
@@ -218,6 +228,9 @@ def inner(boot,package):
   report['display_irq_after']=display_irqs()
   report['display_irq_progressed']=all(report['display_irq_after'][key]>=value+3 for key,value in report['display_irq_before'].items())
   report['compositor_alive_8s']=compositor.poll() is None
+  report['observation_seconds']=package['observation_seconds']
+  if client is not None and Path('/proc',str(client.pid),'maps').exists():
+   report['client_maps']=Path('/proc',str(client.pid),'maps').read_text()
   report['client_alive_at_end']=client is not None and client.poll() is None
   report['compositor_exit_before_cleanup']=compositor.poll()
   if Path('/proc',str(compositor.pid),'limits').exists():report['compositor_limits']=Path('/proc',str(compositor.pid),'limits').read_text()
@@ -298,7 +311,7 @@ def execute(path,sha):
    if ready and child and not invoked:
     invoked=True;evidence=baseline.collect_live(child,int(ready[2]),BASE);result.update(evidence)
     if ready[1]!=ready[2] or evidence['independent_property_client']['exit_code'] or 'value=true ' not in evidence['independent_property_client']['stdout'] or not evidence.get('verified_manager_processes') or not all(evidence.get('live_context_hashes_verified',{}).values()):raise RuntimeError('Real readiness failed')
-    cmd=['nsenter','--target',child,'--mount','--pid','--root','--wd=/','/usr/bin/setpriv','--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot','--inh-caps=-all','--ambient-caps=-all','--no-new-privs',
+    cmd=['nsenter','--target',child,'--mount','--pid','--root','--wdns=/','/usr/bin/setpriv','--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot','--inh-caps=-all','--ambient-caps=-all','--no-new-privs',
      '/usr/bin/env','-i','HOME=/home/ubuntu','PATH=/usr/sbin:/usr/bin:/sbin:/bin','G955N_ANDROID_PRIVATE_RUNTIME=1','G955N_PARENT_PID_NS='+os.readlink('/proc/self/ns/pid'),'G955N_PARENT_MOUNT_NS='+os.readlink('/proc/self/ns/mnt'),
      '/usr/bin/python3',str(BASE/'run-panel-trial.py'),'--inner','--reviewed-manifest',str(path),'--manifest-sha256',sha]
     p=subprocess.run(cmd,capture_output=True,text=True,timeout=28);result['inner_exit']=p.returncode;result['inner_stdout']=p.stdout;result['inner_stderr']=p.stderr

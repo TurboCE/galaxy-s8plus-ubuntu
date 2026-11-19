@@ -30,7 +30,7 @@ def snapshot():
 
 
 def collect_live(child, expected_pid, build):
-    proof = subprocess.run(['nsenter', '--target', child, '--mount', '--pid', '--root', '--wd=/',
+    proof = subprocess.run(['nsenter', '--target', child, '--mount', '--pid', '--root', '--wdns=/',
                             str(build / 'android-property-runtime'), '--read-property', 'hwservicemanager.ready'],
                            capture_output=True, text=True, timeout=6)
     result = dict(independent_property_client=dict(exit_code=proof.returncode, stdout=proof.stdout, stderr=proof.stderr))
@@ -83,7 +83,7 @@ def run_hwc_no_devices(child, build, runtime_process, runtime_log):
                 'LD_LIBRARY_PATH=' + str(build.parent / 'g955n-compat-install/lib'),
                 'HYBRIS_ANDROID_SDK_VERSION=28', 'HYBRIS_EGLPLATFORM=null',
                 'HYBRIS_LD_LIBRARY_PATH=/system/lib64:/vendor/lib64']
-    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wd=/',
+    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wdns=/',
                '/usr/bin/setpriv', '--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot',
                '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs',
                '/usr/bin/env', '-i', *env_args, '/usr/bin/strace', '-f', '-tt', '-s', '96',
@@ -172,7 +172,7 @@ def run_allocator_no_ion(child, build, runtime_process, runtime_log):
         return dict(refused=True, reason='Parent namespace provenance mismatch', rendering_qualified=False)
     binary = build / 'allocator-registration-query'
     digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wd=/',
+    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wdns=/',
                '/usr/bin/setpriv', '--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot',
                '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs',
                '/usr/bin/env', '-i', 'HOME=/home/ubuntu', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
