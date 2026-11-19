@@ -444,3 +444,13 @@ The ordinary login session still uses the prior CPU path pending normal-session
 integration. The pre-existing account-row touch-activation workaround, native
 Polkit/session identity, optional calendar/portal services, long-term stability
 and other hardware features remain open; no blanket error-free claim is made.
+
+
+Native-history follow-up: the completed60-second trial passed actual pixel
+composition, five genuine delivered contacts, private cleanup, host-state
+restoration, same boot/taint0 and no new kernel fault signatures. Bounded live
+reports directly showed swapchain age1 while the bound native EGL buffer age
+was3 (and0 during initialization). This confirms the history mismatch on the
+actual device; the fix uses the genuine3 rather than forcing permanent full
+redraws. The owner confirmed the physical calendar remains steady. The
+ordinary GDM/CPU session was restored after the bounded experiment.
