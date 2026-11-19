@@ -157,12 +157,116 @@ def run_hwc_no_devices(child, build, runtime_process, runtime_log):
     return data
 
 
+
+def run_allocator_no_ion(child, build, runtime_process, runtime_log):
+    """One original allocator lifecycle; private runtime and no hardware nodes."""
+    root = Path('/proc', child, 'root')
+    for name in ['/efs', '/dev/block', '/dev/snd', '/dev/ion', '/dev/mali0', '/dev/fb0', '/dev/graphics/fb0', '/dev/sw_sync']:
+        if (root / name.lstrip('/')).exists():
+            return dict(refused=True, reason='Forbidden path: ' + name, rendering_qualified=False)
+    raw_env = Path('/proc', child, 'environ').read_bytes().split(b'\0')
+    private_env = dict(item.decode().split('=', 1) for item in raw_env if item.startswith(b'G955N_') and b'=' in item)
+    expected = dict(G955N_ANDROID_PRIVATE_RUNTIME='1', G955N_PARENT_PID_NS=os.readlink('/proc/self/ns/pid'),
+                    G955N_PARENT_MOUNT_NS=os.readlink('/proc/self/ns/mnt'))
+    if any(private_env.get(k) != v for k, v in expected.items()):
+        return dict(refused=True, reason='Parent namespace provenance mismatch', rendering_qualified=False)
+    binary = build / 'allocator-registration-query'
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    command = ['nsenter', '--target', child, '--mount', '--pid', '--root', '--wd=/',
+               '/usr/bin/setpriv', '--bounding-set=-sys_admin,-mknod,-sys_rawio,-sys_module,-sys_boot',
+               '--inh-caps=-all', '--ambient-caps=-all', '--no-new-privs',
+               '/usr/bin/env', '-i', 'HOME=/home/ubuntu', 'PATH=/usr/sbin:/usr/bin:/sbin:/bin',
+               'ANDROID_ROOT=/system', 'ANDROID_DATA=/data', *[k + '=' + v for k, v in expected.items()],
+               '/usr/bin/python3', str(build / 'allocator-no-ion-trial.py'), '--run-no-ion',
+               '--query', str(binary), '--query-sha256', digest]
+    data = dict(query_sha256=digest, rendering_qualified=False, allocation_tested=False)
+    process = None
+    output = bytearray()
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   bufsize=0, start_new_session=True)
+        data['launcher_host_pid'] = process.pid
+        os.set_blocking(process.stdout.fileno(), False)
+        watch = selectors.DefaultSelector()
+        watch.register(process.stdout, selectors.EVENT_READ, 'allocator')
+        watch.register(runtime_process.stdout, selectors.EVENT_READ, 'runtime')
+        deadline = time.monotonic() + 24
+        while time.monotonic() < deadline:
+            for key, _ in watch.select(.1):
+                try:
+                    chunk = os.read(key.fd, 65536)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    watch.unregister(key.fileobj)
+                elif key.data == 'allocator':
+                    output.extend(chunk)
+                else:
+                    runtime_log.extend(chunk)
+            match = re.search(rb'allocator_namespace_pid=(\d+)', output)
+            if match and not data.get('verified_allocator_host_processes'):
+                selected = []
+                for path in Path('/proc').glob('[0-9]*/status'):
+                    try:
+                        fields = dict(line.split(':', 1) for line in path.read_text().splitlines() if ':' in line)
+                        nspid = fields.get('NSpid', '').split()
+                        if (nspid and int(nspid[-1]) == int(match[1]) and
+                                os.readlink(path.parent / 'ns/pid') == os.readlink(Path('/proc', child, 'ns/pid')) and
+                                (path.parent / 'cmdline').read_bytes().split(b'\0', 1)[0] ==
+                                b'/vendor/bin/hw/android.hardware.graphics.allocator@2.0-service'):
+                            selected.append(dict(host_pid=int(path.parent.name), namespace_pids=nspid,
+                                                 parent_host_pid=fields.get('PPid', '').strip(),
+                                                 uid=fields.get('Uid', '').split(), gid=fields.get('Gid', '').split(),
+                                                 maps=(path.parent / 'maps').read_text()))
+                    except (OSError, ValueError):
+                        pass
+                data['verified_allocator_host_processes'] = selected
+            if process.poll() is not None:
+                try:
+                    output.extend(os.read(process.stdout.fileno(), 65536))
+                except BlockingIOError:
+                    pass
+                break
+            if runtime_process.poll() is not None:
+                data['runtime_ended_before_allocator'] = True
+                break
+        data['exit_code'] = process.poll()
+        if process.poll() is None:
+            data['coordinator_timeout'] = True
+    except Exception as error:
+        data['exception'] = repr(error)
+    finally:
+        if process and process.poll() is None:
+            try:
+                os.killpg(process.pid, 15)
+                process.wait(timeout=2)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(process.pid, 9)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=2)
+        data['stdout'] = output.decode(errors='replace')
+        start = data['stdout'].find('{')
+        if start >= 0:
+            try:
+                data['lifecycle'] = json.loads(data['stdout'][start:])
+            except ValueError as error:
+                data['report_parse_error'] = repr(error)
+        data['launcher_reaped'] = process is None or process.poll() is not None
+        data['verified_allocator_host_pids_gone'] = all(not Path('/proc', str(p['host_pid'])).exists()
+                                                         for p in data.get('verified_allocator_host_processes', []))
+    return data
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-trial', action='store_true')
     parser.add_argument('--seconds', type=int, default=30)
     parser.add_argument('--hwc-open-no-devices', action='store_true',
                         help='After verified real readiness, run a bounded dependency-only HWC probe without hardware nodes')
+    parser.add_argument('--allocator-no-ion', action='store_true',
+                        help='Explicit original allocator ten-second lifecycle without ION/GPU/display/audio nodes')
     parser.add_argument('--build-dir', type=Path, default=Path('/home/ubuntu/g955n-compat-build'))
     args = parser.parse_args()
     if not args.run_trial:
@@ -171,6 +275,11 @@ def main():
     if (os.geteuid() or 'SM-G955N' not in Path('/proc/device-tree/model').read_text() or
             'g955n-ubuntu' not in Path('/proc/sys/kernel/osrelease').read_text() or not 1 <= args.seconds <= 300):
         raise SystemExit('Requires root on native G955N with a bounded duration')
+    if args.allocator_no_ion and args.hwc_open_no_devices:
+        raise SystemExit('Coordinate one diagnostic at a time')
+    if args.allocator_no_ion:
+        if args.seconds < 30 or not Path('/usr/bin/setpriv').is_file():
+            raise SystemExit('Allocator lifecycle needs at least 30 seconds and capability tools')
     if args.hwc_open_no_devices:
         if args.seconds < 25 or not all(Path(p).is_file() for p in ['/usr/bin/setpriv', '/usr/bin/strace', '/usr/bin/timeout']):
             raise SystemExit('Bounded HWC dependency mode needs at least 25 seconds and existing trace/capability tools')
@@ -214,10 +323,13 @@ def main():
                 result['ready_request'] = dict(peer_pid=int(ready[1]), supervised_pid=int(ready[2]), serial=int(ready[3]))
                 try:
                     result.update(collect_live(child, int(ready[2]), build))
-                    if args.hwc_open_no_devices:
+                    if args.hwc_open_no_devices or args.allocator_no_ion:
                         client = result.get('independent_property_client', {})
                         if int(ready[1]) != int(ready[2]) or client.get('exit_code') or 'value=true ' not in client.get('stdout', ''):
-                            result['hwc_no_device_diagnostic'] = dict(refused=True, reason='Real shared readiness not verified', rendering_qualified=False)
+                            key = 'allocator_no_ion_diagnostic' if args.allocator_no_ion else 'hwc_no_device_diagnostic'
+                            result[key] = dict(refused=True, reason='Real shared readiness not verified', rendering_qualified=False)
+                        elif args.allocator_no_ion:
+                            result['allocator_no_ion_diagnostic'] = run_allocator_no_ion(child, build, process, log)
                         else:
                             result['hwc_no_device_diagnostic'] = run_hwc_no_devices(child, build, process, log)
                 except Exception as error:
@@ -260,7 +372,14 @@ def main():
                             len(result.get('readonly_context_mounts', [])) == len(result.get('live_context_hashes_verified', {})) and
                             all(' ro,' in line or ' ro ' in line for line in result.get('readonly_context_mounts', [])))
         result['property_runtime_passed'] = result['passed']
-        if args.hwc_open_no_devices:
+        if args.allocator_no_ion:
+            diagnostic = result.get('allocator_no_ion_diagnostic', {})
+            result['allocator_registration_passed'] = bool(
+                result['passed'] and diagnostic.get('exit_code') == 0 and
+                diagnostic.get('lifecycle', {}).get('allocator_registration_passed') and
+                diagnostic.get('verified_allocator_host_processes') and
+                diagnostic.get('verified_allocator_host_pids_gone') and diagnostic.get('launcher_reaped'))
+        if args.hwc_open_no_devices or args.allocator_no_ion:
             result['gpu_rendering_qualified_by_this_trial'] = False
         print(json.dumps(result, indent=2))
     return 0 if result.get('passed') else 1

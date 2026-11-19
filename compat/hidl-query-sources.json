@@ -1,0 +1,23 @@
+{
+  "tools-hidl": {
+    "tag": "android-9.0.0_r61",
+    "commit": "3bc44c73f2b02d2cf33d017bf9807e613e5fd2e6",
+    "url": "https://android.googlesource.com/platform/system/tools/hidl"
+  },
+  "libhidl": {
+    "tag": "android-9.0.0_r61",
+    "commit": "5628025297a4a0905e2b5e95643daa6e2508adbd",
+    "url": "https://android.googlesource.com/platform/system/libhidl"
+  },
+  "libcxx": {
+    "tag": "android-9.0.0_r61",
+    "commit": "b59618d8ec6702824ec117c08d5c99e38c8f3afa",
+    "url": "https://android.googlesource.com/platform/external/libcxx"
+  },
+  "hwservicemanager-reference": {
+    "tag": "android-9.0.0_r61",
+    "commit": "e609036145cd4457439e4798878f6ff5bf9c756f",
+    "url": "https://android.googlesource.com/platform/system/hwservicemanager",
+    "usage": "Source review of real registration caller PID; not linked into query"
+  }
+}

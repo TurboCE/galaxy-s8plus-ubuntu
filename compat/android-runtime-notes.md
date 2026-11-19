@@ -192,28 +192,28 @@ Copying that world-writable permission is unnecessary. A future separately
 coordinated ION-only diagnostic can expose just the existing character device at
 /dev/ion, owned by Android system UID 1000 and mode 0600, in the private dev tmpfs;
 no host chmod/chown and no whole-/dev bind. Keep the service's graphics/drmrpc
-supplementary IDs 1003/1007 explicit rather than resolving native Linux group
+primary GID 1003 and supplementary GID 1026 explicit rather than resolving native Linux group
 names. SYS_NICE would require a separate assessed scheduling need; it must not
 restore SYS_ADMIN/MKNOD/RAWIO/MODULE/BOOT. ION allocation still accesses a kernel
 allocator and is outside this quiet checkpoint. Neither its necessity nor its
 sufficiency for registration is yet established by a service run. Keep ION absent
 in the first dependency-only trial; registration may fail honestly at ENOENT.
 
-The next opt-in diagnostic has the following reviewable scaffold contract; no
-executable activation switch is installed until the registration client is built
-and verified:
+The next opt-in diagnostic follows this reviewable contract. The client and
+source-only opt-in runner were subsequently prepared, as recorded below:
 
 1. Reuse the genuine bounded runtime and verify independent shared readiness,
    child PID/mount isolation, contexts/hashes and readonly proc/sys. Reject any
    EFS/block/audio/display/GPU/ION node; reject an already running allocator.
 2. Start exactly one original allocator executable after dropping privileges to
-   UID 1000/GIDs 1003,1007, dangerous capability bounds and NNP. Preserve only
+   UID 1000/primary GID 1003/supplementary GID 1026, dangerous capability bounds and NNP. Preserve only
    the private namespace property/Binder environment. Record actual child PID
    and maps; bound startup/observation to 10 seconds. No allocate method calls.
 3. Query the *binderized* service manager with a minimal Bionic HIDL client:
    defaultServiceManager -> list -> match the exact allocator descriptor/instance
-   -> get on that listed instance -> IBase::getDebugInfo. Require the reported
-   server PID to match the supervised allocator's namespace PID, plus host
+   -> manager debugDump registration PID -> get on that listed instance ->
+   IBase::getDebugInfo. Require the actual registration caller PID to match the
+   supervised allocator's namespace PID, plus host
    PPid/NSpid mapping. Require transport=hwbinder from the original manifest.
    Missing registration, wrong PID or IPC timeout are failures. A live process,
    log message or property alone is not a registration check. Never seed ready
@@ -232,5 +232,69 @@ Android 9 generated HIDL manager/base headers and a matching Bionic C++ build
 against libhidlbase/libhidltransport/libutils/libc++; the current small GCC/libc
 runtime builder intentionally supplies none of these. Preparing those public
 headers/toolchain and verifying the client without any allocator/device calls
-is the concrete blocker before a safe executable activation mode. No NDK or
-new large source package was downloaded for this checkpoint.
+was the concrete blocker at that checkpoint and has now been addressed by the
+bounded build and ABI self-test below. No NDK or Android system build is needed.
+
+
+## Exact registration client build and guarded trial checkpoint
+
+`hidl-query-sources.json` pins the public Android 9 source inputs. The source-only
+header generator builds the original hidl-gen against cached system/core in an
+isolated Linux builder, applying only modern bison/flex compatibility edits to
+temporary copies. It generates base/manager 1.0 headers from the original HAL
+schemas. The C++ query uses these headers and original libc++/Bionic headers,
+Clang's Android28 AArch64 target, and the owner's stock shared libraries. No
+handwritten C++ vtable or full NDK is used. Build scripts run no handset command
+or resulting executable; the ELF startup-array check rejects unsupported global
+C++ constructors rather than silently skipping them.
+
+Stock user-build IBase::getDebugInfo is permitted to report NO_PID=-1.
+The query therefore requires the exact instance from the real manager list and
+checks hwservicemanager.debugDump's actual registered caller PID; AOSP
+ServiceManager.cpp records this from Binder getCallingPid and HidlService returns
+that stored PID. The service must be remote, and its own debug PID must either
+match or be the documented -1. Neither a fabricated PID nor a property/log line
+is accepted. Before/after list-only checks never get an absent service. They do
+not contact the passthrough manager, enumerate HAL libraries, allocate a buffer,
+acknowledge ctl or start any service.
+
+The query ELF and generated headers rebuilt successfully. On the unchanged
+kernel-15 handset the final ELF SHA-256 was
+68f96842aa058b3aa76fbe3b76edbd18f3880924d5674537893061e5fb264442.
+The Bionic libc++/HIDL string-vector and errno selftest passed. The earlier
+namespace-missing negative guard returned 2 before any service query. Both
+captured straces had zero ioctl/connect calls and no hardware-device opens;
+only Bionic startup checked the absent property directory read-only.
+These ABI tests do not validate actual allocator registration.
+
+`allocator-no-ion-trial.py` and the outer collector's `--allocator-no-ion` are
+explicit opt-ins. The inner controller verifies private PID/mount provenance,
+readonly proc/sys/system/vendor, an allowlisted tmpfs /dev, no-new-privileges
+through actual prctl, and removed dangerous effective/permitted/bounding
+capabilities. It checks actual registration absence before launching exactly one
+original allocator, UID 1000, primary GID 1003, supplementary GID 1026 (DRMRPC,
+verified against public Android filesystem IDs). It grants no SYS_NICE, exposes
+no ION/GPU/display/audio node, and calls no allocation method. Runtime guards
+record exact child credentials, real registration PID, host NSpid mapping and
+private maps. The service has at most ten seconds, a private process group and
+parent-death signal; finally sends TERM/KILL, reaps, and checks registration
+absence, remaining process-group members and device boundaries. The existing
+outer runtime verifies complete host-state restoration separately. Property
+runtime success and allocator registration success are separate report fields.
+
+The one authorized 40-second runtime completed in 40.700 seconds with genuine
+ready PID 30/serial 133 and complete host restoration, but the allocator
+controller refused before starting any allocator. Its original NNP guard
+incorrectly required /proc/status NoNewPrivs, absent on this 4.4 vendor kernel.
+The source now queries libc.prctl(PR_GET_NO_NEW_PRIVS=39) and requires an actual
+result of 1; a missing proc field is never defaulted to success. Once verified,
+NNP is inherited immutably by the service; an available child proc field is also
+checked. Pure tests cover missing proc metadata with actual 0/1/-1 and wrong PID
+registration evidence. The corrected HAL trial has not yet been run.
+
+Private evidence is under artifacts/hidl-query/. The post-trial host had no stock
+manager/allocator process, no property directory, identical host namespace IDs
+and mountinfo hash, and the same boot ID. Taint was 512, and recent warning-level
+kernel journal still contained unsupported-syscall register dumps (notably
+statx/faccessat2). This checkpoint does not claim clean kernel logs, a driver
+fault diagnosis, successful allocator startup or accelerated GNOME output.
