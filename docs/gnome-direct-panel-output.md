@@ -122,3 +122,23 @@ A reproducible, explicit trial entry point is provided in
 `compat/native-gnome/direct-panel/trial.py`. It expects the rebuilt private
 EGL module and a root-owned installation of the supervisor and the updated
 framebuffer service. The candidate stays outside the public repository.
+
+### Screen power and boot recovery
+
+With the GPU GNOME desktop active on kernel32, three forced DPMS off/on
+cycles put DECON into runtime suspend and brought it back to active.
+After each resume, the same GNOME Shell submitted new frames and the
+DECON timeline advanced by 179, 178 and 176 points respectively.
+The boot ID stayed constant and taint stayed 0.
+
+Install `trial.py` as `/usr/local/sbin/g955n-direct-panel-trial` and install
+and enable the adjacent `g955n-direct-panel-recover.service` before arming
+the trial. Before changing the active files the controller writes a durable
+snapshot. The timed rollback restores the desktop during the current boot.
+If the phone reboots with a pending snapshot, the recovery service restores
+the original library, launcher and manifest before GDM starts.
+
+A controlled reboot while the tracked trial controller was armed exercised the
+boot service on the SM-G955N. All three file hashes matched the baseline,
+the pending snapshot and lease were cleared, and the GDM and framebuffer
+services were active on the new boot. Kernel taint was 0.

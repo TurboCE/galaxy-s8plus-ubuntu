@@ -1330,3 +1330,8 @@ frame interrupts, with taint0. The three-by-three same-boot GNOME drag A/B
 measured16.04% to11.15% overall CPU busy and501.5ms to33ms window-coordinate
 median update intervals. See gnome-direct-panel-output.md for scope and
 measurement limitations. The supervised trial restored the ordinary output.
+
+Tested three DPMS off/on cycles on the active direct GNOME session.
+Added a boot recovery service and durable rollback snapshot. Verified
+restoration of the baseline library, manifest and launcher on an SM-G955N
+reboot during a staged trial.

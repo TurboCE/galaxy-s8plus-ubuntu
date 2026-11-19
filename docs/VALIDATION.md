@@ -634,3 +634,11 @@ frame interrupts, with taint0. The three-by-three same-boot GNOME drag A/B
 measured16.04% to11.15% overall CPU busy and501.5ms to33ms window-coordinate
 median update intervals. See gnome-direct-panel-output.md for scope and
 measurement limitations. The supervised trial restored the ordinary output.
+
+On kernel32, three direct-output DPMS off/on cycles suspended and resumed
+the DECON runtime device. The active GNOME Shell PID and boot ID were
+unchanged. Each resumed workload advanced the DECON timeline and taint
+stayed 0. A separate controlled reboot with the tracked trial armed restored
+all three original file hashes, cleared trial state, and brought up GDM and
+the legacy panel service on the new boot. Extended uptime, cursor rendering
+and system suspend are still open.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore normal GNOME output after an interrupted SM-G955N direct output trial
+Before=gdm.service gdm3.service display-manager.service
+ConditionPathExists=/var/lib/g955n/direct-panel-trial
+RequiresMountsFor=/opt/g955n-native-gpu /var/lib/g955n
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/sbin/g955n-direct-panel-trial --boot-recover
+
+[Install]
+WantedBy=multi-user.target

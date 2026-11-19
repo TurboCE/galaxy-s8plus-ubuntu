@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded trial of direct output in the ordinary SM-G955N GNOME session."""
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -19,6 +20,17 @@ FILES = (LIBRARY, MANIFEST, LAUNCHER)
 BACKUP = Path('/var/lib/g955n/direct-panel-trial')
 LEASE = Path('/run/lock/g955n-direct-panel-trial')
 TIMER = 'g955n-direct-panel-rollback'
+CONTROLLER = Path('/usr/local/sbin/g955n-direct-panel-trial')
+RECOVERY = 'g955n-direct-panel-recover.service'
+CONTROL_LOCK = Path('/run/lock/g955n-direct-panel-control')
+
+
+def sync_directory(directory):
+    fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def digest(data):
@@ -36,6 +48,7 @@ def replace(path, data):
             stream.flush()
             os.fsync(stream.fileno())
         temp.replace(path)
+        sync_directory(path.parent)
     finally:
         temp.unlink(missing_ok=True)
 
@@ -44,18 +57,27 @@ def ctl(*args):
     subprocess.run(['systemctl', *args], check=True, timeout=45)
 
 
+def remove_backup():
+    # Retire all snapshots together after the original files are durable.
+    with tempfile.TemporaryDirectory(prefix='.direct-panel-cleanup-', dir=BACKUP.parent) as stage:
+        BACKUP.rename(Path(stage) / BACKUP.name)
+        sync_directory(BACKUP.parent)
+
+
+def restore_files():
+    LEASE.unlink(missing_ok=True)
+    for path in FILES:
+        replace(path, (BACKUP / path.name).read_bytes())
+
+
 def restore():
     if not BACKUP.exists():
         return
     ctl('stop', 'gdm.service')
-    LEASE.unlink(missing_ok=True)
-    for path in FILES:
-        replace(path, (BACKUP / path.name).read_bytes())
+    restore_files()
     ctl('restart', 'g955n-fb-display.service')
     ctl('start', 'gdm.service')
-    for path in FILES:
-        (BACKUP / path.name).unlink()
-    BACKUP.rmdir()
+    remove_backup()
 
 
 def run(candidate, expected):
@@ -74,9 +96,17 @@ def run(candidate, expected):
     marker = b' original=dict(os.environ);env=environment(original)'
     if original[LAUNCHER].count(marker) != 1 or b'G955N_DIRECT_PANEL_TRIAL' in original[LAUNCHER]:
         raise RuntimeError('Unexpected GNOME launcher')
-    BACKUP.mkdir(mode=0o700)
-    for path, content in original.items():
-        (BACKUP / path.name).write_bytes(content)
+    with tempfile.TemporaryDirectory(prefix='.direct-panel-backup-', dir=BACKUP.parent) as stage:
+        snapshot = Path(stage) / BACKUP.name
+        snapshot.mkdir(mode=0o700)
+        for path, content in original.items():
+            with (snapshot / path.name).open('wb') as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        sync_directory(snapshot)
+        snapshot.rename(BACKUP)
+        sync_directory(BACKUP.parent)
 
     # Schedule recovery on the phone before interrupting its desktop.
     try:
@@ -84,9 +114,7 @@ def run(candidate, expected):
                         sys.executable, str(Path(__file__).resolve()), '--restore'],
                        check=True, timeout=15)
     except (subprocess.SubprocessError, OSError):
-        for path in FILES:
-            (BACKUP / path.name).unlink()
-        BACKUP.rmdir()
+        remove_backup()
         raise
     try:
         ctl('stop', 'gdm.service')
@@ -111,24 +139,41 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--candidate', type=Path)
     mode.add_argument('--restore', action='store_true')
+    mode.add_argument('--boot-recover', action='store_true')
     parser.add_argument('--sha256')
     args = parser.parse_args()
     if os.getuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise RuntimeError('Requires root on the SM-G955N')
-    if args.restore:
-        restore()
-        return
-    if '#32 ' not in subprocess.check_output(['uname', '-v'], text=True):
-        raise RuntimeError('The trial is qualified only against the kernel32 ABI')
-    if Path('/proc/sys/kernel/tainted').read_text().strip() != '0':
-        raise RuntimeError('Expected an untainted kernel before the trial')
-    # The delayed root recovery must invoke a trusted copy of this file.
-    own_file = Path(__file__).resolve()
-    for path in (own_file, *own_file.parents):
-        info = path.stat()
-        if info.st_uid or info.st_mode & 0o022:
-            raise RuntimeError('Install the trial controller under a root-owned prefix')
-    run(args.candidate, args.sha256)
+    with CONTROL_LOCK.open('a') as control:
+        if args.boot_recover:
+            # GDM can be starting while a trial controller holds the lock.
+            # A live lease means the snapshots belong to the current boot.
+            if LEASE.exists() or not BACKUP.exists():
+                return
+            fcntl.flock(control, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            restore_files()
+            remove_backup()
+            return
+        fcntl.flock(control, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if args.restore:
+            restore()
+            return
+        if not args.sha256:
+            parser.error('--candidate requires --sha256')
+        if '#32 ' not in subprocess.check_output(['uname', '-v'], text=True):
+            raise RuntimeError('The trial is qualified only against the kernel32 ABI')
+        if Path('/proc/sys/kernel/tainted').read_text().strip() != '0':
+            raise RuntimeError('Expected an untainted kernel before the trial')
+        # The delayed root recovery must invoke a trusted copy of this file.
+        own_file = Path(__file__).resolve()
+        if own_file != CONTROLLER:
+            raise RuntimeError(f'Install the trial controller at {CONTROLLER}')
+        for path in (own_file, *own_file.parents):
+            info = path.stat()
+            if info.st_uid or info.st_mode & 0o022:
+                raise RuntimeError('Install the trial controller under a root-owned prefix')
+        ctl('is-enabled', RECOVERY)
+        run(args.candidate, args.sha256)
 
 
 if __name__ == '__main__':
