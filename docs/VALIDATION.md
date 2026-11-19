@@ -518,3 +518,16 @@ recording the choice in its plan. Candidate31 builds and packs with actual LZ4
 builtin verification and the same config/external ramdisk/DTBH as30. The only
 extra source patches are those four audio ownership/bounds/locking fixes. No
 new BOOT write or audio runtime pass is claimed at this checkpoint.
+
+
+### Installed31 and signal-wait holder
+
+Fresh independent full30 backup preceded BOOT-only31 replacement. Full readback
+and unchanged RECOVERY/EFS/CPEFS/RADIO/PARAM/MISC passed.31 boots with the holder
+active before GDM, three ordinary Mali GNOME composition trials pass, and owner
+confirmed normal touch password/desktop entry. Actual holder CPU ticks stayed0
+for5seconds in do_sigtimedwait; normal termination exited0 and SIGKILL released
+its request. An independent guard vote prevented a floor gap during that test.
+The runtime policy remains a mitigation, not a kernel corruption fix. Earlier
+long-on state failures and the later three60-second off/five-second on30 pass
+are distinguished in mif-desktop-stability.md.

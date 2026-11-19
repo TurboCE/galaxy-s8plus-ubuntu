@@ -48,3 +48,28 @@ lifetime inspection and sensor/audio/modem/rotation work remain required.
 Private evidence is under artifacts/ondemand-safety, including kernel30-session,
 kernel30-power100, kernel30-failed-last-kmsg, kernel30-failed-decoded and
 mif-qos30-power100 records. Raw logs/addresses remain private.
+
+
+## Later bounded results and holder CPU behavior
+
+30 with the installed policy completed three60-second off/five-second on cycles
+with measured offMIF421000kHz, real panel suspended/active, same boot and taint0.
+Long-on variants encountered policy-driven DPMS off while the machine remained
+responsive; Mutter idle reset alone did not prevent the already-locked screen's
+blank policy. They are recorded as state-assertion failures, not hardware hangs
+or long-on passes. The later short-on test measures recovery before automatic
+reblanking and does not override authentication.
+
+31 adds only reviewed ABOX fixes17..20 to30's source selection and boots with
+matched config/ramdisk/DTBH. Three ordinary Mali GNOME tests pass and the owner
+confirmed touch password/desktop entry. The holder now blocks in sigwait rather
+than polling: actual /proc wait state is do_sigtimedwait and consumed CPU ticks
+were zero over a five-second observation. Actual normal termination exits0 and
+releases its vote; SIGKILL releases it too. A second temporary guard vote kept
+the tested floor throughout that lifecycle experiment and was released after
+the service was ready again. GDM was deliberately restarted for this test.
+
+A MIF QoS floor also affects coupled INT constraints and whether aggregate QoS
+changes reach the notifier path. The pinned table maps421000MIF to178000INT,
+versus107000INT for the lowest MIF points. Therefore these bounded passes do
+not isolate DRAM speed alone as the cause or identify a corrupting writer.

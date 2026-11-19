@@ -13,7 +13,6 @@ import signal
 import socket
 import stat
 import struct
-import time
 
 FREQUENCY_KHZ = 421000
 MIF = Path('/sys/class/devfreq/17000010.devfreq_mif')
@@ -54,14 +53,11 @@ def main():
     # closes both the lock and the kernel QoS file automatically.
     with open('/run/g955n-desktop-mif-qos.lock', 'a') as lease:
         fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        stopped = False
-
-        def stop(_signum, _frame):
-            nonlocal stopped
-            stopped = True
-
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            signal.signal(sig, stop)
+        # Wait for blocked termination signals without periodic CPU wakeups.
+        # A pending signal is retained until sigwait, eliminating the race
+        # between testing a stop flag and entering an indefinite sleep.
+        signals = {signal.SIGTERM, signal.SIGINT}
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, signals)
         fd = os.open(node, os.O_RDWR | os.O_CLOEXEC)
         try:
             if os.write(fd, struct.pack('<i', FREQUENCY_KHZ)) != 4:
@@ -70,13 +66,11 @@ def main():
             if aggregate < FREQUENCY_KHZ:
                 raise RuntimeError('Kernel did not accept the requested minimum')
             notify('READY=1\nSTATUS=Holding tested native-desktop MIF stability floor')
-            while not stopped:
-                # Finite wait avoids a signal arriving between the flag test
-                # and pause and leaving systemd waiting for its stop timeout.
-                time.sleep(0.25)
+            signal.sigwait(signals)
         finally:
             os.close(fd)
             notify('STOPPING=1\nSTATUS=Released this process MIF QoS request')
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
 if __name__ == '__main__':

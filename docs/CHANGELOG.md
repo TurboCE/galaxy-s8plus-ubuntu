@@ -1236,3 +1236,13 @@ recording the choice in its plan. Candidate31 builds and packs with actual LZ4
 builtin verification and the same config/external ramdisk/DTBH as30. The only
 extra source patches are those four audio ownership/bounds/locking fixes. No
 new BOOT write or audio runtime pass is claimed at this checkpoint.
+
+
+### Installed ABOX-safe31 / event-driven QoS holder
+
+Installed31 with independent full30 backup, exact readback and protected data
+preservation. Normal Mali GNOME tests and owner touch login passed. Removed
+periodic holder wakeups using blocked termination signals/sigwait. Actual31
+normal termination/SIGKILL cleanup and zero CPU ticks over five seconds pass;
+a temporary guard retained the same minimum during lifecycle testing. See
+mif-desktop-stability.md for precise display-power/policy boundaries.
