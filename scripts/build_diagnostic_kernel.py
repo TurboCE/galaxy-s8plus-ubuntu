@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--native-panel-safety',action='store_true',help='Include DPP metadata ownership and native pan/DPMS serialization proposal')
     parser.add_argument('--native-panel-qos',action='store_true',help='Include primary-panel pre-enable QoS ordering and error rollback')
     parser.add_argument('--native-ondemand-safety',action='store_true',help='Hold and check CPU governor private-data lifetime during display events')
+    parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
     if args.build_version is not None and not 1 <= args.build_version <= 9999:parser.error('build version must be 1..9999')
@@ -45,6 +46,10 @@ def main():
     output.mkdir(mode=0o700)
     patchfiles = sorted(p for p in (ROOT/'patches').glob('*.patch') if int(p.name[:4])<=16)
     if len(patchfiles)!=16:raise SystemExit('Requires exact baseline patch chain 1..16')
+    if args.audio_safety:
+        audio = sorted(p for p in (ROOT/'patches').glob('*.patch') if 17 <= int(p.name[:4]) <= 20)
+        if len(audio) != 4:raise SystemExit('Requires exact ABOX safety patch chain 17..20')
+        patchfiles += audio
     if args.native_fb_owner:
         patchfiles += [ROOT/'patches/0023-decon-mmap-page-offset.patch',ROOT/'patches/proposals/0028-decon-native-fb-lifetime.patch']
     patchfiles.append(ROOT/'patches/proposals/0027-ess-work-tail-on-panic.patch')
@@ -60,6 +65,7 @@ def main():
     plan = {'target':'SM-G955N','source':expected,'builder':args.builder,'volume':volume,
             'patches':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in patchfiles},
             'build_version':version,'builder_image_id':image_id,'compiler_version':compiler,
+            'audio_safety':args.audio_safety,
             'native_panel_safety':args.native_panel_safety,
             'native_panel_qos':args.native_panel_qos,
             'native_ondemand_safety':args.native_ondemand_safety,

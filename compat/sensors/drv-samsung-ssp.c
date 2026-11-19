@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <glib/gstdio.h>
 #include <string.h>
 #include <sys/file.h>
 #include <unistd.h>
@@ -21,6 +22,7 @@ typedef struct {
  GUdevDevice *dev;
  char *path;
  char *saved[4];
+ char *lease;
  int fd;
  guint timer;
  guint bit;
@@ -77,17 +79,43 @@ static gboolean controller_get(void){
 static void controller_put(void){
  if(controller_refs&&!--controller_refs){close(controller_fd);controller_fd=-1;}
 }
+/* Persist before the first sysfs mutation so systemd can recover a killed
+ * daemon. The controller lock serializes normal clients and lease recovery.
+ */
+static gboolean save_lease(SSP *s){
+ const char *directory="/run/g955n-ssp-leases";
+ if(g_mkdir_with_parents(directory,0700))return FALSE;
+ struct stat info;
+ if(lstat(directory,&info)||!S_ISDIR(info.st_mode)||info.st_uid||(info.st_mode&077))return FALSE;
+ g_autofree char *path=g_strdup_printf("%s/%u.ini",directory,s->bit);
+ if(g_file_test(path,G_FILE_TEST_EXISTS))return FALSE;
+ s->lease=g_steal_pointer(&path);
+ g_autofree char *boot=read_text("/proc/sys/kernel/random/boot_id");if(!boot)return FALSE;
+ g_autoptr(GKeyFile) record=g_key_file_new();
+ g_key_file_set_string(record,"sensor","boot",boot);
+ g_key_file_set_string(record,"sensor","path",s->path);
+ g_key_file_set_uint64(record,"sensor","bit",s->bit);
+ for(guint i=0;i<G_N_ELEMENTS(attributes);i++){
+  g_autofree char *key=g_strdup_printf("saved%u",i);
+  g_key_file_set_string(record,"sensor",key,s->saved[i]);
+ }
+ gsize length;g_autofree char *data=g_key_file_to_data(record,&length,NULL);
+ return g_file_set_contents(s->lease,data,length,NULL)&&g_chmod(s->lease,0600)==0;
+}
 static void restore(SSP *s){
- if(s->owns_bit){if(!change_bit(s,FALSE))g_warning("SSP sensor enable restore failed");s->owns_bit=FALSE;}
+ gboolean restored=TRUE;
+ if(s->owns_bit){if(!change_bit(s,FALSE)){restored=FALSE;g_warning("SSP sensor enable restore failed");}s->owns_bit=FALSE;}
  if(s->fd>=0){close(s->fd);s->fd=-1;}
  // Stop the FIFO before restoring its scan/length settings.
- if(s->changed>2){g_autofree char *path=g_build_filename(s->path,"buffer/enable",NULL);if(!write_text(path,s->saved[2]))g_warning("SSP buffer restore failed");}
+ if(s->changed>2){g_autofree char *path=g_build_filename(s->path,"buffer/enable",NULL);if(!write_text(path,s->saved[2])){restored=FALSE;g_warning("SSP buffer restore failed");}}
  for(int i=3;i>=0;i--){
   if(i==2||s->changed<=(guint)i)continue;
   g_autofree char *path=g_build_filename(s->path,attributes[i],NULL);
-  if(!write_text(path,s->saved[i]))g_warning("SSP attribute restore failed: %s",attributes[i]);
+  if(!write_text(path,s->saved[i])){restored=FALSE;g_warning("SSP attribute restore failed: %s",attributes[i]);}
  }
  for(guint i=0;i<G_N_ELEMENTS(attributes);i++)g_clear_pointer(&s->saved[i],g_free);
+ if(s->lease&&restored)g_unlink(s->lease);
+ g_clear_pointer(&s->lease,g_free);
  s->changed=0;if(s->pending)g_byte_array_set_size(s->pending,0);
 }
 static gboolean start(SSP *s){
@@ -100,6 +128,7 @@ static gboolean start(SSP *s){
   s->saved[i]=read_text(path);
   if(!s->saved[i]||(i==2&&strcmp(s->saved[i],"0")))goto failed;
  }
+ if(!save_lease(s))goto failed;
  node=g_strdup_printf("/dev/%s",g_udev_device_get_name(s->dev));
  s->fd=open(node,O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_NOFOLLOW);if(s->fd<0)goto failed;
  for(guint i=0;i<G_N_ELEMENTS(attributes);i++){

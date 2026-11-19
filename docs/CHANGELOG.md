@@ -1219,3 +1219,20 @@ off/on intervals, including actual off-frequency421000kHz samples, same boot
 and taint0. Enabled its ordered display-manager requirement and requested a
 deliberate reboot for persistence qualification. That reboot result is pending
 at this checkpoint; no sensor/audio/modem/rotation completion is inferred.
+
+
+### Sensor recovery candidate / ABOX integration build
+
+The SensorProxy prototype now persists root-private original-state journals
+before sensor mutation. Added a boot/device/lock-checked recovery helper,
+firmware/read-only calibration preparation and an example stop/start drop-in.
+Nine root-owned isolated recovery cases pass (including preserved foreign bits,
+failed-write retry and untrusted/stale records); its real AArch64 build passes.
+These pieces remain uninstalled; physical sensors and abrupt-termination cleanup
+on the phone are not yet qualified.
+
+The diagnostic builder can now explicitly add reviewed ABOX fixes17..20,
+recording the choice in its plan. Candidate31 builds and packs with actual LZ4
+builtin verification and the same config/external ramdisk/DTBH as30. The only
+extra source patches are those four audio ownership/bounds/locking fixes. No
+new BOOT write or audio runtime pass is claimed at this checkpoint.
