@@ -1,0 +1,46 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] eglut: handle absent/repeated keyboard capabilities safely
+
+A real no-input Wayland compositor sends an initial seat capabilities=0.
+The original callback unconditionally destroys a NULL keyboard and crashes.
+Guard transitions and maintain the associated repeat timer's lifetime/poll FD.
+Do not advertise a fictitious keyboard or change the Wayland library.
+Original per-file upstream MIT notices are retained.
+
+--- a/src/egl/eglut/eglut_wayland.c
++++ b/src/egl/eglut/eglut_wayland.c
+@@ -215,13 +215,16 @@
+                   enum wl_seat_capability caps)
+ {
+    struct display *d = data;
+-   if (caps & WL_SEAT_CAPABILITY_KEYBOARD) {
++   if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !d->seat.keyboard) {
+       d->seat.keyboard = wl_seat_get_keyboard(seat);
+       wl_keyboard_add_listener(d->seat.keyboard, &keyboard_listener, data);
+       d->seat.key_repeat_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+-   } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
++   } else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && d->seat.keyboard) {
+       wl_keyboard_destroy(d->seat.keyboard);
+       d->seat.keyboard = NULL;
++      if (d->seat.key_repeat_fd >= 0)
++         close(d->seat.key_repeat_fd);
++      d->seat.key_repeat_fd = -1;
+    }
+ }
+ 
+@@ -303,6 +306,7 @@
+    if (!_eglut->native_dpy)
+       _eglutFatal("failed to initialize native display");
+ 
++   display.seat.key_repeat_fd = -1;
+    display.seat.xkb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+ 
+    registry = wl_display_get_registry(_eglut->native_dpy);
+@@ -498,6 +502,7 @@
+    };
+ 
+    while (_eglut->native_dpy != NULL) {
++      pollfds[2].fd = display.seat.key_repeat_fd;
+       /* If we need to flush but can't, don't do anything at all which could
+        * push further events into the socket. */
+       if (!(pollfds[0].events & POLLOUT)) {

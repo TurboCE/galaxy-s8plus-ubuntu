@@ -1,0 +1,55 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libhybris: align Wayland native window visual with EGLConfig
+
+Actual Mali r16p0 rejects RGBX-config/RGBA-window combinations with
+EGL_BAD_MATCH. Linux Wayland callers select an EGLConfig and cannot set the
+hidden Android window format themselves. Set the selected native visual on
+Wayland windows before calling the real driver. Preserve HWC/null paths,
+plugin ABI, native format validation and driver error reporting.
+Original upstream license notices are retained.
+
+--- a/hybris/egl/ws.h
++++ b/hybris/egl/ws.h
+@@ -60,6 +60,7 @@
+ };
+ 
+ EGLBoolean ws_init(const char * egl_platform);
++EGLBoolean ws_is_wayland(void);
+ void ws_eglInitialized(struct _EGLDisplay *dpy);
+ 
+ struct _EGLDisplay *ws_GetDisplay(EGLNativeDisplayType native);
+--- a/hybris/egl/ws.c
++++ b/hybris/egl/ws.c
+@@ -38,6 +38,11 @@
+ 	return strcmp(egl_platform, ws_name) == 0;
+ }
+ 
++EGLBoolean ws_is_wayland(void)
++{
++	return ensureCorrectWs("wayland");
++}
++
+ /*
+  * ws_init() will be called from __eglHybrisGetPlatformDisplayCommon() to
+  * load the selected platform. That means the loading of ws is postponed until
+--- a/hybris/egl/egl.c
++++ b/hybris/egl/egl.c
+@@ -342,6 +342,18 @@
+ 	win = ws_CreateWindow(win, display);
+ 
+ 	assert(((struct ANativeWindow *) win)->common.magic == ANDROID_NATIVE_WINDOW_MAGIC);
++
++	/* Linux Wayland clients select EGLConfig, not Android window formats.
++	 * Match that config before Mali validates the native window visual. */
++	if (ws_is_wayland()) {
++		EGLint visual = 0;
++		if (eglGetConfigAttrib(dpy, config, EGL_NATIVE_VISUAL_ID, &visual) && visual > 0) {
++			int error = native_window_set_buffers_format((struct ANativeWindow *)win, visual);
++			if (error != 0)
++				HYBRIS_ERROR("Wayland native visual %d rejected: %d", visual, error);
++		}
++		/* The real driver still validates/reports EGL surface errors. */
++	}
+ 
+ 	HYBRIS_TRACE_BEGIN("native-egl", "eglCreateWindowSurface", "");
+ 	EGLSurface result = (*_eglCreateWindowSurface)(dpy, config, win, attrib_list);

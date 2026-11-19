@@ -40,4 +40,13 @@ class PanelReviewGuard(unittest.TestCase):
   with self.assertRaisesRegex(RuntimeError,'Wrong/incomplete'):self.verify()
   self.data['scope']='exclusive-hwc-panel-8s';self.data['files'].pop('run-panel-trial.py');self.write()
   with self.assertRaisesRegex(RuntimeError,'Wrong/incomplete'):self.verify()
+ def test_client_fixture_verified_before_display_change(self):
+  client=MODULE.BASE/'es2gears-wayland-safe';client.write_bytes(b'reviewed client')
+  self.data.update(client_probe='es2gears-wayland-safe',client_probe_sha256=sha(client));self.write()
+  _,package=self.verify();self.assertEqual(package['client_command_path'],str(client))
+  client.write_bytes(b'changed')
+  with self.assertRaisesRegex(RuntimeError,'Changed client fixture'):self.verify()
+ def test_arbitrary_client_path_rejected(self):
+  self.data.update(client_probe='/usr/bin/arbitrary',client_probe_sha256='0'*64);self.write()
+  with self.assertRaisesRegex(RuntimeError,'Changed client fixture'):self.verify()
 if __name__=='__main__':unittest.main()

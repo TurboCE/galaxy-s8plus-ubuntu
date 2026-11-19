@@ -1,0 +1,58 @@
+From: SM-G955N Ubuntu port contributors
+Subject: [PATCH] libhybris: keep Bionic pthread keys outside reserved zero
+
+The get hook treats key zero as uninitialized, but direct glibc key creation
+can issue that valid key. Mali then loses EGL thread state even immediately
+after successful eglMakeCurrent. Reserve host key zero when allocated, never
+return it to Bionic, and apply the same zero rule to set/delete in debug and
+normal paths. A host library's existing zero key must remain untouched.
+At most one compatibility reservation per process remains allocated.
+Original upstream license notices are retained.
+
+--- a/hybris/common/hooks.c
++++ b/hybris/common/hooks.c
+@@ -441,11 +441,27 @@
+     return pthread_kill(thread, sig);
+ }
+ 
++/* Bionic reserves zero for uninitialized keys; glibc may allocate key zero.
++ * Keep an allocated host zero key reserved instead of returning an unusable
++ * Bionic key. Never delete another host library's zero key through this ABI. */
++static int _hybris_hook_pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
++{
++    int error = pthread_key_create(key, destructor);
++    if (error == 0 && *key == 0)
++        error = pthread_key_create(key, destructor);
++    return error;
++}
++
++static int _hybris_hook_pthread_key_delete(pthread_key_t key)
++{
++    return key ? pthread_key_delete(key) : EINVAL;
++}
++
+ static int _hybris_hook_pthread_setspecific(pthread_key_t key, const void *ptr)
+ {
+     TRACE_HOOK("key %d ptr %" PRIdPTR, key, (intptr_t) ptr);
+ 
+-    return pthread_setspecific(key, ptr);
++    return key ? pthread_setspecific(key, ptr) : EINVAL;
+ }
+ 
+ static void* _hybris_hook_pthread_getspecific(pthread_key_t key)
+@@ -3084,12 +3100,12 @@
+     HOOK_TO(pthread_cond_timedwait_monotonic, _hybris_hook_pthread_cond_timedwait),
+     HOOK_TO(pthread_cond_timedwait_monotonic_np, _hybris_hook_pthread_cond_timedwait),
+     HOOK_INDIRECT(pthread_cond_timedwait_relative_np),
+-    HOOK_DIRECT_NO_DEBUG(pthread_key_delete),
++    HOOK_INDIRECT(pthread_key_delete),
+     HOOK_DIRECT_NO_DEBUG(pthread_getname_np),
+     HOOK_INDIRECT(pthread_setname_np),
+     HOOK_DIRECT_NO_DEBUG(pthread_once),
+-    HOOK_DIRECT_NO_DEBUG(pthread_key_create),
+-    HOOK_DIRECT(pthread_setspecific),
++    HOOK_INDIRECT(pthread_key_create),
++    HOOK_INDIRECT(pthread_setspecific),
+     HOOK_INDIRECT(pthread_getspecific),
+     HOOK_INDIRECT(pthread_attr_init),
+     HOOK_INDIRECT(pthread_attr_destroy),

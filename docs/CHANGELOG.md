@@ -684,3 +684,45 @@ Private evidence: compositor-build/panel-{ashmem,g2d}-result.json, preceding
 failure/debug/trace results, output-dispatch-build.log and current-host-tests.log.
 Existing optional-extension/property/log-directory findings remain recorded;
 no blanket error filtering or fake HWC/fence/property success was introduced.
+
+
+### Real Wayland client and EGL thread-state fixes
+
+A private Mesa9 es2gears client now completed the bounded8-second trial on
+Mali-G71, reporting252 rendered frames/5seconds (50.319FPS) at its300x300 window.
+The full1440x2960 HWC output accepted420 presents by7.2seconds, with DECON frame
+counters advancing468/467 and DSIM472. Both client and compositor remained alive
+until supervised cleanup. Real fences, private process cleanup, unchanged host
+state, restored GDM/presenter and taint0/no new kernel fault signatures passed.
+No preload, debugger, fabricated seat capability or GL success override was
+active in this passing run. This is a short client/scanout proof, not GNOME,
+input, app-suite, thermal, suspend or long-term acceptance.
+
+Source fixes and direct evidence:
+- RGBX EGLConfig on an always-RGBA Wayland native window caused EGL_BAD_MATCH.
+  Patch0008 selects the actual EGL native visual on the hidden Wayland window
+  before the original driver validates it; HWC/null platforms are unaffected.
+- Original Mesa EGLUT unconditionally destroyed a NULL keyboard for the legal
+  initial seat capabilities=0. A real gdb stack and exact source confirmed it.
+  Patch0009 guards transitions and repeat-timer ownership; patch0010 reports the
+  actual renderer after successful real EGL context binding. These affect only
+  a separately built private fixture, not the installed system Mesa package.
+- Hybris's get hook deliberately rejects Bionic key0, but direct glibc creation
+  could return that valid host key. Native tracing showed successful EGL binding
+  followed by lost EGL state at the first glCreateShader and a Mali NULL-state
+  failure during drawing. Patch0011 keeps host key0 reserved if allocated,
+  returns nonzero Bionic keys and consistently rejects invalid zero set/delete.
+  Existing host key0 ownership is preserved. Actual-hook Linux pthread tests
+  passed thread isolation/destructors, existing host-zero preservation and128
+  reuse cycles; the former create/get mismatch was reproduced separately.
+- The actual Mesa keyboard callback passed ASan/UBSan no-keyboard/repeated grant/
+  removal/timer ownership checks. Thirty host guard tests and both target builds
+  passed. Private runtime manifests pin the client and diagnostics before any
+  display change; diagnostic/interposition runs cannot qualify a pass.
+
+Private evidence: compositor-build/panel-client-key-result.json, earlier
+client-{visual,debug2,safe-debug,safe-trace*} results, pthread-key-model.log,
+keyboard-model/, client-build.log and pthread-key-build.log. GNOME46's source
+selects the X11 nested backend for --nested; launching it directly as a Wayland
+client of this HWC compositor is not an available integration route. A working
+accelerated client/compositor does not silently replace the current GNOME session.

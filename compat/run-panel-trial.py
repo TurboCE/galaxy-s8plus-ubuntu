@@ -33,7 +33,7 @@ FILES={'run-panel-trial.py','run-cpu-buffer-trial.py','allocator-cpu-buffer-tria
        'android-property-runtime','headless-buffer-probe'}
 COMMANDS=('/system/bin/servicemanager','/system/bin/hwservicemanager',
  '/vendor/bin/hw/android.hardware.graphics.allocator@2.0-service',
- '/vendor/bin/hw/android.hardware.graphics.composer@2.1-service',str(PREFIX/'bin/tinywl-g955n-candidate'))
+ '/vendor/bin/hw/android.hardware.graphics.composer@2.1-service',str(PREFIX/'bin/tinywl-g955n-candidate'),'/usr/bin/es2gears_wayland',str(BASE/'es2gears-wayland-safe'))
 
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -72,6 +72,16 @@ def review(path,sha):
  for name,target in package['symlinks'].items():
   p=PREFIX/name
   if not p.is_symlink() or str(p.readlink())!=target or not p.resolve().is_relative_to(PREFIX) or not p.exists():raise RuntimeError('Changed/escaping compositor link')
+ if data.get('client_probe'):
+  clients={'es2gears-wayland':Path('/usr/bin/es2gears_wayland'),'es2gears-wayland-safe':BASE/'es2gears-wayland-safe'}
+  client_path=clients.get(data['client_probe'])
+  if client_path is None or digest(client_path)!=data.get('client_probe_sha256'):raise RuntimeError('Changed client fixture')
+  package['client_probe']=True
+  package['client_command_path']=str(client_path)
+  package['client_debugger']=data.get('client_debugger') is True
+  if data.get('client_preload_sha256'):
+   if digest(BASE/'trace-client-gl.so')!=data['client_preload_sha256']:raise RuntimeError('Changed client diagnostic')
+   package['client_preload']=True
  return data,package
 
 def android_processes():
@@ -176,8 +186,22 @@ def inner(boot,package):
   android_log.bind('/dev/socket/logdw');os.chmod('/dev/socket/logdw',0o666)
   android_log.setblocking(False);captured=[];captured_bytes=0
   compositor=launch(command,'compositor',True,env)
+  client=None
   start=time.monotonic()
   while time.monotonic()-start<8 and compositor.poll() is None:
+   if package.get('client_probe') and client is None and (runtime/'wayland-0').exists():
+    client_env={**env,'WAYLAND_DISPLAY':'wayland-0','HYBRIS_EGLPLATFORM':'wayland'}
+    client_path=package['client_command_path']
+    client_command=['/usr/bin/stdbuf','-oL','-eL',client_path,'-info']
+    if package.get('client_preload'):
+     client_env['LD_PRELOAD']=str(BASE/'trace-client-gl.so')
+     client_command=[client_path,'-info']
+    if package.get('client_debugger'):
+     client_command=['/usr/bin/gdb','--batch','--nx','-ex','set auto-load off','-ex','set pagination off',
+      '-ex','set startup-with-shell off','-ex','run','-ex','info proc mappings',
+      '-ex','thread apply all bt','-ex','info registers','-ex','x/32gx $sp',
+      '--args',client_path,'-info']
+    client=launch(client_command,'client',True,client_env)
    while True:
     try:message=android_log.recv(65536)
     except BlockingIOError:break
@@ -194,6 +218,7 @@ def inner(boot,package):
   report['display_irq_after']=display_irqs()
   report['display_irq_progressed']=all(report['display_irq_after'][key]>=value+3 for key,value in report['display_irq_before'].items())
   report['compositor_alive_8s']=compositor.poll() is None
+  report['client_alive_at_end']=client is not None and client.poll() is None
   report['compositor_exit_before_cleanup']=compositor.poll()
   if Path('/proc',str(compositor.pid),'limits').exists():report['compositor_limits']=Path('/proc',str(compositor.pid),'limits').read_text()
  except Exception as error:report['exception']=repr(error)
@@ -212,8 +237,10 @@ def inner(boot,package):
   report['logs_complete']=all(os.fstat(log.fileno()).st_size<legacy.MAX_TRACE for log in handles)
   for log in handles:log.close()
  text=report.get('compositor_stdout','')
- report['diagnostic_debugger']=bool(package.get('diagnostic_debugger') or package.get('diagnostic_trace'))
+ report['diagnostic_debugger']=bool(package.get('diagnostic_debugger') or package.get('diagnostic_trace') or package.get('client_debugger') or package.get('client_preload'))
+ report['client_gpu_passed']=bool(report.get('client_alive_at_end') and 'Mali-G71' in report.get('client_stdout',''))
  report['panel_presented']=bool(not report['diagnostic_debugger'] and report.get('android_log_complete') and report.get('compositor_alive_8s') and report.get('logs_complete') and report.get('display_irq_progressed') and 'Mali-G71' in text and 'G955N HWC present accepted=' in text and report['cleanup_passed'])
+ if package.get('client_probe'):report['panel_presented']=report['panel_presented'] and report['client_gpu_passed']
  return report
 
 def display_irqs():

@@ -48,5 +48,12 @@
     "commit": "9cfe3f583156881f5971b158011a197ca5a0f6df",
     "scope": "HWCNativeWindowSetBufferCount C wrapper and public class method declaration only; base remains pinned upstream libhybris",
     "license": "Apache-2.0"
+  },
+  "mesa-demos-client-fixture": {
+    "url": "https://archive.ubuntu.com/ubuntu/pool/universe/m/mesa-demos/mesa-demos_9.0.0.orig.tar.gz",
+    "version": "9.0.0",
+    "archive_sha256": "8db8ad62ac351dcb6c920a8d21c1d59cd4b06311b4ea6330ecb690d79b0645cd",
+    "scope": "eglut/es2gears fixture only; not installed system-wide",
+    "license": "MIT per-file notices retained"
   }
 }
