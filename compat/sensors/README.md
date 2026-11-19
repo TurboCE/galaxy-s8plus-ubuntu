@@ -42,8 +42,8 @@ Before production deployment, complete at least:
 * Genuine LHD firmware startup and original read-only EFS calibration sequencing.
 * Physical axis/mount-matrix and changing-light verification. The proposed
   identity matrix is a candidate, not measured calibration.
-* GNOME rotation with a dynamic-rotation-capable display path. Stock fbdev's
-  startup Rotate option disables RandR and does not implement dynamic rotation.
+* GNOME rotation with a dynamic-rotation-capable display path. Stock fbdev does not advertise dynamic RandR rotations. Its startup Rotate
+  setting is not an implementation of runtime sensor-driven rotation.
 * Backlight interface/units and actual automatic-brightness/toggle acceptance.
 
 The independent bounded `../sensor-iio-probe.py` now supports native magnetic

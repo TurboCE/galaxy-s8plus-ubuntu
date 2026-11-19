@@ -26,3 +26,13 @@ app-private data was not. Ubuntu may replace USERDATA and BOOT after image,
 identity, capacity and verified-backup checks. Preserve the now-working TWRP
 RECOVERY and the EFS/CPEFS/RADIO/calibration partitions. No repartitioning or
 bootloader changes are part of that authorization.
+
+
+Owner priority, 2026-11-19: finish the existing S8+ and separately managed S9+
+Ubuntu porting/basic-function work first. This repository/session continues
+S8+ screen-power hangs and basic hardware stability only; do not operate on the
+S9+ from here. USB-C HDMI/DisplayPort Alt Mode feature implementation, dedicated
+builds and flashing are deferred. Preserve existing findings. Completion of the
+two ports does not authorize resuming HDMI work; wait for a new explicit user
+instruction. Existing core-kernel builds for the authorized porting fixes remain
+in scope.

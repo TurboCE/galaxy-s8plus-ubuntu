@@ -49,9 +49,11 @@ actual-function cases pass; the original reproduces the pre-enable ordering
 violation. These are source-level fixes; hardware root cause remains unproven.
 Kernel27 is a build-only candidate until installed and qualified separately.
 
-The phone is presently unresponsive after the repeated trial. The owner is away
-and cannot provide physical recovery. Continue host-side review/build/test;
-do not claim a new deployment or successful device test without reconnection.
+At that checkpoint the phone was unresponsive and the owner was away. It later
+reconnected after a new boot. Subsequent retained kernel27 evidence explicitly
+records a kernel panic and watchdog reset; automatic recovery is now observed,
+although a different hard hang may still require physical recovery. Never claim
+a new deployment or successful device test without reconnection.
 
 Private evidence remains under artifacts/panel-safety: power-hang26-*;
 desktop-power-cycles26-live.log; desktop-power-cycles26-20.log;
@@ -64,3 +66,23 @@ restores only a same-boot matching set. A reboot resets the runtime change; a
 stale record from an older boot is refused. Earlier C2-only and genuine built-in
 cpuidle-off trials did not prevent resets, so neither is a stability fix. The
 current normal-idle candidate does not run this tool.
+
+
+## Kernel27 repeat and recovery checkpoint
+
+Kernel27 passed its real PAM/Mali login and13 complete desktop DPMS cycles, then
+stopped during the next off transition. Source QoS ordering repair alone does
+not resolve the failure. Its retained buffer records a stack-protector panic,
+a stated KASLR displacement0xf0000, and a watchdog reset reason. Subtracting the
+displacement from the printed panic return address, then4bytes to the call
+instruction, resolves the caller to exynos_ss_panic_handler_safe. Directly
+symbolizing the unadjusted return address misleadingly names the next function.
+This secondary safe-fault-handler symptom does not identify the original writer.
+
+A later fresh kernel27 greeter boot also lost responses around the ordinary
+idle blank period, before kernel28 could be staged. No kernel28 BOOT write was
+performed by that failed staging attempt. The next recovery should temporarily
+keep the greeter display awake only during backup/write staging, then restore
+normal display power policy on the candidate boot. Kernel28 adds the tested
+Ondemand lifetime guard; its packed artifact matches kernel27 ramdisk/DT and
+config, but target deployment remains pending at this checkpoint.

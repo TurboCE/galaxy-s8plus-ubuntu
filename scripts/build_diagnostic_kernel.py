@@ -26,7 +26,9 @@ def main():
     parser.add_argument('--native-panel-safety',action='store_true',help='Include DPP metadata ownership and native pan/DPMS serialization proposal')
     parser.add_argument('--native-panel-qos',action='store_true',help='Include primary-panel pre-enable QoS ordering and error rollback')
     parser.add_argument('--native-ondemand-safety',action='store_true',help='Hold and check CPU governor private-data lifetime during display events')
+    parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
+    if args.build_version is not None and not 1 <= args.build_version <= 9999:parser.error('build version must be 1..9999')
     if args.native_ondemand_safety and not args.native_panel_qos:parser.error('--native-ondemand-safety requires --native-panel-qos')
     if args.native_panel_qos and not args.native_panel_safety:parser.error('--native-panel-qos requires --native-panel-safety')
     if args.native_panel_safety and (not args.native_fb_owner or args.wfi_only):parser.error('--native-panel-safety requires the normal-idle native-fb-owner baseline')
@@ -49,8 +51,12 @@ def main():
     if args.native_panel_safety:patchfiles.append(ROOT/'patches/proposals/0029-dpp-config-lifetime-and-pan-power-lock.patch')
     if args.native_panel_qos:patchfiles.append(ROOT/'patches/proposals/0030-primary-panel-qos-transaction.patch')
     if args.native_ondemand_safety:patchfiles.append(ROOT/'patches/proposals/0031-ondemand-panel-policy-lifetime.patch')
+    version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
+    image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
+    compiler=subprocess.check_output(['docker','run','--rm','--network','none',args.builder,'aarch64-linux-gnu-gcc','-dumpfullversion'],text=True).strip()
     plan = {'target':'SM-G955N','source':expected,'builder':args.builder,'volume':volume,
             'patches':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in patchfiles},
+            'build_version':version,'builder_image_id':image_id,'compiler_version':compiler,
             'native_panel_safety':args.native_panel_safety,
             'native_panel_qos':args.native_panel_qos,
             'native_ondemand_safety':args.native_ondemand_safety,
@@ -80,7 +86,7 @@ def main():
                      'cmp /work/out/.config /output/wfi.config']
     commands += [
         'cp /work/out/.config /output/kernel.config',
-        'make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" KBUILD_BUILD_VERSION='+('28' if args.native_ondemand_safety else '27' if args.native_panel_qos else '26' if args.native_panel_safety else '25' if args.wfi_only else '24' if args.native_fb_owner else '23')+' Image dtbs',
+        'make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" KBUILD_BUILD_VERSION='+str(version)+' Image dtbs',
         'cp /work/out/arch/arm64/boot/Image /output/Image.unqualified',
         'cp /work/out/vmlinux /work/out/System.map /output/',
         'cp /work/out/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dtb /output/']
