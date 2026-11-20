@@ -1181,3 +1181,39 @@ Kernel44 compiled and packed with kernel43's configuration, DTB and external
 ramdisk. The Linux host test suite passed all 102 tests. The target remained
 unreachable over USB, Wi-Fi and TWRP. Neither kernel43 nor kernel44 was
 installed or exercised on the device in this checkpoint.
+
+### Recovered kernel42 core diagnostic
+
+The forced restart made the matching kernel42 retained log and its synced
+entry record accessible. The diagnostic reached noirq completion, secondary
+CPU offlining and Exynos SYS_SLEEP preparation. The `pm_test core` wait
+marker confirms it bypassed firmware sleep. The following Samsung pinctrl
+resume entry logged a successful return from its firmware call. The retained
+segment ends without a system resume or userspace completion record.
+The recovery log establishes that this failure occurred without an RTC alarm
+or platform sleep entry. It does not yet identify the exact callback at which
+all execution stopped.
+
+Installed kernel43 from verified TWRP and verified BOOT and protected
+partition readback before the new boot. With `mem` limited to `pm_test
+platform`, the same boot returned in 5.31 seconds, restored Wi-Fi gateway
+traffic and retained the enabled touchscreen and active GDM with zero taint.
+The DPU shutdown refusal did not recur in this bounded test, so this pass
+does not exercise the new power-domain failure branch.
+
+Installed kernel44 after TWRP backed up and verified the exact kernel43 BOOT
+and protected partitions. BOOT readback matched and SSH identified a new
+boot running kernel44.
+
+With Wi-Fi temporarily disabled, kernel44 entered actual suspend-to-idle
+(`freeze`, `pm_test` disabled) and returned on the same boot after 27.79
+seconds. The first wake IRQ was the S2MPS17 parent, and the retained trace
+logged the RTC alarm handler at that wake. Wi-Fi re-associated and passed
+traffic to its gateway. GDM was active, touchscreen input remained enabled
+and kernel taint remained zero. This verifies one RTC wake from suspend-to-idle.
+
+The subsequent `mem` test limited to `pm_test core` was armed with extra
+syscore logging. It did not return a readable completion record over USB or
+Wi-Fi. The retained log must be recovered before attributing this failure to
+pinctrl, Exynos restore or a later callback. The normal desktop sleep targets
+remain masked while the core path is unresolved.

@@ -1452,3 +1452,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Corrected Exynos syscore unwind when a pending wake or the core diagnostic
   skips platform entry. Added retained log markers around preparation, PSCI
   entry and return, and the restore path.
+- Recovered the kernel42 core test and verified that it reached syscore
+  resume without entering firmware sleep. Installed kernel43 and kernel44
+  with verified backups. Kernel43 passed the bounded `mem` platform test.
+- Verified a live RTC wake from kernel44 suspend-to-idle, with same-boot
+  Wi-Fi recovery, active GDM and an enabled touchscreen.
+- The follow-up kernel44 deep-prepare core trial did not produce a visible
+  completion record. Desktop suspend remains gated pending verification.
