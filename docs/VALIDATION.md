@@ -1160,3 +1160,24 @@ Kernel43 built and packed with kernel42's configuration, DTB and external
 ramdisk. The Linux suite passed all 102 tests. USB re-enumeration did not
 restore a management path after the kernel42 core trial, so kernel43 has
 no device installation or resume record at this checkpoint.
+
+### Exynos syscore early-wake sequencing
+
+The kernel42 core diagnostic can bypass the platform `enter` callback and
+still invoke syscore resume. The previous Exynos code left the early-wake
+flag at its previous value until the PSCI call returned. A skipped entry
+could therefore use the normal post-sleep sequence even though system
+sleep never occurred. VTS state was also queried again during restore, so
+it could select a mode different from the one prepared.
+
+Proposal0044 initializes each attempt for early unwind, records the chosen
+mode once, and keeps the normal firmware result when actual entry returns.
+It propagates Exynos preparation errors and records preparation, firmware
+and restore boundaries for retained diagnostics. This is a source-level
+finding. The kernel42 core hang still has no recovered device record and
+the RTC wake path has not been qualified.
+
+Kernel44 compiled and packed with kernel43's configuration, DTB and external
+ramdisk. The Linux host test suite passed all 102 tests. The target remained
+unreachable over USB, Wi-Fi and TWRP. Neither kernel43 nor kernel44 was
+installed or exercised on the device in this checkpoint.

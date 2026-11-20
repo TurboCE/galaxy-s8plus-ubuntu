@@ -1,0 +1,121 @@
+Subject: Use the Exynos early-wake sequence when platform entry is skipped
+
+The generic suspend core calls syscore resume after a pending wake or
+pm_test core without calling the platform enter operation. Default to
+Exynos early wake until the firmware suspend returns. Restore the same
+mode that was prepared, even if ABOX or VTS changes state, and return
+configuration errors before platform entry. Log the preparation, PSCI
+and restore boundaries for retained suspend diagnostics.
+
+--- a/drivers/soc/samsung/exynos-pm.c
++++ b/drivers/soc/samsung/exynos-pm.c
+@@ -63,6 +63,7 @@
+ 	unsigned int num_gic;			/* Total number of GIC sources */
+ 	bool is_early_wakeup;
+ 	bool is_cp_call;
++	unsigned int active_mode_idx;
+ 	unsigned int suspend_mode_idx;		/* power mode to be used in suspend scenario */
+ 	unsigned int suspend_psci_idx;		/* psci index to be used in suspend scenario */
+ 	unsigned int cp_call_mode_idx;		/* power mode to be used in cp_call scenario */
+@@ -230,46 +231,47 @@
+ 
+ static int exynos_pm_syscore_suspend(void)
+ {
++	int ret;
++
+ 	if (!exynos_check_cp_status()) {
+-		pr_info("%s %s: sleep canceled by CP reset \n",
+-					EXYNOS_PM_PREFIX, __func__);
++		pr_info("%s %s: sleep canceled by CP reset\n",
++			EXYNOS_PM_PREFIX, __func__);
+ 		return -EINVAL;
+ 	}
+ 
+-	pm_info->is_cp_call = abox_is_on();
+-	if (pm_info->is_cp_call || pm_dbg->test_cp_call) {
+-		exynos_prepare_sys_powerdown(pm_info->cp_call_mode_idx);
+-		pr_info("%s %s: Enter CP Call scenario. (mode_idx = %d)\n",
+-				EXYNOS_PM_PREFIX, __func__, pm_info->cp_call_mode_idx);
+-	} else {
+-		if (vts_is_on())
+-			exynos_prepare_sys_powerdown(SLEEP_VTS_ON);
+-		else
+-			exynos_prepare_sys_powerdown(pm_info->suspend_mode_idx);
+-
+-		pr_info("%s %s: Enter Suspend scenario. (mode_idx = %d)\n",
+-				EXYNOS_PM_PREFIX,__func__, pm_info->suspend_mode_idx);
+-	}
+-
++	pm_info->is_cp_call = abox_is_on() || pm_dbg->test_cp_call;
++	if (pm_info->is_cp_call)
++		pm_info->active_mode_idx = pm_info->cp_call_mode_idx;
++	else if (vts_is_on())
++		pm_info->active_mode_idx = SLEEP_VTS_ON;
++	else
++		pm_info->active_mode_idx = pm_info->suspend_mode_idx;
++
++	/* A pending wake or pm_test may bypass the platform enter callback. */
++	pm_info->is_early_wakeup = true;
++	pr_info("%s: preparing mode %u\n", EXYNOS_PM_PREFIX,
++		pm_info->active_mode_idx);
++	ret = exynos_prepare_sys_powerdown(pm_info->active_mode_idx);
++	if (ret) {
++		pr_err("%s: failed to prepare mode %u: %d\n", EXYNOS_PM_PREFIX,
++		       pm_info->active_mode_idx, ret);
++		return ret;
++	}
++
++	pr_info("%s: prepared mode %u\n", EXYNOS_PM_PREFIX,
++		pm_info->active_mode_idx);
+ 	return 0;
+ }
+ 
+ static void exynos_pm_syscore_resume(void)
+ {
+-	if (pm_info->is_cp_call || pm_dbg->test_cp_call)
+-		exynos_wakeup_sys_powerdown(pm_info->cp_call_mode_idx, pm_info->is_early_wakeup);
+-	else {
+-		if (vts_is_on())
+-			exynos_wakeup_sys_powerdown(SLEEP_VTS_ON, pm_info->is_early_wakeup);
+-		else
+-			exynos_wakeup_sys_powerdown(pm_info->suspend_mode_idx, pm_info->is_early_wakeup);
+-	}
+-
++	pr_info("%s: restoring mode %u (early wake: %d)\n", EXYNOS_PM_PREFIX,
++		pm_info->active_mode_idx, pm_info->is_early_wakeup);
++	exynos_wakeup_sys_powerdown(pm_info->active_mode_idx,
++				    pm_info->is_early_wakeup);
+ 	exynos_show_wakeup_reason(pm_info->is_early_wakeup);
+-
+-	if (!pm_info->is_early_wakeup)
+-		pr_debug("%s %s: post sleep, preparing to return\n",
+-						EXYNOS_PM_PREFIX, __func__);
++	pr_info("%s: restored mode %u\n", EXYNOS_PM_PREFIX,
++		pm_info->active_mode_idx);
+ }
+ 
+ static struct syscore_ops exynos_pm_syscore_ops = {
+@@ -305,7 +307,7 @@
+ 	gpio_dvs_check_sleepgpio();
+ #endif
+ 
+-	if (pm_info->is_cp_call || pm_dbg->test_cp_call)
++	if (pm_info->is_cp_call)
+ 		psci_index = pm_info->cp_call_psci_idx;
+ 	else
+ 		psci_index = pm_info->suspend_psci_idx;
+@@ -317,10 +319,11 @@
+ 	/* This will also act as our return point when
+ 	 * we resume as it saves its own register state and restores it
+ 	 * during the resume. */
++	pr_info("%s: entering platform sleep, PSCI state %u\n",
++		EXYNOS_PM_PREFIX, psci_index);
+ 	pm_info->is_early_wakeup = (bool)arm_cpuidle_suspend(psci_index);
+-	if (pm_info->is_early_wakeup)
+-		pr_info("%s %s: return to originator\n",
+-				EXYNOS_PM_PREFIX, __func__);
++	pr_info("%s: returned from platform sleep (early wake: %d)\n",
++		EXYNOS_PM_PREFIX, pm_info->is_early_wakeup);
+ 
+ 	return pm_info->is_early_wakeup;
+ }

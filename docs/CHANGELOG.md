@@ -1449,3 +1449,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   suspend/resume diagnostic. The two PCIe D3 warnings were absent.
 - Built kernel43 to unwind noirq suspend if a device power domain refuses
   shutdown. Kernel42's core diagnostic still has no visible return record.
+- Corrected Exynos syscore unwind when a pending wake or the core diagnostic
+  skips platform entry. Added retained log markers around preparation, PSCI
+  entry and return, and the restore path.
