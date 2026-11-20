@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--native-panel-qos',action='store_true',help='Include primary-panel pre-enable QoS ordering and error rollback')
     parser.add_argument('--native-ondemand-safety',action='store_true',help='Hold and check CPU governor private-data lifetime during display events')
     parser.add_argument('--ssp-sysfs-counts',action='store_true',help='Fix SSP IIO poll_delay sysfs EOF/no-progress return counts')
+    parser.add_argument('--abox-suspend-irq-order', action='store_true',
+                        help='Drain ABOX IRQs before power-off and use runtime ownership for system sleep')
     parser.add_argument('--suspend-battery-diagnostic', action='store_true',
                         help='Freeze battery work and enable bounded PM-stage tests')
     parser.add_argument('--pmic-wake-irq', action='store_true', help='Keep the Exynos8895 S2MPS17 wake IRQ available in suspend')
@@ -43,6 +45,8 @@ def main():
         parser.error('--dpp-shared-dma requires --native-panel-safety and an explicit --build-version')
     if (args.pmic_wake_irq or args.suspend_battery_diagnostic) and not args.build_version:
         parser.error('Suspend candidates require an explicit --build-version')
+    if args.abox_suspend_irq_order and (not args.audio_safety or not args.suspend_battery_diagnostic):
+        parser.error('--abox-suspend-irq-order requires --audio-safety and --suspend-battery-diagnostic')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -72,6 +76,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0033-s2mps17-keep-wake-irq-enabled.patch')
     if args.suspend_battery_diagnostic:
         patchfiles.append(ROOT/'patches/proposals/0034-freeze-sec-battery-workqueue.patch')
+    if args.abox_suspend_irq_order:
+        patchfiles.append(ROOT/'patches/proposals/0035-abox-suspend-irq-order.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -83,6 +89,7 @@ def main():
             'build_version':version,'builder_image_id':image_id,'compiler_version':compiler,
             'ssp_sysfs_counts':args.ssp_sysfs_counts,
             'audio_safety':args.audio_safety,
+            'abox_suspend_irq_order':args.abox_suspend_irq_order,
             'dpp_shared_dma':args.dpp_shared_dma,
             'pmic_wake_irq':args.pmic_wake_irq,
             'suspend_battery_diagnostic':args.suspend_battery_diagnostic,

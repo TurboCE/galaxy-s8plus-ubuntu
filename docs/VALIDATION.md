@@ -761,3 +761,28 @@ Replayed touchscreen events through the actual input device and the GDM
 on-screen keyboard. Normal PAM login reached GNOME and the restored
 direct path reported 60 completed DECON frames. The panel was active and
 taint remained 0 in this bounded check.
+
+### ABOX power-down follow-up on the kernel35 base
+
+The latest platform-test journal ended around ABOX runtime power-down.
+Review of the driver found two lifetime defects independent of the log tail.
+It cut DSP/clock power before waiting for the GIC handler, which reads the
+GIC registers. It also repeated shutdown on an inactive device and called
+enable outside runtime PM accounting, although a PM notifier already releases
+and reacquires the runtime reference around sleep. Proposal0035 drains the
+IRQ after final IPC and before power removal, guards repeated disable, and
+keeps the notifier as the owner of that system transition. The recovered
+journal cannot prove this was the first failing callback.
+
+On the restored kernel32, SensorProxy and ModemManager answered service
+queries. IIO exported accelerometer, gyroscope, light, geomagnetic and
+step-counter devices. Bluetooth was inactive in the snapshot. WirePlumber
+remained masked, and ModemManager reported no modem. Device enumeration
+alone does not establish calibrated motion or pedometer accuracy. This
+checkpoint also leaves dynamic screen rotation, acoustic speaker and
+microphone operation, mobile data/calls, GPS and Bluetooth pairing/reconnect
+open. The earlier bounded auto-brightness and two-band Wi-Fi results stand.
+
+Kernel36 builds from kernel35 plus proposal0035. The AArch64 build and
+linked initramfs check passed. The kernel35 configuration and Korean DTB
+match byte for byte.

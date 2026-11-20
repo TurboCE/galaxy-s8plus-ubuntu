@@ -1,0 +1,81 @@
+Subject: Keep ABOX runtime ownership and drain its IRQ before power-off
+
+System sleep already drops and reacquires the driver's runtime PM
+reference in the notifier. Its separate callbacks repeated disable on
+an inactive ABOX and performed a resume outside runtime PM accounting.
+Use the notifier for that transition, make a duplicate disable harmless,
+and drain the GIC interrupt after the final IPC and before shutting down
+the clock or DSP. The IRQ handler reads GIC registers while it drains.
+
+diff --git a/sound/soc/samsung/abox/abox.c b/sound/soc/samsung/abox/abox.c
+--- a/sound/soc/samsung/abox/abox.c
++++ b/sound/soc/samsung/abox/abox.c
+@@ -5143,6 +5143,9 @@
+ 	int i;
+ 	unsigned long flag;
+ 
++	if (!data->enabled)
++		return 0;
++
+ 	dev_info(dev, "%s\n", __func__);
+ 
+ 	switch (data->calliope_state) {
+@@ -5177,6 +5180,9 @@
+ 	data->calliope_state = CALLIOPE_DISABLED;
+ 	spin_unlock_irqrestore(&data->ipc_spinlock, flag);
+ 
++	/* Drain the handler while the GIC and its registers are accessible. */
++	abox_gic_disable_irq(&data->pdev_gic->dev);
++
+ 	abox_save_register(data);
+ 
+ 	abox_cfg_gpio(dev, "idle");
+@@ -5190,8 +5196,6 @@
+ 
+ 	clk_disable(data->clk_ca7);
+ 
+-	abox_gic_disable_irq(&data->pdev_gic->dev);
+-
+ 	cancel_work_sync(&data->change_cpu_gear_work);
+ 
+ 	return 0;
+@@ -5207,30 +5211,6 @@
+ static int abox_runtime_resume(struct device *dev)
+ {
+ 	dev_info(dev, "%s\n", __func__);
+-
+-	return abox_enable(dev);
+-}
+-
+-static int abox_suspend(struct device *dev)
+-{
+-	struct abox_data *data = dev_get_drvdata(dev);
+-
+-	dev_info(dev, "%s\n", __func__);
+-
+-	if (data->enabled)
+-		return 0;
+-
+-	return abox_disable(dev);
+-}
+-
+-static int abox_resume(struct device *dev)
+-{
+-	struct abox_data *data = dev_get_drvdata(dev);
+-
+-	dev_info(dev, "%s\n", __func__);
+-
+-	if (data->enabled)
+-		return 0;
+ 
+ 	return abox_enable(dev);
+ }
+@@ -5724,7 +5704,7 @@
+ MODULE_DEVICE_TABLE(of, samsung_abox_match);
+ 
+ static const struct dev_pm_ops samsung_abox_pm = {
+-	SET_SYSTEM_SLEEP_PM_OPS(abox_suspend, abox_resume)
++	/* The PM notifier releases and reacquires the runtime PM reference. */
+ 	SET_RUNTIME_PM_OPS(abox_runtime_suspend, abox_runtime_resume, NULL)
+ };
+ 

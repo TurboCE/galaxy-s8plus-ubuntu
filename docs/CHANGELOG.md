@@ -1371,3 +1371,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Reinstalled GNOME direct output as the default on restored kernel32.
   Rebooted and verified its lease, installed files and GDM. System suspend
   remains disabled pending qualification.
+
+### Kernel36 ABOX suspend ordering candidate
+
+- Drained the ABOX GIC IRQ before cutting clocks and DSP power.
+  Removed parallel system-sleep callbacks that bypassed runtime PM
+  accounting. Kept the existing suspend notifier and made repeated
+  disable safe. Built kernel36 on the kernel35 diagnostic base.
