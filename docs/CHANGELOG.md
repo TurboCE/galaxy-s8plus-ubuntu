@@ -1488,3 +1488,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   systemd service checks the required kernel properties.
 - Verified another RTC suspend-to-idle cycle over WLAN SSH alone. Added
   a pinned-key WLAN fallback to the read-only Ubuntu collector.
+- Enabled manual GNOME suspend-to-idle on the live kernel50 handset after
+  verifying RTC resume and recovery of the panel, desktop, touch and WLAN.
+  Added GNOME defaults to keep idle suspend off and suppress the
+  power-button shutdown dialog.

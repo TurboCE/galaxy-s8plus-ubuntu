@@ -1451,3 +1451,31 @@ The SSH collector also verified fallback on the handset using a deliberately
 unreachable primary address and its current WLAN address. Both probes use the
 same pinned key and the capture checks the device model and kernel identity
 before collecting logs.
+
+### Manual GNOME suspend enabled on kernel50
+
+The running system initially advertised `CanSuspend=no` because both
+systemd targets were masked. USB SSH was unavailable, so configuration
+and qualification ran over authenticated WLAN SSH. Installed GNOME
+desktop and greeter defaults that leave idle suspend off on both AC and
+battery. Enabled the two systemd targets after checking the running
+kernel properties, the installed suspend policy and the GPIO-key and
+RTC wake settings. The installed policy still uses `freeze`.
+
+The standard logind `Suspend` request finished after a 33.26-second RTC
+wake. The same boot and active seat returned with Mutter reporting
+normal display power, a powered panel with positive backlight, active
+touch input, and three successful WLAN gateway probes. The kernel
+reported no new warning in the suspend interval, and the existing
+USB-detach taint remained unchanged. The test rollback units were then
+removed and the manual suspend targets were left available.
+
+The live desktop and greeter previously used GNOME's interactive
+power-button action. The installed profile now uses `nothing` so GNOME
+does not open a shutdown dialog when it sees the button. Verified the
+effective values in both profiles and polkit authorization for the
+active GNOME Shell process. The kernel GPIO device still reports wake
+enabled. A repeat with the final policy resumed on RTC after 45.68
+seconds with the same boot and seat, active panel, touch and WLAN,
+and no new warning in the suspend interval. Physical-button wake and
+deep sleep are still unverified.
