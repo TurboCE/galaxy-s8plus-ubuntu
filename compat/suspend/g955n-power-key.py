@@ -62,11 +62,39 @@ def wake_display(session):
         env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
         if not any(value.startswith('DISPLAY=') for value in env):
             return
+        # A brief resume press can be lost before X sees it. Reset idle time
+        # without changing the screen lock, then turn the panel on.
+        read_command(*run, *env, '/usr/bin/xset', 's', 'reset')
         read_command(*run, *env, '/usr/bin/xset', 'dpms', 'force', 'on')
     else:
         read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
                      MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '0')
     print('Power key requested display wake', flush=True)
+
+
+def suspend_session(session):
+    _, session_type, run = session
+    if session_type == 'x11':
+        # Blank while the graphical session can still process X requests.
+        # systemd's later sleep hooks run with user sessions frozen.
+        env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
+        if not any(value.startswith('DISPLAY=') for value in env):
+            raise RuntimeError('No active display to blank before suspend')
+        read_command(*run, *env, '/usr/bin/xset', 'dpms', 'force', 'off')
+    else:
+        read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
+                     MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '3')
+    deadline = time.monotonic() + 2
+    while panel_is_on():
+        if time.monotonic() >= deadline:
+            wake_display(session)
+            raise RuntimeError('Panel did not blank; suspend was not requested')
+        time.sleep(.05)
+    try:
+        read_command('/usr/bin/systemctl', 'suspend')
+    except (OSError, subprocess.SubprocessError):
+        wake_display(session)
+        raise
 
 
 def open_power_dialog(session):
@@ -124,7 +152,7 @@ def watch_keys(key):
             try:
                 if result == 0 and (session := active_session()) and session[0] == dialog_seat:
                     read_command('/usr/bin/systemctl', 'poweroff')
-            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
                 print(f'Confirmed shutdown unavailable ({type(error).__name__})', flush=True)
         if not select.select([key], [], [], 0.2)[0]:
             # X can wake DPMS as soon as it receives a key. Save the earlier
@@ -141,7 +169,7 @@ def watch_keys(key):
                                 dialog_seat = session[0]
                             else:
                                 wake_display(session)
-                    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                    except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
                         print(f'Power dialog unavailable ({type(error).__name__})', flush=True)
             continue
         event = key.read(INPUT_EVENT.size)
@@ -165,10 +193,10 @@ def watch_keys(key):
                     dialog_seat = session[0]
                 elif before:
                     print('Power key requested system suspend', flush=True)
-                    read_command('/usr/bin/systemctl', 'suspend')
+                    suspend_session(session)
                 else:
                     wake_display(session)
-            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+            except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
                 print(f'Power key action unavailable ({type(error).__name__})', flush=True)
 
 

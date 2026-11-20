@@ -1763,3 +1763,31 @@ GNOME multimedia-key actions changed sink volume from0.67 to0.61, muted the
 speaker and muted the microphone through the standard services. Original levels
 and mute states were restored. PipeWire, pipewire-pulse and WirePlumber were
 enabled; built-in speaker/mic default names persisted through policy restarts.
+
+### Kernel54 power state versus unresponsive input
+
+A later apparent freeze was recovered without reboot by reconnecting USB.
+Recovered logs showed a normal power-key suspend request followed by actual
+suspend-to-idle, lasting about126 seconds until a PMIC/charger wake. An earlier
+instance similarly remained asleep about189 seconds. These instances were
+actual sleep, not proof of a persistent kernel deadlock. GPIO power-key wakeup
+was enabled and its DT wake property present. Auto-suspend on AC/battery was
+`nothing`, logind idle action was ignored, and Android autosleep was off.
+
+The power-key service previously requested sleep without first blanking the
+panel. It now forces DPMS off while the user session is available, verifies the
+hardware runtime state and cancels sleep if the panel stays on. It restores the
+display on a failed sleep request. Wake resets the X11 screen-saver timer before
+DPMS on; a live counter query measured214214 ms before reset and133 ms after.
+This does not unlock the session. The installed file was backed up and checked
+against its expected previous hash; no kernel or partition was changed.
+
+A live barrier fixture verified active panel -> hardware off -> simulated sleep
+request -> active panel. A subsequent normal systemd suspend trial programmed
+a20-second alarm and completed in21.03 seconds including setup. It retained the
+same boot and GNOME process, returned with an active panel and the screen lock
+still set, and added zero kernel fault signatures. Kernel taint512 predated the
+trial and remained unchanged. The recorded wake IRQ was213 (PMIC); that number
+alone does not identify an individual PMIC source. This is a bounded timed-wake
+result, not repeated physical-button/OSK acceptance or a declaration that all
+kernel errors are eliminated.

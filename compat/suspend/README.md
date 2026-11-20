@@ -48,3 +48,10 @@ The image builder retains the initial masks. To return an enabled handset to
 that baseline, mask the two targets again and remove the installed GNOME
 profile files followed by `dconf update`. The key service can be disabled
 independently with `systemctl disable --now g955n-power-key.service`.
+
+The key handler blanks the panel before requesting system suspend, while the
+session can still process X11 requests. It verifies hardware blanking within
+two seconds and cancels the request if blanking fails. A rejected suspend
+request restores display power. Resume resets the X11 screen-saver idle counter
+before forcing DPMS on, so the old idle time cannot immediately blank it again.
+Neither action clears the GNOME screen lock or submits credentials.

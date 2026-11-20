@@ -1528,3 +1528,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   verified GNOME volume and speaker/mic mute controls. Added a bounded duplex
   diagnostic which separates hardware errors and startup capture transients
   from acoustic acceptance. The owner confirmed uninterrupted voice playback.
+- Required actual panel blanking before a short power-key suspend request and
+  reset the X11 idle counter before display wake. Installed the handler and
+  verified an on/off/on barrier plus a21-second timed suspend/resume in the same
+  locked GNOME session with no new kernel fault signatures.
