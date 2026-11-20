@@ -33,8 +33,8 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: three explicit disconnect/reconnect cycles per band, each with bound-interface TLS HTTP 200 and 254968-byte download at 2467/5745 MHz; original profile restored, same boot. Full suspend/resume pending |
 | Bluetooth | Framework dump collected privately | Discovery, pairing, audio and reconnect | Kernel36 BlueZ discovery received 18 BLE advertising reports with the ROM/H4 controller; firmware/pairing/audio/resume pending |
 | GPS / GNSS | Location service dump collected privately | Fresh outdoor fix with plausible coordinates and timestamps | Not tested |
-| Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Partial: LHD/MCU initialized and 220 native IIO records each with changing payloads/increasing timestamps; controlled motion, units, axes and desktop integration pending |
-| Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, pedometer, proximity, light and calibration | INCOMPLETE: one ambient-light event is not physical response acceptance. Magnetic/u64 accumulated-step parsers pass protocol fixtures but new live/physical measurements are pending. SensorProxy accel/light prototype builds but is uninstalled and lacks abrupt-termination recovery; stock HRM accelerometer misclassification is not an actual accel pass |
+| Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Kernel36 streams both through IIO. GNOME uses SensorProxy for accelerometer orientation, previously verified against controlled poses. Physical gyroscope response and axis calibration remain open |
+| Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, pedometer, proximity, light and calibration | Kernel36 reads magnetic and light records and a zero step total while stationary. GNOME's light response passed a controlled shade trial on kernel32. Compass calibration, actual step increase and proximity remain open |
 | Cameras | Camera service dump collected privately | Front/rear preview, capture, video, autofocus and flash | Not tested |
 | Audio | Audio service dump collected privately | Speaker, earpiece, microphones, headphone jack and routing | Kernel36 GNOME playback and primary microphone capture passed through scoped RDMA0 and WDMA1. Audibility, microphone acoustic quality, other inputs/outputs and suspend recovery remain open |
 | Charging / battery / thermals | Power service dump collected privately | Current/voltage/temp telemetry, controlled charge and thermal limits | Not tested |
@@ -916,3 +916,10 @@ See [ModemManager port detection](https://modemmanager.org/docs/modemmanager/por
 A separate nine-second BlueZ discovery trial returned 18 BLE advertising
 reports at the HCI layer and restored idle discovery state. It did not
 observe classic inquiry results or attempt pairing.
+
+A 12-second native SSP trial returned 64 accelerometer, 64 gyroscope,
+58 geomagnetic, seven ambient light and one step-counter record, with
+increasing timestamps in each multi-record stream. The stationary step
+total was zero. Restored the original sensor settings, restarted the
+standard SensorProxy service and verified its accelerometer and light
+properties on the same boot with taint 0.
