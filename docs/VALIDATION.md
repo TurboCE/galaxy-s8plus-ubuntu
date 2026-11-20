@@ -1083,3 +1083,20 @@ mutating input-core user counts. Touch wake defaults off through the standard
 wakeup control, and active input users get the controller restored on resume.
 The candidate's config and ramdisk match kernel40 byte for byte. The decoded
 DTB adds only the FTS desktop-suspend property.
+
+Kernel41 was installed after taking and verifying a current kernel40 BOOT
+backup. Protected partition hashes remained unchanged. A new boot verified
+kernel41, GDM, zero taint and the disabled default FTS wake policy over SSH.
+The radio-off platform test completed all device, late and noirq phases in
+5.34 seconds and returned successfully to the same boot. NetworkManager
+restored Wi-Fi and gateway traffic, with zero taint. The FTS input device
+was still enabled and no FTS wake or VCELL timeout appeared in the captured
+interval. PCI core still reported power-state warnings for both the Exynos
+Wi-Fi root port and its endpoint during noirq resume.
+
+The real `mem` test was scheduled with an RTC alarm and a persistent on-device
+report. After the alarm window, neither the USB serial console nor SSH over USB
+or the captured Wi-Fi address returned a completion record. A targeted USB
+re-enumeration did not restore access. The exact sleep or resume failure point
+and RTC delivery are unverified until the retained record can be retrieved.
+The normal systemd suspend targets remain masked pending this validation.

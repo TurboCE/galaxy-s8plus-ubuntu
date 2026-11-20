@@ -1435,3 +1435,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   disabled after the abort.
 - Added a Korean revision 10 touchscreen sleep policy for native Ubuntu. It
   preserves input users across suspend and exposes touch wake as an opt-in.
+- Installed kernel41 with a verified BOOT backup. Its radio-off platform
+  diagnostic completed suspend and resume, restored Wi-Fi traffic and left
+  desktop touch enabled. The PCIe noirq resume warnings remain.
+- Scheduled a real `mem` test with RTC wake on kernel41. The test did not
+  return a visible completion record, and USB and Wi-Fi became unreachable.
+  Normal desktop suspend remains gated pending a verified full resume.
