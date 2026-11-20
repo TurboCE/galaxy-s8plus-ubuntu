@@ -1,0 +1,147 @@
+Subject: Preserve desktop touch users and make FTS system wake opt-in
+
+The SM-G955N touchscreen IRQ aborted noirq suspend in the desktop image.
+The Korean revision 10 touchscreen opts in through its device tree. Use
+the Linux wakeup setting for the controller idle mode, default to the
+physical power key, preserve input-core counts and restore active desktop
+users on resume. Balance the recorded IRQ wake state.
+
+--- a/drivers/input/touchscreen/stm/fts_ts.c
++++ b/drivers/input/touchscreen/stm/fts_ts.c
+@@ -3018,7 +3018,11 @@
+ 	fts_secure_touch_init(info);
+ #endif
+ 
++	info->desktop_suspend = of_property_read_bool(client->dev.of_node,
++						     "samsung,desktop-suspend");
+ 	device_init_wakeup(&client->dev, true);
++	if (info->desktop_suspend)
++		device_set_wakeup_enable(&client->dev, false);
+ 	info->probe_done = true;
+ 
+ 	fts_check_custom_library(info);
+@@ -3225,6 +3229,12 @@
+ 	return 0;
+ }
+ 
++static bool fts_idle_wakeup(struct fts_ts_info *info)
++{
++	return info->lowpower_flag && (!info->desktop_suspend ||
++		device_may_wakeup(&info->client->dev));
++}
++
+ static void fts_input_close(struct input_dev *dev)
+ {
+ 	struct fts_ts_info *info = input_get_drvdata(dev);
+@@ -3262,7 +3272,7 @@
+ 
+ 	info->pressure_setting_mode = 0;
+ 
+-	fts_stop_device(info, info->lowpower_flag);
++	fts_stop_device(info, fts_idle_wakeup(info));
+ 
+ #ifdef FTS_SUPPORT_HOVER
+ 	info->retry_hover_enable_after_wakeup = 0;
+@@ -3524,7 +3534,7 @@
+ 	if (info->input_dev_touch->disabled) {
+ 		input_err(true, &info->client->dev , "%s: call input_close\n", __func__);
+ 
+-		fts_stop_device(info, info->lowpower_flag);
++		fts_stop_device(info, fts_idle_wakeup(info));
+ 
+ 		if ((info->lowpower_flag & FTS_MODE_AOD) && info->use_sponge) {
+ 			int i, ret = -1;
+@@ -3654,8 +3664,9 @@
+ 			fts_delay(20);
+ 		}
+ 
+-		if (device_may_wakeup(&info->client->dev))
+-			enable_irq_wake(info->irq);
++		if (!info->irq_wake_armed && device_may_wakeup(&info->client->dev) &&
++		    !enable_irq_wake(info->irq))
++			info->irq_wake_armed = true;
+ 
+ 		fts_release_all_finger(info);
+ #ifdef FTS_SUPPORT_TOUCH_KEY
+@@ -3681,6 +3692,10 @@
+ 		}
+ #endif
+ 	} else {
++		if (info->irq_wake_armed) {
++			disable_irq_wake(info->irq);
++			info->irq_wake_armed = false;
++		}
+ 		fts_interrupt_set(info, INT_DISABLE);
+ 		disable_irq(info->irq);
+ 
+@@ -3753,8 +3768,10 @@
+ 			info->force_release = false;
+ 		}
+ 
+-		if (device_may_wakeup(&info->client->dev))
++		if (info->irq_wake_armed) {
+ 			disable_irq_wake(info->irq);
++			info->irq_wake_armed = false;
++		}
+ 	}
+ 	info->fts_power_state = FTS_POWER_STATE_ACTIVE;
+ 	enable_irq(info->irq);
+@@ -3807,6 +3824,24 @@
+ 	input_dbg(false, &info->client->dev, "%s\n", __func__);
+ 
+ #ifdef USE_OPEN_CLOSE
++	if (info->desktop_suspend) {
++		mutex_lock(&info->input_dev->mutex);
++#ifdef USE_OPEN_DWORK
++		cancel_delayed_work_sync(&info->open_work);
++#endif
++		cancel_delayed_work_sync(&info->reset_work);
++		info->resume_desktop_touch = !info->input_dev->disabled &&
++			info->input_dev->users;
++		if (info->fts_power_state == FTS_POWER_STATE_ACTIVE ||
++		    (info->fts_power_state == FTS_POWER_STATE_LOWPOWER &&
++		     !fts_idle_wakeup(info)))
++			fts_stop_device(info, fts_idle_wakeup(info));
++		if (info->fts_power_state == FTS_POWER_STATE_LOWPOWER)
++			reinit_completion(&info->resume_done);
++		mutex_unlock(&info->input_dev->mutex);
++		return 0;
++	}
++
+ 	if (info->input_dev) {
+ 		int retval = mutex_lock_interruptible(&info->input_dev->mutex);
+ 
+@@ -3847,6 +3882,11 @@
+ 	if (info->fts_power_state > FTS_POWER_STATE_POWERDOWN)
+ 		complete_all(&info->resume_done);
+ 
++	if (info->resume_desktop_touch) {
++		info->resume_desktop_touch = false;
++		return fts_start_device(info);
++	}
++
+ 	return 0;
+ }
+ #endif
+--- a/drivers/input/touchscreen/stm/fts_ts.h
++++ b/drivers/input/touchscreen/stm/fts_ts.h
+@@ -513,6 +513,9 @@
+ 	int irq;
+ 	int irq_type;
+ 	bool irq_enabled;
++	bool irq_wake_armed;
++	bool desktop_suspend;
++	bool resume_desktop_touch;
+ 	bool force_release;
+ 	struct fts_i2c_platform_data *board;
+ #ifdef FTS_SUPPORT_TA_MODE
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -186,6 +186,7 @@
+ 	hsi2c_23: hsi2c@108E0000 {
+ 		touchscreen@49 {
+ 			status = "okay";
++			samsung,desktop-suspend;
+ 			stm,firmware_name = "tsp_stm/fts8cd56_dream2.fw", "tsp_stm/fts8cd56_dream2.fw";
+ 			stm,afe_base = <0x9D84>;
+ 		};

@@ -50,6 +50,8 @@ def main():
                         help='Cancel queued Broadcom station PM work before non-WoWLAN PCIe suspend')
     parser.add_argument('--freeze-voltage-dvfs', action='store_true',
                         help='Freeze Exynos voltage-policy polling before suspend disables I2C interrupts')
+    parser.add_argument('--fts-desktop-suspend', action='store_true',
+                        help='Preserve desktop touch users and opt in to touch wake explicitly')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -74,6 +76,8 @@ def main():
         parser.error('--dhd-cancel-pending-pm-work requires --dhd-pcie-suspend-order')
     if args.freeze_voltage_dvfs and not args.suspend_battery_diagnostic:
         parser.error('--freeze-voltage-dvfs requires --suspend-battery-diagnostic')
+    if args.fts_desktop_suspend and not args.build_version:
+        parser.error('--fts-desktop-suspend requires an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -115,6 +119,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0039-dhd-cancel-pending-pm-work-on-suspend.patch')
     if args.freeze_voltage_dvfs:
         patchfiles.append(ROOT/'patches/proposals/0040-freeze-exynos-voltage-dvfs-thread.patch')
+    if args.fts_desktop_suspend:
+        patchfiles.append(ROOT/'patches/proposals/0041-fts-preserve-desktop-input-across-suspend.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -129,6 +135,7 @@ def main():
             'abox_suspend_irq_order':args.abox_suspend_irq_order,
             'dpp_shared_dma':args.dpp_shared_dma,
             'desktop_charger_touch':args.desktop_charger_touch,
+            'fts_desktop_suspend':args.fts_desktop_suspend,
             'dhd_pcie_suspend_order':args.dhd_pcie_suspend_order,
             'mif_int_suspend_comparison':args.mif_int_suspend_comparison,
             'dhd_cancel_pending_pm_work':args.dhd_cancel_pending_pm_work,

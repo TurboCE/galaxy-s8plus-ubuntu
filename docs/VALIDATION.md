@@ -1064,3 +1064,22 @@ the freezer before device interrupts stop, preserving low-voltage policy
 and normal polling outside suspend. Kernel40 compiled and packed with the
 same config, DTB and external ramdisk as kernel39. The kernel40 change has
 no live evidence yet.
+
+### Live kernel40 and FTS suspend wake
+
+Installed kernel40 with a verified backup and BOOT-only readback. Automatic
+association and explicit reconnection at 5745 MHz each received three gateway
+replies and Wi-Fi-bound HTTPS 200 on the same boot. Initial taint was zero.
+
+The radio-off platform test returned EBUSY in 3.25 seconds, recovered the
+Wi-Fi gateway on the same boot and still had zero taint. The matching on-device
+capture identified `fts_touch` as the first wake IRQ. The FTS handler timed
+out waiting for its PM resume callback during the noirq abort. The saved
+trace contains no HSI2C or VCELL timeouts in that trial. The live input device
+remained disabled after the attempted transition.
+
+Proposal0041 opts the Korean revision 10 FTS device into system sleep without
+mutating input-core user counts. Touch wake defaults off through the standard
+wakeup control, and active input users get the controller restored on resume.
+The candidate's config and ramdisk match kernel40 byte for byte. The decoded
+DTB adds only the FTS desktop-suspend property.

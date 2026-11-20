@@ -1429,3 +1429,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   platform test also returned busy and both management paths later dropped.
 - Made the Exynos voltage-policy polling thread participate in the system
   freezer. Built and packed kernel40 for a separate device comparison.
+- Installed kernel40 with a verified BOOT backup. Wi-Fi passed automatic
+  association and manual reconnection. The radio-off suspend trace identified
+  the FTS touchscreen as the first wake interrupt, and the input device stayed
+  disabled after the abort.
+- Added a Korean revision 10 touchscreen sleep policy for native Ubuntu. It
+  preserves input users across suspend and exposes touch wake as an opt-in.
