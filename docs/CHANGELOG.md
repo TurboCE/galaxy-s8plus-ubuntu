@@ -1480,3 +1480,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   RTC trial had no observable completion. Desktop sleep remains gated.
 - Kernel49 makes WLAN wake from system sleep an explicit device wakeup
   setting while preserving the runtime WLAN interrupt.
+- Recovered a kernel48 shallow-sleep DPU0 timeout. Added a Korean board
+  comparison that retains DPU0 during system device suspend.

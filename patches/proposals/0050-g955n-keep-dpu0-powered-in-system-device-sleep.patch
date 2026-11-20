@@ -1,0 +1,52 @@
+Subject: Keep the Korean SM-G955N DPU0 domain on in device suspend
+
+The retained kernel48 suspend-to-idle log repeats the DPU0 PMUCAL
+power-off timeout and subsequent stalls previously seen with mem.
+Opt this domain out of synchronous system-device power-off. Keep its
+accounting active, including its dependence on parent domains, while
+still running device callbacks. Runtime PM and other domains keep the
+current policy. This is an isolation comparison, not a deep-sleep fix.
+
+--- a/drivers/base/power/domain.c
++++ b/drivers/base/power/domain.c
+@@ -587,7 +587,8 @@
+ 	struct gpd_link *link;
+ 	int ret;
+ 
+-	if (genpd->status == GPD_STATE_POWER_OFF)
++	if (genpd->status == GPD_STATE_POWER_OFF ||
++	    (genpd->flags & GENPD_FLAG_KEEP_ON_SYSTEM_SLEEP))
+ 		return 0;
+ 
+ 	if (genpd->suspended_count != genpd->device_count
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -18,6 +18,7 @@
+ 
+ /* Defines used for the flags field in the struct generic_pm_domain */
+ #define GENPD_FLAG_PM_CLK	(1U << 0) /* PM domain uses PM clk */
++#define GENPD_FLAG_KEEP_ON_SYSTEM_SLEEP (1U << 1)
+ 
+ enum gpd_status {
+ 	GPD_STATE_ACTIVE = 0,	/* PM domain is active */
+--- a/drivers/soc/samsung/exynos-pd.c
++++ b/drivers/soc/samsung/exynos-pd.c
+@@ -344,6 +344,8 @@
+ 		__of_genpd_add_provider(np, __of_genpd_xlate_simple, &pd->genpd);
+ 
+ 		exynos_pd_genpd_init(pd, initial_state);
++		if (of_property_read_bool(np, "samsung,keep-on-in-system-sleep"))
++			pd->genpd.flags |= GENPD_FLAG_KEEP_ON_SYSTEM_SLEEP;
+ 
+ 		/* add LOGICAL sub-domain
+ 		 * It is not assumed that there is REAL sub-domain.
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -305,3 +305,7 @@
+ 		gpio,lcd-reset = <&gpa0 5 0x1>;
+ 	};
+ };
++
++&pd_dpu0 {
++	samsung,keep-on-in-system-sleep;
++};

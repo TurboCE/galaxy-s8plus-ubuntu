@@ -1369,3 +1369,29 @@ tests passed. The enumerated kernel48 USB serial console gave no response,
 SSH and recovery remained unreachable, and USB re-enumeration did not
 restore console access. Kernel49 installation and hardware validation
 remain pending, including RTC sleep and opt-in WLAN wake.
+
+### Recovered kernel48 shallow failure and DPU0 retention comparison
+
+The manual restart recovered the same kernel48 shallow-sleep attempt that
+lost both management paths. Its synced record contains the programmed RTC
+alarm and no return event. The journal confirms the test entry. In the
+retained kernel log, DPU0 timed out during noirq power-off and CPU stalls
+followed. This is the same hardware transition that blocked kernel45 `mem`.
+The evidence places this shallow failure before any RTC wake.
+
+Proposal0050 retains this one board-specific display power domain during
+synchronous system-device suspend. It leaves the domain accounted as on,
+so a parent domain does not lose an active dependency. Device suspend and
+resume callbacks still run and normal runtime power-off is unchanged.
+This comparison carries a potential sleep-power cost. It does not qualify
+full SoC sleep.
+
+Kernel49 was installed after the restart with verified BOOT and protected
+partition readback. The running PCI WLAN wake setting was disabled and RTC
+wake enabled. The associated device-only diagnostic completed in 6.21
+seconds without reboot. Wi-Fi gateway traffic, GDM and touch recovered and
+kernel taint remained zero. That bounded test stops before DPU0 noirq.
+
+Kernel50 compiled and packed with the kernel49 configuration and ramdisk.
+Decoded DTBs differ only by the DPU0 system-sleep retention property.
+All 102 Linux host tests passed.
