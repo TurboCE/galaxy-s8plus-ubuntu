@@ -1459,3 +1459,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Wi-Fi recovery, active GDM and an enabled touchscreen.
 - The follow-up kernel44 deep-prepare core trial did not produce a visible
   completion record. Desktop suspend remains gated pending verification.
+- Kernel45 restores Exynos power-domain hardware after a failed shutdown
+  sequence and includes the SM-G955N desktop charger-mode touch opt-in.

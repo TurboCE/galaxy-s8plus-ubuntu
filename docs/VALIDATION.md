@@ -1217,3 +1217,23 @@ syscore logging. It did not return a readable completion record over USB or
 Wi-Fi. The retained log must be recovered before attributing this failure to
 pinctrl, Exynos restore or a later callback. The normal desktop sleep targets
 remain masked while the core path is unresolved.
+
+### Recovered kernel44 failure and kernel45 comparison
+
+The forced reboot recovered the kernel44 core test entry and its retained
+kernel log. This attempt aborted during noirq after an Exynos DPU0 power-off
+failure. It reached noirq resume completion and began early device resume.
+The retained segment ends before system resume completes and contains no
+Exynos syscore restore marker. This test therefore did not exercise the
+kernel44 syscore fix. The exact later callback that stopped the unwind is
+unverified because the tail of the retained log is damaged.
+
+The Exynos local power-off routine could leave a changed power request
+when its hardware wait failed. Generic PM still treated the domain as
+active, so there was no hardware power-on in that rollback. Proposal0045
+uses the existing local enable and saved-register restore before returning
+the original error. The build also includes proposal0036 and its explicit
+SM-G955N opt-in. The forced restart booted into charger mode with GDM active,
+and kernel44 declined to bind the touchscreen. Kernel45 keeps the same
+DTB and ramdisk and adds only the charger touch argument to kernel config.
+All 102 Linux tests passed.

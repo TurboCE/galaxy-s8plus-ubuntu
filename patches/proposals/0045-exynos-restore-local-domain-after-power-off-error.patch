@@ -1,0 +1,31 @@
+Subject: Restore Exynos local domain hardware after a failed power-off
+
+The failed DPU0 off sequence can change the PMU power request and time out
+before the status bits reach OFF. The generic power domain correctly
+remains active after proposal0043, so its normal unwind does not call
+power-on for that domain. Restore the local hardware using the existing
+power-on and saved-register sequence before returning the original error.
+
+--- a/drivers/soc/samsung/cal-if/pmucal_local.c
++++ b/drivers/soc/samsung/cal-if/pmucal_local.c
+@@ -62,7 +62,7 @@
+  */
+ int pmucal_local_disable(unsigned int pd_id)
+ {
+-	int ret, i;
++	int ret, restore_ret, i;
+ 
+ 	exynos_ss_pmu(pd_id, __func__, ESS_FLAG_IN);
+ 
+@@ -91,6 +91,11 @@
+ 							pmucal_pd_list[pd_id].save[i].offset,
+ 							pmucal_pd_list[pd_id].save[i].value);
+ 		}
++		/* The failed sequence may already have changed the power request. */
++		restore_ret = pmucal_local_enable(pd_id);
++		if (restore_ret)
++			pr_err("%s %s: failed to recover pd(%u): %d\n",
++			       PMUCAL_PREFIX, __func__, pd_id, restore_ret);
+ 		return ret;
+ 	}
+ 
