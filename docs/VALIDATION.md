@@ -1288,3 +1288,30 @@ as kernel45. The Linux test suite passed all 102 tests. USB, Wi-Fi and TWRP
 remained unreachable, so kernel46 has no installation or live suspend
 result. The retained log from the previous kernel45 real `mem` test has
 not been recovered.
+
+### Recovered kernel45 deep trial and live kernel46
+
+The forced restart exposed the kernel45 real `mem` test entry record and
+its programmed RTC alarm. The retained log reports DPU0 power-off timeout
+and repeated RCU stalls before noirq completed. It contains no matching
+Exynos platform sleep entry or return. This failure cannot be attributed
+to RTC wake delivery or PSCI resume because the test stopped earlier.
+
+Installed kernel46 with a verified kernel45 BOOT backup and verified BOOT
+and protected partition readback. With Wi-Fi connected soon after enabling
+the radio, the kernel waited about 1.5 seconds. DHD RX, control, event and
+TX-flush holds cleared, then the station PM hold alone blocked entry. The
+matching live `iw` output showed WoWLAN enabled. The driver had excluded
+WoWLAN sessions from its pending station work cancellation.
+
+After the connection settled, kernel46 actually entered `freeze` with
+Wi-Fi connected and returned on the same boot after 34.42 seconds. The
+S2MPS17 wake IRQ and RTC alarm handler matched the programmed wake. Wi-Fi
+passed gateway traffic and GDM and touchscreen input remained active.
+Kernel taint was zero. Default GNOME sleep remained gated.
+
+Proposal0047 pauses the deferred station PM timer across the wiphy system
+suspend callback, including when WoWLAN is configured. It preserves the
+requested delay and re-arms deferred work on resume. The firmware wake
+configuration and other DHD wake checks stay in place. Kernel47 compiled
+with kernel46's config, DTB and external ramdisk. All 102 Linux tests passed.

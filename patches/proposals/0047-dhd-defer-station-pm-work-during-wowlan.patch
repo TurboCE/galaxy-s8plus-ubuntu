@@ -1,0 +1,142 @@
+Subject: Defer station PM work while Broadcom system suspend is in progress
+
+The SM-G955N keeps WoWLAN enabled, so the wiphy suspend callback skipped
+cancellation of its pending 10 to 20 second station PM timer. Pause only
+that timer for system suspend and preserve delayed requests for resume.
+The firmware wake configuration and other DHD wake locks are unchanged.
+Applies after proposals0037 and 0039.
+
+--- a/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
++++ b/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
+@@ -1238,44 +1238,71 @@
+ bool fw_assoc_watchdog_started = 0;
+ #define FW_ASSOC_WATCHDOG_TIME 10 * 1000 /* msec */
+ 
++static void wl_schedule_pm_enable_work_locked(struct bcm_cfg80211 *cfg,
++	unsigned int duration)
++{
++	dhd_pub_t *dhd = (dhd_pub_t *)cfg->pub;
++
++	if (!duration || !dhd->up)
++		return;
++
++	if (!schedule_delayed_work(&cfg->pm_enable_work,
++				   msecs_to_jiffies(duration))) {
++		WL_ERR(("Can't schedule pm work handler\n"));
++		return;
++	}
++
++	cfg->pm_work_duration = duration;
++	DHD_PM_WAKE_LOCK_TIMEOUT(cfg->pub, duration);
++}
++
+ static void wl_add_remove_pm_enable_work(struct bcm_cfg80211 *cfg,
+ 	enum wl_pm_workq_act_type type)
+ {
+-	u16 wq_duration = 0;
+-	dhd_pub_t *dhd =  NULL;
+-
+-	if (cfg == NULL)
++	unsigned int duration = 0;
++
++	if (!cfg)
+ 		return;
+ 
+-	dhd = (dhd_pub_t *)(cfg->pub);
++	if (type == WL_PM_WORKQ_SHORT)
++		duration = WL_PM_ENABLE_TIMEOUT;
++	else if (type == WL_PM_WORKQ_LONG)
++		duration = WL_PM_ENABLE_TIMEOUT * 2;
+ 
+ 	mutex_lock(&cfg->pm_sync);
+-	/*
+-	 * Make cancel and schedule work part mutually exclusive
+-	 * so that while cancelling, we are sure that there is no
+-	 * work getting scheduled.
+-	 */
+-	/* Running work releases its own wake lock. */
++	if (cfg->pm_work_paused) {
++		cfg->pm_work_duration = duration;
++	} else {
++		/* Running work releases its own wake lock. */
++		if (cancel_delayed_work(&cfg->pm_enable_work))
++			DHD_PM_WAKE_UNLOCK(cfg->pub);
++		wl_schedule_pm_enable_work_locked(cfg, duration);
++	}
++	mutex_unlock(&cfg->pm_sync);
++}
++
++#if defined(BCMPCIE) && !defined(DHD_CLEAR_ON_SUSPEND)
++static void wl_pause_pm_enable_work(struct bcm_cfg80211 *cfg)
++{
++	mutex_lock(&cfg->pm_sync);
++	cfg->pm_work_paused = true;
+ 	if (cancel_delayed_work(&cfg->pm_enable_work))
+ 		DHD_PM_WAKE_UNLOCK(cfg->pub);
+-
+-	if (type == WL_PM_WORKQ_SHORT) {
+-		wq_duration = WL_PM_ENABLE_TIMEOUT;
+-	} else if (type == WL_PM_WORKQ_LONG) {
+-		wq_duration = (WL_PM_ENABLE_TIMEOUT*2);
+-	}
+-
+-	/* It should schedule work item only if driver is up */
+-	if (wq_duration && dhd->up) {
+-		if (schedule_delayed_work(&cfg->pm_enable_work,
+-				msecs_to_jiffies((const unsigned int)wq_duration))) {
+-			DHD_PM_WAKE_LOCK_TIMEOUT(cfg->pub, wq_duration);
+-		} else {
+-			WL_ERR(("Can't schedule pm work handler\n"));
+-		}
+-	}
++	else
++		cfg->pm_work_duration = 0;
+ 	mutex_unlock(&cfg->pm_sync);
+ }
++
++static void wl_resume_pm_enable_work(struct bcm_cfg80211 *cfg)
++{
++	mutex_lock(&cfg->pm_sync);
++	if (cfg->pm_work_paused) {
++		cfg->pm_work_paused = false;
++		wl_schedule_pm_enable_work_locked(cfg, cfg->pm_work_duration);
++	}
++	mutex_unlock(&cfg->pm_sync);
++}
++#endif
+ 
+ /* Return a new chanspec given a legacy chanspec
+  * Returns INVCHANSPEC on error
+@@ -8082,6 +8109,9 @@
+ 	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
+ 	s32 err = BCME_OK;
+ 
++#if defined(BCMPCIE) && !defined(DHD_CLEAR_ON_SUSPEND)
++	wl_resume_pm_enable_work(cfg);
++#endif
+ 	if (unlikely(!wl_get_drv_status(cfg, READY, ndev))) {
+ 		WL_INFORM_MEM(("device is not ready\n"));
+ 		return err;
+@@ -8103,10 +8133,7 @@
+ 
+ 	if (wl_get_drv_status(cfg, READY, ndev)) {
+ 		wl_cfg80211_cancel_scan(cfg);
+-#if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 39)) || defined(WL_COMPAT_WIRELESS)
+-		if (!wow)
+-#endif
+-			wl_add_remove_pm_enable_work(cfg, WL_PM_WORKQ_DEL);
++		wl_pause_pm_enable_work(cfg);
+ 	}
+ #endif
+ #ifdef DHD_CLEAR_ON_SUSPEND
+--- a/drivers/net/wireless/bcmdhd4361/wl_cfg80211.h
++++ b/drivers/net/wireless/bcmdhd4361/wl_cfg80211.h
+@@ -1098,6 +1098,8 @@
+ 	struct mutex event_sync;	/* maily for up/down synchronization */
+ 	bool disable_roam_event;
+ 	struct delayed_work pm_enable_work;
++	bool pm_work_paused;
++	unsigned int pm_work_duration;
+ 	struct workqueue_struct *event_workq;   /* workqueue for event */
+ 	struct work_struct event_work;		/* work item for event */
+ 	struct mutex pm_sync;	/* mainly for pm work synchronization */

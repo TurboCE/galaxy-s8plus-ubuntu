@@ -1467,3 +1467,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   record. Wi-Fi activity also continues to prevent ordinary suspend entry.
 - Added a bounded Broadcom system-suspend drain for transient wake locks.
   Kept all existing wake-lock checks and the firmware D3 handshake.
+- Installed kernel46 and verified an RTC wake from suspend-to-idle with
+  Wi-Fi connected. A separate boot-time connection test still exposed a
+  deferred station power-management hold with WoWLAN enabled.
+- Kernel47 postpones deferred station PM work during system suspend with
+  WoWLAN enabled, and reschedules it after the PCI transport resumes.
