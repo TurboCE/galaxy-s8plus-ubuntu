@@ -200,3 +200,18 @@ USB console returned by the end of the observation. A host USB port
 re-enumeration did not restore access. This is a failed system suspend test.
 The last reached kernel power stage and any retained crash trace need to be
 collected after the phone is accessible. Deep system suspend was not tested.
+
+### Kernel36 direct output and touch authentication
+
+The controller recognizes the linked kernel36 build notes from the exact
+tested image. It applies the fullscreen policy to supervised trials as well
+as persistent sessions. An explicit restore cancels the old timer so another
+trial can start without a stale systemd unit.
+
+On a normal kernel36 boot, replayed contacts on the actual touchscreen input
+node selected the GDM account, switched the on-screen keyboard to numbers,
+entered the password, and reached the real GNOME session. A warm reboot
+recreated the verified direct-output lease and passed the same touch login.
+The opaque fullscreen fixture showed zero empty overlay samples and
+continued DECON timeline progress. This is an input-path test from evdev
+through PAM. Physical digitizer latency was not measured.

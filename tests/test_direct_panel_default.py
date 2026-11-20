@@ -77,3 +77,30 @@ class DirectPanelBootTests(unittest.TestCase):
         self.prepare()
         self.assert_recovered()
         self.assertEqual(self.files[2].stat().st_mode & 0o777, 0o755)
+
+    def test_kernel36_requires_reviewed_linked_notes(self):
+        notes = self.policy.parent / 'notes'
+        notes.write_bytes(b'reviewed kernel build')
+        with patch.object(controller, 'KERNEL_NOTES', notes), \
+             patch.object(controller, 'KERNEL36_NOTES_SHA256',
+                          hashlib.sha256(notes.read_bytes()).hexdigest()), \
+             patch.object(controller.subprocess, 'check_output', return_value='#36 SMP\n'):
+            self.assertTrue(controller.qualified_kernel())
+            notes.write_bytes(b'other kernel build')
+            self.assertFalse(controller.qualified_kernel())
+            notes.unlink()
+            self.assertFalse(controller.qualified_kernel())
+
+    def test_manual_restore_cancels_transient_timer_before_restarting_gdm(self):
+        self.lease.touch()
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(tuple(command))
+
+        with patch.object(controller.subprocess, 'run', side_effect=run):
+            controller.restore()
+
+        self.assertEqual(calls[0], ('systemctl', 'stop', controller.TIMER + '.timer'))
+        self.assertIn(('systemctl', 'start', 'gdm.service'), calls)
+        self.assert_recovered()

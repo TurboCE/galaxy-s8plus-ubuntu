@@ -27,7 +27,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | --- | --- | --- | --- |
 | Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | FAILED stability: kernels22/24/25/26/27 suffered unexpected reset or hard hang. Last verified running kernel27 passed13 desktop DPMS cycles then hung; a later greeter boot also stopped responding. BOOT backups/full readbacks and protected-partition hashes were verified before authorized installations. Kernels28/29 build/pack but are not deployed; proposal32 is object-tested only. No current SSH/USB-console response. See kernel26-power-investigation.md and compiler-reference-comparison.md |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | PARTIAL: persistent GDM account-tile repair passed owner-confirmed account touch, password and desktop entry after reboot on26, without injected Return/autologin. Native1440x2960 works; later27 actual PAM login also succeeds remotely. Screen-power hard hangs remain; physical touch latency, dynamic rotation and automatic brightness are unqualified |
-| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | BOUNDED PASS for normal GNOME GLES/EGL rendering/composition: real Mali-G71 shell, private EGL/Exynos gralloc and no swrast; three client/overlay/calendar trials passed on26. Normal27 login also loads Mali. Overall objective remains PARTIAL because sustained stability and physical response latency are unqualified. XPutImage CPU copying remains; panel commit counts are not rendered FPS |
+| GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | The verified kernel36 build defaults to GNOME Mali-to-DECON DMA-BUF output. GDM touch login, fullscreen and repeated display off/on passed before and after a warm reboot. Physical response latency and full suspend remain open |
 | LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Kernel36 reports modem OFFLINE. Native modem boot and modem-control integration are pending; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: three explicit disconnect/reconnect cycles per band, each with bound-interface TLS HTTP 200 and 254968-byte download at 2467/5745 MHz; original profile restored, same boot. Full suspend/resume pending |
@@ -923,3 +923,15 @@ increasing timestamps in each multi-record stream. The stationary step
 total was zero. Restored the original sensor settings, restarted the
 standard SensorProxy service and verified its accelerometer and light
 properties on the same boot with taint 0.
+
+### Kernel36 direct display boot retest
+
+On normal boots the verified direct-output configuration passed real GDM
+PAM login via replayed touchscreen events, including the on-screen keyboard.
+It passed eight checked screen off/on cycles before and eight after a warm
+reboot. Each cycle waited for agreement between X11 DPMS and kernel panel
+runtime state, then verified new DECON work and unchanged boot and shell.
+Fullscreen remained composed and kernel taint was 0 during the checks.
+The active configuration was left enabled. These are display-power checks,
+not whole-system suspend. Kernel logs still showed panel command failures
+in earlier rapid transition tests.

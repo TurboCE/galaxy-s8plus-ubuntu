@@ -30,6 +30,8 @@ PRIVATE_MODE = SHELL_DATA / 'gnome-shell/modes/ubuntu.json'
 EXTENSION_ID = 'g955n-direct-panel@local'
 EXTENSION = SHELL_DATA / 'gnome-shell/extensions' / EXTENSION_ID
 POLICY_FILES = (EXTENSION / 'extension.js', EXTENSION / 'metadata.json', PRIVATE_MODE)
+KERNEL_NOTES = Path('/sys/kernel/notes')
+KERNEL36_NOTES_SHA256 = '1bc70f6013b1af4529cef38d8ce0d9529103cd1f9e4b03bdbe0842b11716d01b'
 
 
 def sync_directory(directory):
@@ -81,6 +83,9 @@ def restore_files():
 
 
 def restore():
+    subprocess.run(['systemctl', 'stop', TIMER + '.timer'],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                   timeout=15)
     if not BACKUP.exists():
         return
     ctl('stop', 'gdm.service')
@@ -96,7 +101,15 @@ def create_lease():
 
 
 def qualified_kernel():
-    return '#32 ' in subprocess.check_output(['uname', '-v'], text=True)
+    version = subprocess.check_output(['uname', '-v'], text=True)
+    if version.startswith('#32 '):
+        return True
+    if not version.startswith('#36 '):
+        return False
+    try:
+        return digest(KERNEL_NOTES.read_bytes()) == KERNEL36_NOTES_SHA256
+    except OSError:
+        return False
 
 
 def default_hashes():
@@ -139,8 +152,7 @@ def run(candidate, expected, default):
     if b'pan_with_trial_lease' not in Path('/usr/local/sbin/g955n-fb-display').read_bytes():
         raise RuntimeError('The installed framebuffer service does not honor the trial lease')
     ctl('is-active', 'g955n-fb-display.service', 'gdm.service')
-    if default:
-        prepare_shell_policy()
+    prepare_shell_policy()
     data = candidate.read_bytes()
     if digest(data) != expected:
         raise RuntimeError('Candidate checksum mismatch')
@@ -168,7 +180,7 @@ def run(candidate, expected, default):
 
     # Schedule recovery on the phone before interrupting its desktop.
     try:
-        subprocess.run(['systemd-run', f'--unit={TIMER}', '--on-active=150s',
+        subprocess.run(['systemd-run', '--collect', f'--unit={TIMER}', '--on-active=150s',
                         sys.executable, str(Path(__file__).resolve()), '--restore-trial'],
                        check=True, timeout=15)
     except (subprocess.SubprocessError, OSError):
@@ -186,10 +198,9 @@ def run(candidate, expected, default):
         settings = b"\n env.pop('G955N_DIRECT_PANEL_TRIAL',None)\n"
         settings += b" if Path('/run/lock/g955n-direct-panel-trial').is_file():\n"
         settings += b"  env['G955N_DIRECT_PANEL_TRIAL']='1'\n"
-        if default:
-            settings += (b"  env['XDG_DATA_DIRS']="
-                         + repr(str(SHELL_DATA) + ':').encode()
-                         + b"+(original.get('XDG_DATA_DIRS') or '/usr/local/share:/usr/share')\n")
+        settings += (b"  env['XDG_DATA_DIRS']="
+                     + repr(str(SHELL_DATA) + ':').encode()
+                     + b"+(original.get('XDG_DATA_DIRS') or '/usr/local/share:/usr/share')\n")
         # Include the two dynamic keys in logout cleanup.
         launcher = original[LAUNCHER].replace(marker, marker + settings.rstrip(b"\n"))
         launcher = launcher.replace(cleanup,
@@ -237,7 +248,7 @@ def main():
         if not args.sha256:
             parser.error('--candidate requires --sha256')
         if not qualified_kernel():
-            raise RuntimeError('Direct output is qualified only against the kernel32 ABI')
+            raise RuntimeError('Direct output requires a reviewed display kernel build')
         if Path('/proc/sys/kernel/tainted').read_text().strip() != '0':
             raise RuntimeError('Expected an untainted kernel before the trial')
         # The delayed root recovery must invoke a trusted copy of this file.

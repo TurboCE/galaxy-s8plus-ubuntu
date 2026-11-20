@@ -1408,3 +1408,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   mode. Built kernel37 with an explicit SM-G955N desktop opt-in for the
   regular touchscreen probe during charger boot. Verified the build and
   matching ramdisk/DTB. Live charger-mode validation remains pending.
+- Enabled direct Mali-to-DECON GNOME output on the exact verified kernel36
+  build. Supervised trials apply the same fullscreen policy as default
+  sessions. Explicit rollback cancels its timer to allow immediate retry.
+  Verified touch login, fullscreen and display power cycles across reboot.
