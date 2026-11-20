@@ -1010,3 +1010,10 @@ disassociated request returned EBUSY before late suspend. Broadcom reported
 different active PM, RX/TX-flush and control wake locks. All three requests
 returned to the same boot and verified Wi-Fi gateway traffic. Those attempts
 did not reach the earlier fatal noirq point.
+
+With the radio temporarily off, another comparison request returned EBUSY
+after 3.23 seconds on the same boot. The on-device recovery re-enabled
+Wi-Fi and verified gateway reachability. Taint 512 was reported after
+the test. Subsequent USB and Wi-Fi SSH attempts did not retrieve the
+matching kernel trace, so the callback and source of the warning still
+require verification. Full suspend and RTC resume remain untested.
