@@ -28,8 +28,9 @@ chmod 755 "$R/usr/local/sbin/g955n-android-bsp"
 chmod 755 "$R/usr/local/sbin/g955n-fb-display"
 install -D -m 644 /source/compat/xdamage-monitor.py "$R/usr/local/lib/g955n/g955n_xdamage.py"
 chmod 755 "$R/usr/local/sbin/g955n-location-hub"
+chmod 755 "$R/usr/local/sbin/g955n-bluetooth-address"
 chmod 755 "$R/usr/local/sbin/g955n-kernel-evidence"
-chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service g955n-kernel-evidence.service serial-getty@ttyGS0.service
+chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service g955n-kernel-evidence.service g955n-bluetooth-rom.service serial-getty@ttyGS0.service
 chroot "$R" dconf update
 chroot "$R" systemctl set-default graphical.target
 if [ -s /inputs/ubuntu-password ]; then

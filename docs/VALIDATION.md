@@ -826,3 +826,33 @@ ModemManager for supported modem control. The builder now explicitly
 enables ModemManager. This does not supply a Samsung modem transport,
 a calibrated compass/step integration, a Bluetooth firmware load,
 a GNSS data source or a microphone driver path.
+
+### Live native services on kernel36
+
+After reconnect, the ordinary system SensorProxy D-Bus interface returned
+HasAccelerometer and HasAmbientLight true, orientation normal, and a 20 lux
+reading. ModemManager was active and returned no modem despite the kernel
+exporting eight rmnet interfaces. These interfaces do not provide a
+ModemManager-compatible Samsung control transport.
+
+Installed the native BlueZ ROM/H4 attachment service using the previously
+observed ttySAC1 at 115200 with flow control. It sets the original address
+only in the uniquely matched UART controller RAM, with EFS mounted read-only
+and no recovery replay. The built-in controller appeared in BlueZ and was
+powered. Enabled the unit as a Bluetooth service dependency. A matching
+firmware load, pairing and reconnect are still unqualified.
+
+The guarded WirePlumber trial in the owner GNOME session exported the normal
+internal speaker sink. No physical microphone was exposed. This graph
+enumeration alone did not establish actual PCM playback.
+
+The normal Ubuntu WirePlumber/PipeWire graph linked the speaker stream, but
+its default S32_LE/MMAP PCM did not advance the RDMA0 hardware pointer.
+The bounded trial stopped and restored the earlier mask. Added a rule for
+the exact built-in speaker sink to use 48 kHz S16 and read/write access.
+With the reviewed UCM speaker gain and that rule, normal GNOME WirePlumber
+and PipeWire started, the two-second playback completed, and RDMA0 moved
+through 21 distinct observed hardware positions. Both engine scopes stayed
+within the reviewed private ALSA module and kernel taint stayed 0. Left
+the desktop services enabled. Actual audibility and microphone capture
+are separate acceptance tests.

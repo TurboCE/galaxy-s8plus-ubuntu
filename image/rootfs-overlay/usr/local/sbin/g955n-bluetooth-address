@@ -1,0 +1,75 @@
+#!/usr/bin/python3
+"""Set the original address on this board's verified ROM/H4 controller."""
+import argparse
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import time
+
+TTY = Path('/dev/ttySAC1')
+TTY_SYS = Path('/sys/class/tty/ttySAC1')
+EFS_ADDRESS = Path('/efs/bluetooth/bt_addr')
+
+
+def run(*args):
+    return subprocess.check_output(args, text=True, timeout=5, stderr=subprocess.STDOUT)
+
+
+def original_address():
+    options = run('/usr/bin/findmnt', '-n', '-o', 'OPTIONS', '-T', '/efs').strip().split(',')
+    if 'ro' not in options or not {'norecovery', 'noload'}.intersection(options):
+        raise RuntimeError('Expected the original read-only EFS mount')
+    value = EFS_ADDRESS.read_bytes().strip(b'\0\r\n ').decode('ascii').upper()
+    if not re.fullmatch(r'(?:[0-9A-F]{2}:){5}[0-9A-F]{2}', value):
+        raise RuntimeError('Invalid EFS Bluetooth address')
+    if value in ('00:00:00:00:00:00', 'FF:FF:FF:FF:FF:FF', 'AA:AA:AA:AA:AA:AA'):
+        raise RuntimeError('Placeholder EFS Bluetooth address')
+    return value
+
+
+def controller(tty):
+    for _ in range(25):
+        matches = [p for p in Path('/sys/class/bluetooth').glob('hci*')
+                   if p.resolve().is_relative_to(tty)]
+        if len(matches) > 1:
+            raise RuntimeError('Multiple Bluetooth controllers on the selected UART')
+        if matches:
+            return matches[0].name
+        time.sleep(0.2)
+    raise RuntimeError('The selected UART did not register a Bluetooth controller')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--check', action='store_true')
+    args = parser.parse_args()
+    if os.geteuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
+        raise RuntimeError('Requires root on the SM-G955N')
+    tty = TTY_SYS.resolve(strict=True)
+    if '10830000.uart' not in tty.parts or not stat.S_ISCHR(TTY.stat().st_mode):
+        raise RuntimeError('Unexpected Bluetooth UART')
+    address = original_address()
+    if args.check:
+        return
+    hci = controller(tty)
+    run('/usr/bin/hciconfig', hci, 'up')
+    if address not in run('/usr/bin/hciconfig', hci).upper():
+        payload = ['0x' + value for value in reversed(address.split(':'))]
+        response = run('/usr/bin/hcitool', '-i', hci, 'cmd', '0x3f', '0x0001', *payload)
+        if not re.search(r'(?m)^\s*01\s+01\s+FC\s+00\s*$', response.upper()):
+            raise RuntimeError('Bluetooth controller did not acknowledge its address')
+        run('/usr/bin/hciconfig', hci, 'down')
+        run('/usr/bin/hciconfig', hci, 'up')
+    if address not in run('/usr/bin/hciconfig', hci).upper():
+        raise RuntimeError('Could not verify the original Bluetooth address')
+    print('SM-G955N Bluetooth controller ready for BlueZ')
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
+        # A failed vendor-command invocation contains the radio address in argv.
+        raise SystemExit('SM-G955N Bluetooth ROM activation failed') from None

@@ -1390,3 +1390,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   ModemManager alongside NetworkManager and BlueZ. No new modem backend
   was installed. Verified staging with the authentic Ubuntu packages
   from the rootfs snapshot.
+- Connected the built-in UART Bluetooth controller to standard BlueZ on
+  kernel36 and enabled the attachment service. Preserved original EFS
+  calibration and verified BlueZ sees one powered built-in controller.
+- Enabled the regular GNOME speaker on kernel36 with the scoped ABI.
+  Fixed the stalled default PCM negotiation by using S16 at 48 kHz and
+  read/write access for the built-in speaker only. Verified completed
+  playback and RDMA0 hardware pointer progress.

@@ -1,0 +1,15 @@
+[Unit]
+Description=SM-G955N built-in Bluetooth ROM UART
+Requires=g955n-hardware.service
+After=g955n-hardware.service
+Before=bluetooth.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/sbin/g955n-bluetooth-address --check
+ExecStart=/usr/bin/hciattach -n /dev/ttySAC1 any 115200 flow
+ExecStartPost=/usr/local/sbin/g955n-bluetooth-address
+TimeoutStartSec=24
+
+[Install]
+WantedBy=bluetooth.service

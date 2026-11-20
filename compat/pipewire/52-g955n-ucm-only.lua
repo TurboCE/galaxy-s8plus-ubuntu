@@ -21,3 +21,18 @@ table.insert(alsa_monitor.rules, {
     ["device.profile-set"] = "g955n-ucm-only.conf",
   },
 })
+
+-- RDMA0 has verified 48 kHz S16 playback through ALSA read/write access.
+-- Keep the conversion inside PipeWire for desktop clients.
+table.insert(alsa_monitor.rules, {
+  matches = {
+    {
+      { "node.name", "equals", "alsa_output.platform-sound.HiFi__hw_Exynos8895Mader_0__sink" },
+    },
+  },
+  apply_properties = {
+    ["audio.format"] = "S16LE",
+    ["audio.rate"] = 48000,
+    ["api.alsa.disable-mmap"] = true,
+  },
+})
