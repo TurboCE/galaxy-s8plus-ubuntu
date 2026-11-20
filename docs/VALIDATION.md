@@ -856,3 +856,11 @@ through 21 distinct observed hardware positions. Both engine scopes stayed
 within the reviewed private ALSA module and kernel taint stayed 0. Left
 the desktop services enabled. Actual audibility and microphone capture
 are separate acceptance tests.
+
+The bounded WDMA0 microphone probe initially failed to configure a backend.
+The pinned ABOX graph routes SIFM0 to WDMA1. Corrected the WDMA0 diagnostic
+to select UAIF0 through NSRC0, RSRC0 and RECP PIFS0. On the device it then
+negotiated 48 kHz S16 capture, but returned EIO with zero captured frames
+and a stationary hardware pointer. The ABOX GIC count did not advance
+during the bounded read. The diagnostic restored the mixer state and
+kernel taint stayed 0. Microphone remains outside the desktop PCM scope.

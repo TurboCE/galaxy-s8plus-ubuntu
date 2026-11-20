@@ -129,10 +129,11 @@ def main():
     signal.signal(signal.SIGINT, interrupt)
     routes = [
         ('ABOX Sampling Rate Recp', '48000'),
-        ('ABOX Sampling Rate Inmux0', '48000'),
-        ('ABOX SPUM ASRC0', 'On'),
-        ('ABOX SIFM0', 'WDMA'),
         ('ABOX NSRC0', 'UAIF0'),
+        ('ABOX RSRC0', 'NSRC0'),
+        ('ABOX RECP PIFS1', '0'),
+        ('ABOX RECP PIFS0', '1'),
+        ('ABOX SPUM ASRC0', 'On'),
         ('LHPF1 Input 1', 'IN3L'),
         ('ASRC1IN1L Input 1', 'LHPF1'),
         ('AIF1TX1 Input 1', 'ASRC1IN1L'),
