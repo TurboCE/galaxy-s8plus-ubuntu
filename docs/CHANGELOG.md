@@ -1532,3 +1532,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   reset the X11 idle counter before display wake. Installed the handler and
   verified an on/off/on barrier plus a21-second timed suspend/resume in the same
   locked GNOME session with no new kernel fault signatures.
+- Added a source-pinned GNOME keyboard overlay guarding absent event actors and
+  avoiding disposed-device auto-detection when the accessibility keyboard is
+  explicitly enabled. Kept native unlock-dialog routing and PAM authentication;
+  removed the earlier experimental unlock overlay. Installed with private
+  backups and matching GPU startup hashes, then activated by normal logout/login.
+- Recovered the failed-session screen caused by a forced Shell service reload.
+  Verified normal touchscreen GDM login and, with the final minimal overlay,
+  a20-second timed suspend followed by touchscreen/OSK/PAM unlock in the same
+  GNOME process. Mali-G71 and real KMS frame retirement remained active.

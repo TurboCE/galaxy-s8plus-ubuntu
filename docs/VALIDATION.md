@@ -1791,3 +1791,45 @@ trial and remained unchanged. The recorded wake IRQ was213 (PMIC); that number
 alone does not identify an individual PMIC source. This is a bounded timed-wake
 result, not repeated physical-button/OSK acceptance or a declaration that all
 kernel errors are eliminated.
+
+### Kernel54 lock keyboard and normal session recovery
+
+The lock investigation captured `Argument descendant may not be null` in
+`keyboard.js` through the unlock dialog, and a disposed-input-device stack in
+automatic keyboard detection after X11 input refresh. The final overlay adds
+only a missing-actor guard and skips automatic device inspection when the
+accessibility keyboard is explicitly enabled. Native keyboard forwarding,
+the distro unlock dialog, screen locking and PAM are retained. No global
+event-forwarding replacement or credential handling is shipped.
+
+An experimental forced restart of the Shell service activated GNOME's
+failed-session target. The owner's white "Oh no!" screen was this failure UI;
+a running replacement Shell alone was insufficient to recover the session.
+Recovery used normal session shutdown and fresh touchscreen GDM/PAM login.
+The final installer never restarts Shell. Its root-owned files, GPU manifest,
+startup hashes and original-resource pins passed readback verification; the
+experimental unlock-dialog resource was removed. It rejects changed original
+GNOME resources until reviewed again after an update.
+
+Early blind-coordinate trials entered input before the keyboard was prepared,
+and sometimes used GDM entry coordinates for the different unlock layout. They
+do not establish a routing defect or validate the discarded broad forwarding
+prototype. The corrected private device harness waits for the actual protected
+entry's focus and visible numeric keyboard using accessibility metadata. It
+replays touchscreen events and verifies exactly one additional character per
+key, without reading protected text. The owner-provided secret and test payload
+remain outside Git. X11 root screenshots did not capture the actual composited
+lock surface and were not used as evidence of authentication state.
+
+With the final two-guard overlay loaded in a fresh normal session, touchscreen
+GDM/PAM login reached GNOME. A subsequent20.41-second suspend/resume, including
+setup and using a20-second RTC alarm, retained the same boot and Shell, restored
+the panel and kept the screen locked. The prepared OSK then accepted all touches
+without duplicate/lost characters, retained its numeric page and completed
+normal PAM unlock. The failed-session screen was absent. Kernel taint remained
+the pre-existing512; both the timed sleep and unlock intervals added zero kernel
+fault signatures. GNOME still mapped Mali, reported Mali-G71, owned the KMS card
+and retired60 frames without CPU pixel transfer. This bounded trial does not
+certify indefinite reliability, eliminate the previous DWC3 warning, or replace
+physical power-button wake acceptance. The generated-method fixture and JS/Python
+syntax checks also passed.
