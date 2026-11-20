@@ -1461,3 +1461,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   completion record. Desktop suspend remains gated pending verification.
 - Kernel45 restores Exynos power-domain hardware after a failed shutdown
   sequence and includes the SM-G955N desktop charger-mode touch opt-in.
+- Installed kernel45 and verified Exynos mode 8 unwind in the bounded core
+  diagnostic. Wi-Fi reconnected and the desktop touch device stayed enabled.
+- Kernel45's actual RTC deep-sleep trial did not yield a visible return
+  record. Wi-Fi activity also continues to prevent ordinary suspend entry.

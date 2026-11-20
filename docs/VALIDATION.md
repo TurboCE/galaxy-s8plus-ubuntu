@@ -1237,3 +1237,32 @@ SM-G955N opt-in. The forced restart booted into charger mode with GDM active,
 and kernel44 declined to bind the touchscreen. Kernel45 keeps the same
 DTB and ramdisk and adds only the charger touch argument to kernel config.
 All 102 Linux tests passed.
+
+Installed kernel45 from verified TWRP with the kernel44 BOOT backed up and
+readback and protected hashes checked. A new normal-mode boot verified the
+charger touch opt-in, bound FTS input, active GDM and zero kernel taint.
+This boot did not exercise the charger-mode exception.
+
+The first two attempted RTC suspend-to-idle runs returned EBUSY before
+noirq. With Wi-Fi associated, DHD reported active RX, control and event
+wake locks. After disconnecting only the managed `wlan0` link, control
+and event locks still blocked entry. Both attempts returned to the same
+boot and passed Wi-Fi gateway traffic, with touchscreen still enabled.
+
+Putting NetworkManager itself into temporary sleep also left RX and TX-flush
+wake locks active at PCI suspend entry. The request returned EBUSY and the
+original Wi-Fi connection recovered. These three cases do not qualify the
+ordinary GNOME suspend action while Wi-Fi is enabled.
+
+The radio-off `mem` core diagnostic completed on the same kernel45 boot.
+Its retained log shows Exynos mode 8 preparation and early-wake restore,
+with no platform sleep entry. Wi-Fi reconnected and passed gateway traffic.
+The touchscreen was still enabled, GDM was active and taint remained zero.
+This was the first observed successful core test in this comparison series.
+
+A subsequent real `mem` test with Wi-Fi temporarily off and RTC wake
+scheduled did not return a completion record over USB or either known
+Wi-Fi address after the alarm window. The USB port re-enumeration request
+was accepted but did not restore access. The retained record must be
+recovered to distinguish an entry failure from a wake or resume failure.
+Deep suspend and default GNOME sleep remain unqualified.
