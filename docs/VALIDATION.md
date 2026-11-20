@@ -1122,3 +1122,26 @@ found only the opt-in property on Exynos WLAN PCIe channel 0. The Linux host
 test suite passed all 102 tests. USB, Wi-Fi and TWRP were unreachable, so
 kernel42 remains uninstalled. Live PCIe warning, Wi-Fi reconnection and RTC
 resume results are pending, as is the retained record of kernel41 real sleep.
+
+### Recovered kernel41 deep-sleep record and live kernel42
+
+After the operator's forced restart, the kernel41 on-device report contained
+only the entry record with a programmed RTC alarm. The matching retained
+kernel log reached the end of noirq suspend, offlined the secondary CPUs and
+entered the Exynos SYS_SLEEP syscore configuration. It reports a DPU power
+domain shutdown error before that point. The segment ends without a resume
+record, followed by the bootloader's pin-reset report. An earlier, different
+RTC alarm fired while the phone was awake. Delivery of the full-test alarm
+and return from the platform sleep instruction are still unverified.
+
+Installed kernel42 from TWRP after backing up and verifying the kernel41 BOOT
+and protected partitions, then verified a new kernel42 boot over SSH. The
+forced restart had preserved the previous test's software radio-off state.
+Restored Wi-Fi and verified 5745 MHz association and manual reconnect, each
+with three gateway replies and interface-bound HTTPS 200. The radio-off
+platform diagnostic returned successfully on the same boot in 5.32 seconds,
+explicitly reconnected Wi-Fi and passed gateway traffic with zero taint.
+The matching live trace completed device, late and noirq phases with both
+previous PCI D3 warnings absent. GDM remained active and the touchscreen
+input device was enabled. The later `mem` diagnostic limited to `pm_test
+core` was armed, but did not yield a visible record over USB or Wi-Fi.

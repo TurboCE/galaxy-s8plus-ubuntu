@@ -1444,3 +1444,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Built kernel42 to defer generic PCI config access while the SM-G955N WLAN
   host is deliberately powered down for system sleep. The existing Exynos
   host and Broadcom resume paths still restore their saved configuration.
+- Recovered the kernel41 deep-sleep entry record following the manual reset.
+  Installed kernel42 and verified Wi-Fi reconnect and the complete device
+  suspend/resume diagnostic. The two PCIe D3 warnings were absent.
