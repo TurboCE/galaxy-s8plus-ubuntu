@@ -91,7 +91,7 @@ def install_audio(root, build):
         ['dpkg-query', '--admindir=' + str(root / 'var/lib/dpkg'), '-W',
          '-f=${Version}', 'libspa-0.2-modules'], text=True)
     if (record.get('ubuntu_source_version') != package
-            or record.get('hardware_open_scope') != 'g955n-rdma0-playback-ucm-v2'
+            or record.get('hardware_open_scope') != 'g955n-rdma0-wdma1-ucm-v3'
             or record.get('feature') != 'api.acp.disable-pro-audio'
             or record.get('exported_symbol_abi_matches') is not True
             or record.get('scope_patch_sha256') != digest(scope)

@@ -28,15 +28,15 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | Boot / storage / USB recovery | ADB authorized, stock 4.4.111; partition names readable | Repeated cold boot, logs, ext4 read/write, recovery path | FAILED stability: kernels22/24/25/26/27 suffered unexpected reset or hard hang. Last verified running kernel27 passed13 desktop DPMS cycles then hung; a later greeter boot also stopped responding. BOOT backups/full readbacks and protected-partition hashes were verified before authorized installations. Kernels28/29 build/pack but are not deployed; proposal32 is object-tested only. No current SSH/USB-console response. See kernel26-power-investigation.md and compiler-reference-comparison.md |
 | Display / touch | SurfaceFlinger active; input proc access denied | Correct resolution, touch coordinates, rotation, brightness | PARTIAL: persistent GDM account-tile repair passed owner-confirmed account touch, password and desktop entry after reboot on26, without injected Return/autologin. Native1440x2960 works; later27 actual PAM login also succeeds remotely. Screen-power hard hangs remain; physical touch latency, dynamic rotation and automatic brightness are unqualified |
 | GPU | Mali-G71, r16p0, GLES 3.2 renderer | EGL renderer Mali/Panfrost, actual rendered frames and sustained workload; reject llvmpipe | BOUNDED PASS for normal GNOME GLES/EGL rendering/composition: real Mali-G71 shell, private EGL/Exynos gralloc and no swrast; three client/overlay/calendar trials passed on26. Normal27 login also loads Mali. Overall objective remains PARTIAL because sustained stability and physical response latency are unqualified. XPutImage CPU copying remains; panel commit counts are not rendered FPS |
-| LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Not tested; owner reports no SIM |
+| LTE data | Telephony service dump collected privately | SIM registration, mobile-only DNS/HTTPS, reconnect after suspend | Kernel36 reports modem OFFLINE. Native modem boot and modem-control integration are pending; owner reports no SIM |
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: three explicit disconnect/reconnect cycles per band, each with bound-interface TLS HTTP 200 and 254968-byte download at 2467/5745 MHz; original profile restored, same boot. Full suspend/resume pending |
-| Bluetooth | Framework dump collected privately | Discovery, pairing, audio and reconnect | Partial: original-address controller RAM and 9 discovered devices; temporary ROM/H4 only, firmware/pairing/audio/resume pending |
+| Bluetooth | Framework dump collected privately | Discovery, pairing, audio and reconnect | Kernel36 BlueZ discovery received 18 BLE advertising reports with the ROM/H4 controller; firmware/pairing/audio/resume pending |
 | GPS / GNSS | Location service dump collected privately | Fresh outdoor fix with plausible coordinates and timestamps | Not tested |
 | Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Partial: LHD/MCU initialized and 220 native IIO records each with changing payloads/increasing timestamps; controlled motion, units, axes and desktop integration pending |
 | Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, pedometer, proximity, light and calibration | INCOMPLETE: one ambient-light event is not physical response acceptance. Magnetic/u64 accumulated-step parsers pass protocol fixtures but new live/physical measurements are pending. SensorProxy accel/light prototype builds but is uninstalled and lacks abrupt-termination recovery; stock HRM accelerometer misclassification is not an actual accel pass |
 | Cameras | Camera service dump collected privately | Front/rear preview, capture, video, autofocus and flash | Not tested |
-| Audio | Audio service dump collected privately | Speaker, earpiece, microphones, headphone jack and routing | Partial: normal RDMA0 2-second PCM progress passed, acoustic check postponed. Installed v2 scoped plugin exported Off/HiFi/speaker in a muted 21-second trial; both core/policy traces opened only pcmC0D0p. Default policy remains masked; microphone/headphone/kernel-fault acceptance pending |
+| Audio | Audio service dump collected privately | Speaker, earpiece, microphones, headphone jack and routing | Kernel36 GNOME playback and primary microphone capture passed through scoped RDMA0 and WDMA1. Audibility, microphone acoustic quality, other inputs/outputs and suspend recovery remain open |
 | Charging / battery / thermals | Power service dump collected privately | Current/voltage/temp telemetry, controlled charge and thermal limits | Not tested |
 | CPU scaling / idle | No measured Android baseline | Both cluster frequency response, idle residency, unchanged governor and thermal policy | Partial: bounded CPU0/CPU4 load completed, both frequencies changed and both idle states advanced, policy unchanged, peak observed 54 C. Battery draw/full thermal/suspend qualification pending |
 | Suspend / resume | No Ubuntu evidence | Measured idle draw, wake sources, repeated resume with radio/GPU recovery | Not tested |
@@ -887,3 +887,32 @@ Every trial restored the controls. The remaining failure is past ALSA route
 selection. Whether samples reach the ABOX DSP and whether WDMA0 starts a
 transfer are still unverified.
 The kernel remained on the same boot with taint 0 during these checks.
+
+### Kernel36 native microphone and modem diagnosis
+
+The mounted stock Android mixer selects UAIF0 into NSRC0 for AP recording.
+Its base controls route NSRC0 via SPUM ASRC1 and SIFM0 to WDMA1. With that
+route and the stock codec HPF setting, a bounded native ALSA read delivered
+48,000 frames with 36 distinct hardware-pointer values. Both channels carried
+the same primary-microphone signal. The recorder kept samples in RAM and
+restored the touched mixer controls.
+
+The v3 private ALSA module and HiFi microphone route were installed in the
+standard GNOME session. `pw-record` used the default internal source, with
+48 kHz S16 interleaved read/write access, 34 distinct WDMA1 hardware-pointer
+positions and 520,192 bytes captured during a bounded three-second trial.
+The ordinary PipeWire speaker completed two seconds and showed 26 distinct
+RDMA0 positions afterward. Successful PCM opens were confined to card 0,
+device 0 playback and device 9 capture. The boot stayed unchanged and taint
+stayed 0. Listening quality and microphone calibration were not measured.
+
+The modem driver's read-only state was OFFLINE. The SIPC nodes and network
+interfaces are registered before the modem boots. The stock image contains
+Samsung's CP bootstrap daemon and RIL, and static inspection of the daemon
+shows paths into modem boot and NV storage. No bootstrap was run. ModemManager
+still needs a compatible control transport once modem boot is implemented.
+See [ModemManager port detection](https://modemmanager.org/docs/modemmanager/port-and-device-detection/).
+
+A separate nine-second BlueZ discovery trial returned 18 BLE advertising
+reports at the HCI layer and restored idle discovery state. It did not
+observe classic inquiry results or attempt pairing.

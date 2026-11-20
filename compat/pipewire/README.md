@@ -352,10 +352,20 @@ Global WirePlumber activation remains masked until fuller qualification.
 ### Ubuntu image integration
 
 `scripts/build_rootfs.py --audio-build DIRECTORY` optionally stages
-the matching reviewed speaker ABI in a private SPA tree and enables
+the matching reviewed audio ABI in a private SPA tree and enables
 the standard WirePlumber service for the Ubuntu desktop account. The
 directory contains the native build's `build.json` and `libspa-alsa.so`.
 The installer checks the two startup guards, distro package version and
 both plugin hashes before removing the mask. Without this explicit
-input, the image keeps WirePlumber masked. Speaker acoustic and
-microphone acceptance are separate runtime work.
+input, the image keeps WirePlumber masked.
+
+### WDMA1 microphone scope, v3
+
+Stage `pipewire-1.0.5-scoped-v3` from the authenticated source with `0001`
+and `0002` applied. Run `build-alsa-plugin-native.py --g955n-scope` and use
+`candidate-scoped-v3` for image staging. The runtime manifest requires
+`hardware_open_scope=g955n-rdma0-wdma1-ucm-v3`. The policy verifies the
+card and exact PCM ID before opening RDMA0 playback or WDMA1 capture.
+The HiFi microphone sends the main digital mic to both PCM channels
+through UAIF0, NSRC0 and SIFM0. Normal PipeWire playback and capture have
+passed on kernel36 with no partition changes. See [hardware validation](../../docs/VALIDATION.md).

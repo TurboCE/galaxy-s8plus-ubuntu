@@ -4,8 +4,8 @@ Subject: [PATCH] alsa: scope native G955N opens before PCM probing
 Local development-port restriction; not an upstream portability policy.
 Requires 0001 disable-pro-audio backport. Hardware control identity is checked
 before UCM/ACP probes and again at every production PCM open entry point.
-Only isolated type-hw RDMA0 playback on the verified primary card is supported.
-Debug/unknown cards, capture/call/realtime and aliases are refused.
+Allow only direct RDMA0 playback and WDMA1 capture on the verified primary card.
+Debug cards, other PCM endpoints and aliases are refused.
 Accept only the actual ALSA UCM _ucmXXXX. namespace before a direct-hw
 address, without consulting its configuration. The suffix still passes all
 hardware/PCM/direction checks. Control and PCM opens use separate minimal
@@ -30,7 +30,7 @@ ALSA configuration cannot redirect the checked endpoint.
 +	int res, g955n_scope;
 +
 +	g955n_scope = g955n_scope_index(index);
-+	pa_log_info("G955N g955n-rdma0-playback-ucm-v2 card=%u scope=%d", index, g955n_scope);
++	pa_log_info("G955N g955n-rdma0-wdma1-ucm-v3 card=%u scope=%d", index, g955n_scope);
 +	if (g955n_scope != G955N_PRIMARY) {
 +		errno = g955n_scope < 0 ? -g955n_scope : EPERM;
 +		return NULL;
@@ -125,7 +125,7 @@ ALSA configuration cannot redirect the checked endpoint.
  		if ((err = spa_system_timerfd_create(state->data_system,
 --- /dev/null
 +++ b/spa/plugins/alsa/g955n-scope.h
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,209 @@
 +/* SPDX-License-Identifier: MIT
 + * SM-G955N native-port boundary before every production PCM open.
 + * All hw control/PCM resolution uses private minimal ALSA configuration roots.
@@ -157,9 +157,34 @@ ALSA configuration cannot redirect the checked endpoint.
 +    return n > 0 && strstr(model, "SM-G955N") != NULL;
 +}
 +
++static inline int g955n_scope_pcm_identity(snd_ctl_t *ctl, int card,
++        unsigned int device, snd_pcm_stream_t stream)
++{
++    snd_pcm_info_t *pcm;
++    snd_pcm_info_alloca(&pcm);
++    snd_pcm_info_set_device(pcm, device);
++    snd_pcm_info_set_subdevice(pcm, 0);
++    snd_pcm_info_set_stream(pcm, stream);
++    int r = snd_ctl_pcm_info(ctl, pcm);
++    if (r < 0)
++        return r;
++
++    const char *expected = stream == SND_PCM_STREAM_PLAYBACK ? "RDMA0 (*)" : "WDMA1 (*)";
++    if (snd_pcm_info_get_card(pcm) != card ||
++        snd_pcm_info_get_device(pcm) != device ||
++        snd_pcm_info_get_subdevice(pcm) != 0 ||
++        snd_pcm_info_get_stream(pcm) != stream ||
++        strcmp(snd_pcm_info_get_id(pcm), expected) ||
++        strcmp(snd_pcm_info_get_name(pcm), "") ||
++        snd_pcm_info_get_subdevices_count(pcm) != 1)
++        return -EPERM;
++    return 0;
++}
++
 +/* No global config update, user .asoundrc, aliases or hooks are evaluated.
 + * selector is validated by the caller before interpolation. */
-+static inline int g955n_scope_card(const char *selector, int *actual_card)
++static inline int g955n_scope_card(const char *selector, int *actual_card,
++        unsigned int device, snd_pcm_stream_t stream)
 +{
 +    snd_ctl_t *ctl = NULL;
 +    snd_config_t *config = NULL;
@@ -191,21 +216,9 @@ ALSA configuration cannot redirect the checked endpoint.
 +                !strcmp(longname, "Exynos8895-Madera") &&
 +                !strcmp(id, "Exynos8895Mader") ? G955N_PRIMARY : -EPERM;
 +            if (r == G955N_PRIMARY) {
-+                snd_pcm_info_t *pcm;
-+                snd_pcm_info_alloca(&pcm);
-+                snd_pcm_info_set_device(pcm, 0);
-+                snd_pcm_info_set_subdevice(pcm, 0);
-+                snd_pcm_info_set_stream(pcm, SND_PCM_STREAM_PLAYBACK);
-+                int e = snd_ctl_pcm_info(ctl, pcm);
-+                if (e < 0) r = e;
-+                else if (snd_pcm_info_get_card(pcm) != card ||
-+                    snd_pcm_info_get_device(pcm) != 0 ||
-+                    snd_pcm_info_get_subdevice(pcm) != 0 ||
-+                    snd_pcm_info_get_stream(pcm) != SND_PCM_STREAM_PLAYBACK ||
-+                    strcmp(snd_pcm_info_get_id(pcm), "RDMA0 (*)") ||
-+                    strcmp(snd_pcm_info_get_name(pcm), "") ||
-+                    snd_pcm_info_get_subdevices_count(pcm) != 1)
-+                    r = -EPERM;
++                int e = g955n_scope_pcm_identity(ctl, card, device, stream);
++                if (e < 0)
++                    r = e;
 +            }
 +        } else if (debug)
 +            r = !strcmp(driver, "abox_dump") && !strcmp(name, "abox_dump") &&
@@ -222,10 +235,10 @@ ALSA configuration cannot redirect the checked endpoint.
 +    char selector[32];
 +    if (!g955n_scope_model()) return -ENODEV;
 +    snprintf(selector, sizeof(selector), "%u", index);
-+    return g955n_scope_card(selector, NULL);
++    return g955n_scope_card(selector, NULL, 0, SND_PCM_STREAM_PLAYBACK);
 +}
 +
-+/* ALSA 1.2.11 UCM main.c prefixes local PlaybackPCM values with
++/* ALSA 1.2.11 UCM main.c prefixes local PCM values with
 + * "_ucm%04X.". utils.c:uc_mgr_alibcfg_by_device requires the dot at
 + * byte eight and parses exactly four hex digits; support that actual wire
 + * syntax, rather than extrapolating printf minimum width to larger IDs.
@@ -278,11 +291,13 @@ ALSA configuration cannot redirect the checked endpoint.
 +        if (errno) return -EPERM;
 +    }
 +    if (*end || target->pcm > 0x7fffffffUL || target->sub > 0x7fffffffUL) return -EPERM;
-+    target->scope = g955n_scope_card(selector, &target->card);
++    if (target->sub != 0 ||
++        !((stream == SND_PCM_STREAM_PLAYBACK && target->pcm == 0) ||
++          (stream == SND_PCM_STREAM_CAPTURE && target->pcm == 9)))
++        return -EPERM;
++    target->scope = g955n_scope_card(selector, &target->card, target->pcm, stream);
 +    if (target->scope < 0) return target->scope;
 +    if (target->scope != G955N_PRIMARY) return -EPERM;
-+    if (target->scope == G955N_PRIMARY &&
-+        (target->pcm != 0 || target->sub != 0 || stream != SND_PCM_STREAM_PLAYBACK)) return -EPERM;
 +    return 0;
 +}
 +

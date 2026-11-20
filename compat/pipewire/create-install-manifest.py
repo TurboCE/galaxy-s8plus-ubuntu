@@ -22,7 +22,7 @@ def main():
     if (record.get('ubuntu_source_version') != '1.0.5-1ubuntu3.3'
             or record.get('feature') != 'api.acp.disable-pro-audio'
             or not record.get('exported_symbol_abi_matches')
-            or record.get('hardware_open_scope') != 'g955n-rdma0-playback-ucm-v2'
+            or record.get('hardware_open_scope') != 'g955n-rdma0-wdma1-ucm-v3'
             or len(record.get('scope_patch_sha256', '')) != 64):
         raise SystemExit('Build record does not match the reviewed candidate')
     stage = args.stage_root.resolve()

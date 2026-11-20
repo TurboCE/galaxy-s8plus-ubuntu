@@ -1400,3 +1400,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added a one-time snapshot of the active codec and ABOX capture route to
   the bounded WDMA0 diagnostic. The probe now declines to change mixer
   controls when built-in speaker playback is already active.
+- Switched the internal microphone to the working stock SIFM0/WDMA1 route.
+  Added its UCM device and enabled it as the standard GNOME audio input.
+  Updated the private ALSA module to allow only RDMA0 playback and WDMA1
+  capture. Verified both in the default desktop audio services.

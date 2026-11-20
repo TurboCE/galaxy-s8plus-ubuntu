@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded native G955N WDMA0/main-microphone diagnostic.
+"""Bounded native G955N WDMA1/main-microphone diagnostic.
 
 Requires explicit initialization. Records at most three seconds into RAM only,
 retains numeric signal/PCM diagnostics, and restores every touched mixer value.
@@ -25,9 +25,8 @@ CAPTURE_WIDGETS = {
     'dapm': ('DMIC1',),
     'codec:cs47l92-codec/dapm': ('MICBIAS1A', 'IN3L PGA', 'LHPF1', 'ASRC1IN1L',
                                 'AIF1TX1', 'AIF1TX2', 'AIF1 Capture'),
-    'codec:13e50000.abox/dapm': ('ABOX UAIF0 Capture', 'ABOX NSRC0', 'ABOX RSRC0',
-                                 'ABOX PIFS0', 'ABOX RECP', 'ABOX SPUM ASRC0',
-                                 'ABOX WDMA0 Capture'),
+    'codec:13e50000.abox/dapm': ('ABOX UAIF0 Capture', 'ABOX NSRC0', 'ABOX SPUM ASRC1',
+                               'ABOX SIFM0', 'ABOX WDMA1 Capture'),
 }
 
 
@@ -114,24 +113,24 @@ def main():
         raise SystemExit('Requires root on the native SM-G955N Ubuntu kernel')
     if 'Exynos8895-Madera' not in read_text('/proc/asound/cards'):
         raise SystemExit('Unexpected ALSA card; no controls changed')
-    if not re.search(r'^00-08:.*capture', read_text('/proc/asound/pcm'), re.M):
-        raise SystemExit('WDMA0 capture PCM is not registered; no controls changed')
+    if not re.search(r'^00-09:.*capture', read_text('/proc/asound/pcm'), re.M):
+        raise SystemExit('WDMA1 capture PCM is not registered; no controls changed')
     playback_status = Path('/proc/asound/card0/pcm0p/sub0/status')
     if read_text(playback_status).strip() != 'closed':
         raise SystemExit('RDMA0 playback is not idle; no controls changed')
-    status_dir = Path('/proc/asound/card0/pcm8c/sub0')
+    status_dir = Path('/proc/asound/card0/pcm9c/sub0')
     try:
         initial_status = (status_dir / 'status').read_text().strip()
     except FileNotFoundError:
         raise SystemExit('Unsupported diagnostic: ALSA status absent; enable '
                          'CONFIG_SND_VERBOSE_PROCFS. No controls changed')
     except OSError as error:
-        raise SystemExit(f'Cannot read WDMA0 status: {error}; no controls changed')
+        raise SystemExit(f'Cannot read WDMA1 status: {error}; no controls changed')
     if initial_status != 'closed':
         state = re.search(r'^state:\s*(\S+)', initial_status, re.M)
         if state:
-            raise SystemExit(f'WDMA0 is busy (state={state.group(1)}); no controls changed')
-        raise SystemExit('Unsupported WDMA0 status; no controls changed')
+            raise SystemExit(f'WDMA1 is busy (state={state.group(1)}); no controls changed')
+        raise SystemExit('Unsupported WDMA1 status; no controls changed')
     destination = args.output_dir.absolute()
     if (destination.parent != Path('/var/tmp')
             or not destination.name.startswith('g955n-mic-')
@@ -142,19 +141,18 @@ def main():
     signal.signal(signal.SIGTERM, interrupt)
     signal.signal(signal.SIGINT, interrupt)
     routes = [
-        ('ABOX Sampling Rate Recp', '48000'),
+        ('ABOX Sampling Rate Inmux0', '48000'),
         ('ABOX NSRC0', 'UAIF0'),
-        ('ABOX RSRC0', 'NSRC0'),
-        ('ABOX RECP PIFS1', '0'),
-        ('ABOX RECP PIFS0', '1'),
-        ('ABOX SPUM ASRC0', 'On'),
+        ('ABOX SPUM ASRC1', 'On'),
+        ('ABOX SIFM0', 'WDMA'),
+        ('IN3L HPF Switch', '1'),
         ('LHPF1 Input 1', 'IN3L'),
         ('ASRC1IN1L Input 1', 'LHPF1'),
         ('AIF1TX1 Input 1', 'ASRC1IN1L'),
         ('AIF1TX2 Input 1', 'ASRC1IN1L'),
         ('DMIC1 Switch', '1'),
     ]
-    report = dict(kernel=platform.release(), pcm='hw:0,8', seconds=args.seconds,
+    report = dict(kernel=platform.release(), pcm='hw:0,9', seconds=args.seconds,
                   access='mmap' if args.mmap else 'rw', rate=48000, channels=2,
                   expected_frames=48000 * args.seconds,
                   physical_signal_verified=False, controls_restored=False,
@@ -176,7 +174,7 @@ def main():
         for name, value in routes:
             saved.append((name, original[name]['value']))
             mixer(name, value)
-        command = ['arecord', '-D', 'hw:0,8', '-f', 'S16_LE', '-r', '48000',
+        command = ['arecord', '-D', 'hw:0,9', '-f', 'S16_LE', '-r', '48000',
                    '-c', '2', '-t', 'raw', '-d', str(args.seconds)]
         if args.mmap:
             command.append('--mmap')

@@ -25,8 +25,8 @@ PATCHED_HASHES = {
 }
 
 
-SCOPED_HASHES = {'spa/plugins/alsa/alsa-pcm.c': '09380f2a78c14f8bd481ee9a9d992aca22b552d07baf183d177648723e31988e', 'spa/plugins/alsa/acp/acp.c': '407e5ef8ad4705a96c0cc7da01a8bbb3f8001ef318895af7e6fe9fb8c66b2008', 'spa/plugins/alsa/acp/alsa-util.c': '0236d625fbf4d7f4e7598d0e63af3b6aa2ccf997ba77cb4a567b58dce53ab4c6', 'spa/plugins/alsa/g955n-scope.h': 'ce1251d627b2a91823f2bb1f49c53f6c0c9378e3764d0dc8d8719ad482bb632e'}
-SCOPE_PATCH_SHA256 = '8f2edae1cfbe22f243011f691eb20eebe8a563f3f2347141297f8aa3f867031a'
+SCOPED_HASHES = {'spa/plugins/alsa/alsa-pcm.c': '09380f2a78c14f8bd481ee9a9d992aca22b552d07baf183d177648723e31988e', 'spa/plugins/alsa/acp/acp.c': '25b7d494bdf7d88cb35abfdad1201f7ae8defcb7911170a816274ad9c06a258f', 'spa/plugins/alsa/acp/alsa-util.c': '0236d625fbf4d7f4e7598d0e63af3b6aa2ccf997ba77cb4a567b58dce53ab4c6', 'spa/plugins/alsa/g955n-scope.h': '2c47b7afb35b15eba8ea231b7fdedbd22dbec457bd0dddacb58562e9e04d83f0'}
+SCOPE_PATCH_SHA256 = '5391f08dfffdaa048e2029a0b5a25cbe38130b7f25ac222bc3604d4cdc03ae19'
 
 def digest(path):
     with Path(path).open('rb') as source:
@@ -62,7 +62,7 @@ def main():
     for name, expected in SOURCE_HASHES.items():
         if digest(work / name) != expected:
             raise SystemExit('Authenticated source archive checksum mismatch: ' + name)
-    source = work / ('pipewire-1.0.5-scoped-v2' if args.g955n_scope else 'pipewire-1.0.5')
+    source = work / ('pipewire-1.0.5-scoped-v3' if args.g955n_scope else 'pipewire-1.0.5')
     checked_hashes = SCOPED_HASHES if args.g955n_scope else PATCHED_HASHES
     for name, expected in checked_hashes.items():
         if digest(source / name) != expected:
@@ -80,8 +80,8 @@ def main():
         if shutil.which(command) is None:
             raise SystemExit('Missing build dependency: ' + command)
     subprocess.run(['pkg-config', '--exists', 'alsa', 'libudev'], check=True)
-    build = work / ('build-alsa-scoped-v2' if args.g955n_scope else 'build-alsa')
-    candidate = work / ('candidate-scoped-v2' if args.g955n_scope else 'candidate')
+    build = work / ('build-alsa-scoped-v3' if args.g955n_scope else 'build-alsa')
+    candidate = work / ('candidate-scoped-v3' if args.g955n_scope else 'candidate')
     candidate.mkdir(mode=0o700, exist_ok=True)
     environment = dict(os.environ, DEB_BUILD_MAINT_OPTIONS='hardening=+all',
                        DEB_LDFLAGS_MAINT_APPEND='-Wl,-z,defs')
@@ -123,7 +123,7 @@ def main():
         upstream_backport='a8b9ce2050dfb3f91c19061562d0a161117c3ab8',
         feature='api.acp.disable-pro-audio', source_archives=SOURCE_HASHES,
         patched_source_files=checked_hashes, ubuntu_patch_series=applied,
-        hardware_open_scope=("g955n-rdma0-playback-ucm-v2" if args.g955n_scope else None),
+        hardware_open_scope=("g955n-rdma0-wdma1-ucm-v3" if args.g955n_scope else None),
         scope_patch_sha256=(SCOPE_PATCH_SHA256 if args.g955n_scope else None),
         compiler_flags={key: environment[key] for key in ('CPPFLAGS', 'CFLAGS', 'CXXFLAGS', 'LDFLAGS')},
         candidate_sha256=digest(plugin), original_plugin_sha256=digest(original),

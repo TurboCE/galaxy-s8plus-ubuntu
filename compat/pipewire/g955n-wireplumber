@@ -89,7 +89,7 @@ def check():
     manifest = json.loads(MANIFEST.read_text())
     if manifest.get('feature') != 'api.acp.disable-pro-audio':
         raise ValueError('Missing reviewed ALSA probe-control feature attestation')
-    if manifest.get('hardware_open_scope') != 'g955n-rdma0-playback-ucm-v2':
+    if manifest.get('hardware_open_scope') != 'g955n-rdma0-wdma1-ucm-v3':
         raise ValueError('Missing reviewed hardware PCM-open scope attestation')
     if len(manifest.get('scope_patch_sha256', '')) != 64:
         raise ValueError('Missing reviewed scope patch hash')
