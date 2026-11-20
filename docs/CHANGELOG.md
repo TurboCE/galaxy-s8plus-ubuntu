@@ -1404,3 +1404,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Added its UCM device and enabled it as the standard GNOME audio input.
   Updated the private ALSA module to allow only RDMA0 playback and WDMA1
   capture. Verified both in the default desktop audio services.
+- Traced a missing touchscreen on kernel36 to the bootloader's charger
+  mode. Built kernel37 with an explicit SM-G955N desktop opt-in for the
+  regular touchscreen probe during charger boot. Verified the build and
+  matching ramdisk/DTB. Live charger-mode validation remains pending.

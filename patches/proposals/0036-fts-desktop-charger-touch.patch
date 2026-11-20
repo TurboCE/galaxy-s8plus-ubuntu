@@ -1,0 +1,47 @@
+Subject: Allow SM-G955N desktop touch in an explicit charger boot
+
+A charger-mode start can currently reach Ubuntu GDM with FTS unbound.
+Provide an SM-G955N-only opt-in for the FTS probe when the boot image
+deliberately runs the desktop. Leave lpcharge and all battery policy
+and stock boot behavior alone. The regular FTS probe still owns all
+power, firmware, IRQ and initialization checks.
+
+--- a/drivers/input/touchscreen/stm/fts_ts.c
++++ b/drivers/input/touchscreen/stm/fts_ts.c
+@@ -2811,6 +2811,27 @@
+ 	input_set_drvdata(dev, info);
+ }
+ 
++#ifdef CONFIG_BATTERY_SAMSUNG
++/* A native desktop may choose to start during a charger-mode boot. */
++static bool g955n_desktop_charger_touch;
++
++static int __init fts_desktop_charger_touch_setup(char *value)
++{
++	g955n_desktop_charger_touch = !strcmp(value, "1");
++	return 1;
++}
++__setup("g955n.desktop_charger_touch=", fts_desktop_charger_touch_setup);
++
++static bool fts_allow_charger_touch(void)
++{
++	const char *model;
++
++	return g955n_desktop_charger_touch &&
++		!of_property_read_string(of_root, "model", &model) &&
++		strstr(model, "SM-G955N");
++}
++#endif
++
+ static int fts_probe(struct i2c_client *client, const struct i2c_device_id *idp)
+ {
+ 	int retval;
+@@ -2825,7 +2846,7 @@
+ 		return -EIO;
+ 	}
+ #ifdef CONFIG_BATTERY_SAMSUNG
+-	if (lpcharge == 1) {
++	if (lpcharge == 1 && !fts_allow_charger_touch()) {
+ 		input_err(true, &client->dev, "%s: Do not load driver due to : lpm %d\n",
+ 			 __func__, lpcharge);
+ 		return -ENODEV;

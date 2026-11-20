@@ -35,3 +35,18 @@ preparation was verified before GDM. This new ordinary GNOME shell reports
 Mali-G71, loads private EGL/Mali/Exynos gralloc without swrast, and passes three
 client/overlay/calendar trials. The former software-fallback boundary above
 applies to the earlier kernel25 login, not this kernel26 session.
+
+## Kernel36 charger-mode boot
+
+One kernel36 boot reached GDM with no touchscreen input device. The
+bootloader supplied `androidboot.mode=charger`, and the STM touchscreen
+driver logged that it skipped probing in low-power charging mode. An
+ordinary warm reboot removed that mode, restored `sec_touchscreen`, and
+allowed a touch event to open the real GDM password conversation.
+
+Proposal0036 lets an SM-G955N desktop image explicitly enable the ordinary
+STM touchscreen probe during a charger-mode boot. It leaves the battery
+driver's charging mode in effect. Kernel37 built and packed with the flag.
+Its Korean DTB and external ramdisk match kernel36, and the linked builtin
+LZ4 initramfs passed validation. Charger-mode behavior has yet to be tested
+with the candidate installed.

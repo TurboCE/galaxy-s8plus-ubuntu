@@ -9,13 +9,20 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 
-def make_wfi_config(text):
+def append_builtin_argument(text, argument):
     lines=[line for line in text.splitlines() if line.startswith('CONFIG_CMDLINE=')]
     if len(lines)!=1:raise ValueError('Expected one built-in command line')
     old=lines[0];cmdline=json.loads(old.split('=',1)[1])
-    if 'cpuidle.off=' in cmdline:raise ValueError('Existing idle override')
-    new='CONFIG_CMDLINE='+json.dumps(cmdline+' cpuidle.off=1')
+    name=argument.split('=',1)[0]
+    if any(item.split('=',1)[0]==name for item in cmdline.split()):
+        raise ValueError('Built-in command line already supplies '+name)
+    new='CONFIG_CMDLINE='+json.dumps(cmdline+' '+argument)
     return text.replace(old+'\n',new+'\n',1)
+
+
+def make_wfi_config(text):
+    return append_builtin_argument(text, 'cpuidle.off=1')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -33,6 +40,8 @@ def main():
                         help='Freeze battery work and enable bounded PM-stage tests')
     parser.add_argument('--pmic-wake-irq', action='store_true', help='Keep the Exynos8895 S2MPS17 wake IRQ available in suspend')
     parser.add_argument('--dpp-shared-dma', action='store_true', help='Map the shared Exynos8895 DPP DMA register block once')
+    parser.add_argument('--desktop-charger-touch', action='store_true',
+                        help='Allow SM-G955N FTS touch when this native image boots Ubuntu in charger mode')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -47,6 +56,8 @@ def main():
         parser.error('Suspend candidates require an explicit --build-version')
     if args.abox_suspend_irq_order and (not args.audio_safety or not args.suspend_battery_diagnostic):
         parser.error('--abox-suspend-irq-order requires --audio-safety and --suspend-battery-diagnostic')
+    if args.desktop_charger_touch and not args.build_version:
+        parser.error('--desktop-charger-touch requires an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -78,6 +89,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0034-freeze-sec-battery-workqueue.patch')
     if args.abox_suspend_irq_order:
         patchfiles.append(ROOT/'patches/proposals/0035-abox-suspend-irq-order.patch')
+    if args.desktop_charger_touch:
+        patchfiles.append(ROOT/'patches/proposals/0036-fts-desktop-charger-touch.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -91,6 +104,7 @@ def main():
             'audio_safety':args.audio_safety,
             'abox_suspend_irq_order':args.abox_suspend_irq_order,
             'dpp_shared_dma':args.dpp_shared_dma,
+            'desktop_charger_touch':args.desktop_charger_touch,
             'pmic_wake_irq':args.pmic_wake_irq,
             'suspend_battery_diagnostic':args.suspend_battery_diagnostic,
             'native_panel_safety':args.native_panel_safety,
@@ -114,12 +128,17 @@ def main():
         'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig',
         'cmp /work/out/.config /port/artifacts/kernel-audio-proc/kernel.config',
     ]
-    if args.wfi_only:
-        baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
-        (output/'wfi.config').write_text(make_wfi_config(baseline))
-        commands += ['cp /output/wfi.config /work/out/.config',
+    if args.wfi_only or args.desktop_charger_touch:
+        boot_config=baseline
+        if args.wfi_only:
+            boot_config=make_wfi_config(boot_config)
+        if args.desktop_charger_touch:
+            boot_config=append_builtin_argument(boot_config, 'g955n.desktop_charger_touch=1')
+        config_name='boot-options.config' if args.desktop_charger_touch else 'wfi.config'
+        (output/config_name).write_text(boot_config)
+        commands += [f'cp /output/{config_name} /work/out/.config',
                      'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig',
-                     'cmp /work/out/.config /output/wfi.config']
+                     f'cmp /work/out/.config /output/{config_name}']
     if args.suspend_battery_diagnostic:
         commands += ['bash scripts/config --file /work/out/.config -e PM_DEBUG',
                      'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig']
