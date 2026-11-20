@@ -1266,3 +1266,25 @@ Wi-Fi address after the alarm window. The USB port re-enumeration request
 was accepted but did not restore access. The retained record must be
 recovered to distinguish an entry failure from a wake or resume failure.
 Deep suspend and default GNOME sleep remain unqualified.
+
+### Kernel46 Broadcom system-suspend work drain
+
+The kernel45 connected association, interface disconnect and NetworkManager
+sleep comparisons all stopped in the ordinary DHD PCI suspend callback,
+before the noirq or Exynos platform paths. In the NetworkManager case the
+PCI callback returned EBUSY in 19 microseconds with active RX and TX-flush
+holds. Thus the radio's system-sleep preparation still needs to cope with
+in-flight work even after the desktop asks NetworkManager to sleep.
+
+Proposal0046 waits no longer than the existing 1500 ms DHD event timeout
+before taking the bus lock and starting the suspend transition. It polls
+without clearing any wake lock. The existing wake-lock check, bus-idle
+check and firmware D3 handshake still decide whether suspend can proceed.
+The runtime PM path keeps its current behavior. This is a separate test
+candidate from the Exynos deep-sleep wake path.
+
+Kernel46 compiled and packed with the same configuration, DTB and ramdisk
+as kernel45. The Linux test suite passed all 102 tests. USB, Wi-Fi and TWRP
+remained unreachable, so kernel46 has no installation or live suspend
+result. The retained log from the previous kernel45 real `mem` test has
+not been recovered.

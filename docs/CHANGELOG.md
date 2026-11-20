@@ -1465,3 +1465,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   diagnostic. Wi-Fi reconnected and the desktop touch device stayed enabled.
 - Kernel45's actual RTC deep-sleep trial did not yield a visible return
   record. Wi-Fi activity also continues to prevent ordinary suspend entry.
+- Added a bounded Broadcom system-suspend drain for transient wake locks.
+  Kept all existing wake-lock checks and the firmware D3 handshake.

@@ -1,0 +1,89 @@
+Subject: Give Broadcom wake locks time to drain before system suspend
+
+The SM-G955N system PM callback rejects suspend immediately when the
+firmware still has pending work or a short wake lock from completed
+traffic. Wait for up to the existing event timeout before marking the
+bus busy, so the live interrupt and event workers can finish. Keep all
+existing bus, wake-lock and D3 checks, and leave runtime PM unchanged.
+
+--- a/drivers/net/wireless/bcmdhd4361/dhd.h
++++ b/drivers/net/wireless/bcmdhd4361/dhd.h
+@@ -1848,6 +1848,7 @@
+ extern bool dhd_os_check_if_up(dhd_pub_t *pub);
+ extern int dhd_os_check_wakelock(dhd_pub_t *pub);
+ extern int dhd_os_check_wakelock_all(dhd_pub_t *pub);
++extern void dhd_os_wait_for_system_suspend_locks(dhd_pub_t *pub);
+ extern int dhd_get_instance(dhd_pub_t *pub);
+ #ifdef CUSTOM_SET_CPUCORE
+ extern void dhd_set_cpucore(dhd_pub_t *dhd, int set);
+--- a/drivers/net/wireless/bcmdhd4361/dhd_linux.c
++++ b/drivers/net/wireless/bcmdhd4361/dhd_linux.c
+@@ -32,6 +32,8 @@
+ #include <linuxver.h>
+ #include <osl.h>
++#include <linux/delay.h>
++#include <linux/jiffies.h>
+ #ifdef SHOW_LOGTRACE
+ #include <linux/syscalls.h>
+ #include <event_log.h>
+ #endif /* SHOW_LOGTRACE */
+@@ -17311,8 +17313,7 @@
+ 	return 0;
+ }
+ 
+-int
+-dhd_os_check_wakelock_all(dhd_pub_t *pub)
++static int dhd_os_wake_locks_active(dhd_pub_t *pub, bool report)
+ {
+ #if defined(CONFIG_HAS_WAKELOCK) || (defined(BCMSDIO) && (LINUX_VERSION_CODE > \
+ 	KERNEL_VERSION(2, 6, 36)))
+@@ -17350,18 +17351,32 @@
+ 	lock_active = (l1 || l2 || l3 || l4 || l5 || l6 || l7 || l8 || l9);
+ 
+ 	/* Indicate to the Host to avoid going to suspend if internal locks are up */
+-	if (lock_active) {
++	if (lock_active && report)
+ 		DHD_ERROR(("%s wakelock c-%d wl-%d wd-%d rx-%d "
+ 			"ctl-%d intr-%d scan-%d evt-%d, pm-%d, txfl-%d\n",
+-			__FUNCTION__, c, l1, l2, l3, l4, l5, l6, l7, l8, l9));
+-		return 1;
+-	}
++			"dhd_os_check_wakelock_all", c, l1, l2, l3, l4, l5, l6, l7, l8, l9));
++	return lock_active;
+ #elif defined(BCMSDIO) && (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 36))
+ 	if (dhd && (dhd->wakelock_counter > 0) && dhd_bus_dev_pm_enabled(pub)) {
+ 		return 1;
+ 	}
+ #endif /* defined(BCMSDIO) && (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 36)) */
+ 	return 0;
++}
++
++int dhd_os_check_wakelock_all(dhd_pub_t *pub)
++{
++	return dhd_os_wake_locks_active(pub, true);
++}
++
++void dhd_os_wait_for_system_suspend_locks(dhd_pub_t *pub)
++{
++	unsigned long deadline = jiffies + msecs_to_jiffies(DHD_EVENT_TIMEOUT_MS);
++
++	/* No bus lock is held, so in-flight firmware and RX work can finish. */
++	while (dhd_os_wake_locks_active(pub, false) &&
++	       time_before(jiffies, deadline))
++		msleep(20);
+ }
+ 
+ int net_os_wake_unlock(struct net_device *dev)
+--- a/drivers/net/wireless/bcmdhd4361/dhd_pcie_linux.c
++++ b/drivers/net/wireless/bcmdhd4361/dhd_pcie_linux.c
+@@ -392,6 +392,10 @@
+ 		return ret;
+ 	}
+ 
++	if (!READ_ONCE(bus->dhd->dongle_reset) &&
++	    READ_ONCE(bus->dhd->busstate) == DHD_BUS_DATA)
++		dhd_os_wait_for_system_suspend_locks(bus->dhd);
++
+ 	DHD_GENERAL_LOCK(bus->dhd, flags);
+ 	if (!DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
+ 		DHD_ERROR(("%s: Bus not IDLE!! dhd_bus_busy_state = 0x%x\n",

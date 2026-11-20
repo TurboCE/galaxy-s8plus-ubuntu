@@ -60,6 +60,8 @@ def main():
                         help='Use the Exynos early-wake sequence for prepared but unentered sleep')
     parser.add_argument('--exynos-restore-failed-domain-off', action='store_true',
                         help='Restore Exynos local hardware and saved registers after domain off fails')
+    parser.add_argument('--dhd-system-suspend-drain', action='store_true',
+                        help='Allow a bounded drain of Broadcom work before system suspend')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -94,6 +96,8 @@ def main():
         parser.error('--exynos-suspend-unwind requires an explicit --build-version')
     if args.exynos_restore_failed_domain_off and not args.strict_noirq_power_domain:
         parser.error('--exynos-restore-failed-domain-off requires --strict-noirq-power-domain')
+    if args.dhd_system_suspend_drain and not args.dhd_pcie_suspend_order:
+        parser.error('--dhd-system-suspend-drain requires --dhd-pcie-suspend-order')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -145,6 +149,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0044-exynos-unwind-prepared-sleep-without-firmware-entry.patch')
     if args.exynos_restore_failed_domain_off:
         patchfiles.append(ROOT/'patches/proposals/0045-exynos-restore-local-domain-after-power-off-error.patch')
+    if args.dhd_system_suspend_drain:
+        patchfiles.append(ROOT/'patches/proposals/0046-dhd-drain-wake-locks-before-system-suspend.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -163,6 +169,7 @@ def main():
             'dhd_pcie_suspend_order':args.dhd_pcie_suspend_order,
             'mif_int_suspend_comparison':args.mif_int_suspend_comparison,
             'dhd_cancel_pending_pm_work':args.dhd_cancel_pending_pm_work,
+            'dhd_system_suspend_drain':args.dhd_system_suspend_drain,
             'exynos_wlan_pci_sleep_ownership':args.exynos_wlan_pci_sleep_ownership,
             'strict_noirq_power_domain':args.strict_noirq_power_domain,
             'exynos_suspend_unwind':args.exynos_suspend_unwind,
