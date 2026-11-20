@@ -1,0 +1,28 @@
+Subject: Hold the normal MIF and INT operating points for a G955N suspend comparison
+
+The kernel38 platform test reached noirq after reporting MIF 208 MHz and
+INT 107 MHz despite the ordinary desktop QoS floor. The Exynos suspend
+path pins these operating points through str_freq. Test the already used
+421/178 MHz pair on the Korean revision 10 device tree, changing only the
+suspend fields. This is a diagnostic for the preceding corruption and
+does not establish that the frequency transition caused it.
+
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -19,6 +19,16 @@
+ #include "exynos8895-dream2lte_gpio_kor_10.dtsi"
+ #include "exynos8895-dreamlte_kor-tdmb-00.dtsi"
+ #include "exynos8895-dreamlte_fingerprint-sensor_10.dtsi"
++
++
++/* Diagnostic: hold the normal MIF/INT pair through the suspend callbacks. */
++&devfreq_0 {
++	freq_info = <1794000 421000 421000 208000 2093000 1794000>;
++};
++
++&devfreq_1 {
++	freq_info = <667000 178000 178000 107000 667000 667000>;
++};
+ 
+ / {
+ 	model = "Samsung SM-G955N rev05 board based on EXYNOS8895";

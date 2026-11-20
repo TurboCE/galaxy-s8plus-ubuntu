@@ -44,6 +44,8 @@ def main():
                         help='Allow SM-G955N FTS touch when this native image boots Ubuntu in charger mode')
     parser.add_argument('--dhd-pcie-suspend-order', action='store_true',
                         help='Suspend the Broadcom wireless layer before its PCIe transport')
+    parser.add_argument('--mif-int-suspend-comparison', action='store_true',
+                        help='Use the normal MIF and INT operating points in SM-G955N suspend tests')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -62,6 +64,8 @@ def main():
         parser.error('--desktop-charger-touch requires an explicit --build-version')
     if args.dhd_pcie_suspend_order and not args.build_version:
         parser.error('--dhd-pcie-suspend-order requires an explicit --build-version')
+    if args.mif_int_suspend_comparison and not args.build_version:
+        parser.error('--mif-int-suspend-comparison requires an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -97,6 +101,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0036-fts-desktop-charger-touch.patch')
     if args.dhd_pcie_suspend_order:
         patchfiles.append(ROOT/'patches/proposals/0037-dhd-pcie-suspend-scan-order.patch')
+    if args.mif_int_suspend_comparison:
+        patchfiles.append(ROOT/'patches/proposals/0038-dream2lte-kor-suspend-opp-comparison.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -112,6 +118,7 @@ def main():
             'dpp_shared_dma':args.dpp_shared_dma,
             'desktop_charger_touch':args.desktop_charger_touch,
             'dhd_pcie_suspend_order':args.dhd_pcie_suspend_order,
+            'mif_int_suspend_comparison':args.mif_int_suspend_comparison,
             'pmic_wake_irq':args.pmic_wake_irq,
             'suspend_battery_diagnostic':args.suspend_battery_diagnostic,
             'native_panel_safety':args.native_panel_safety,

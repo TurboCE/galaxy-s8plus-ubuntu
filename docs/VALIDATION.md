@@ -975,3 +975,38 @@ at the port but did not restore the session. No matching PM return record
 was available through those transports. System sleep targets stayed
 masked and no full-system sleep cycle was attempted. A recovered journal
 is required to distinguish a PM callback hang from a transport-only failure.
+
+The owner reported an interactive power menu before restarting. The
+recovered journal confirmed the connected devices phase returned in
+5.29 seconds with errno 0. The wireless child ran before its PCIe parent
+at suspend and after it at resume. The PCI core still warned that the
+driver cleared its state-saved indicator. The host transports did not
+reconnect in the original observation window.
+
+The subsequent platform phase rebooted the handset. The matching retained
+kernel38 trace recorded a fatal write fault in `klist_next`, reached through
+`device_for_each_child` and `__device_suspend_noirq`. The printed relocation
+offset matches those three frames in the local kernel38 symbol map. The
+fault destination resolves within a kernel function. The preceding trace
+reports actual suspend operating points of 208 MHz MIF and 107 MHz INT.
+The corruption site does not identify the writer.
+
+Proposal0038 compares the runtime-stable 421 MHz MIF and 178 MHz INT pair
+through suspend. A DTB comparison verified exactly two changed suspend
+fields for the Korean revision 10 board. The kernel binary, config and
+external ramdisk match the original kernel38 build byte for byte.
+
+Wrote the comparison image to BOOT after backing up the exact original
+kernel38 BOOT. Verified BOOT readback and protected-partition hashes, then
+read both edited properties from the running device tree. The PCI parent
+also made predictable interface naming rename the primary Wi-Fi device on
+some boots. The existing autoconnect profile required wlan0. Installed a
+matching systemd link rule for this PCI device and driver. After a normal
+reboot the interface stayed wlan0 and NetworkManager reconnected without
+editing the saved profile.
+
+With the comparison image, two connected platform requests and one
+disassociated request returned EBUSY before late suspend. Broadcom reported
+different active PM, RX/TX-flush and control wake locks. All three requests
+returned to the same boot and verified Wi-Fi gateway traffic. Those attempts
+did not reach the earlier fatal noirq point.
