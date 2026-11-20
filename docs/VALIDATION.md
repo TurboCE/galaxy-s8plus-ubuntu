@@ -1479,3 +1479,55 @@ enabled. A repeat with the final policy resumed on RTC after 45.68
 seconds with the same boot and seat, active panel, touch and WLAN,
 and no new warning in the suspend interval. Physical-button wake and
 deep sleep are still unverified.
+
+### Suspend console and Bluetooth UART
+
+The owner saw the framebuffer console during a later sleep comparison
+and confirmed that the normal screen returned. The system remained on the
+same boot with the active X11 session back on tty2. The driver registers
+a framebuffer that requires VT switching, so the PM core temporarily
+uses tty63 and redirects kernel messages there.
+
+The sleep hook clears that reserved VT before suspend, limits console
+output during the switch, restores the prior level after resume, and
+records the first kernel-reported IRQ. It preserves the kernel ring
+buffer. A WLAN-managed repeat with the hook showed normal panel power
+and the same desktop seat after a 35.05-second RTC wake. The wake record
+identified the S2MPS17 IRQ and the kernel journal contained the RTC
+handler inside the interval. A direct VT read revealed that the first
+version had skipped the pre-suspend clear because the sysctl could not
+be read byte by byte. Reading it with awk let the hook lower the console
+level and clear all 7,714 nonblank console characters in the direct check.
+Physical-button wake has no matching record yet.
+
+Both `could not set bt sleep pins` and `could not set bt default pins`
+are reproducible in the UART callback. Proposal0051 adds the missing
+states to the Korean board DT, using the existing Bluetooth sleep pins
+and the same active mapping as `default`. Its DTB compiled and packed
+with the exact kernel50 Image, configuration and external ramdisk. The
+decoded DT comparison confirmed only the Bluetooth UART states and their
+phandle assignments changed. This candidate is uninstalled.
+
+The kernel50 `mem` `core` diagnostic completed on the same boot and
+with unchanged taint. It passed DPU0 noirq, took secondary CPUs offline,
+prepared Exynos mode 8, and ran the mode 8 early-wake restore. The
+five-second core test skipped the actual firmware sleep entry.
+
+Kernel50 also completed a direct `mem` request with an RTC alarm. The
+kernel logged a 42.62-second interval, mode 8 restore with
+`early wake: 0`, and the RTC alarm handler before suspend exit.
+The request returned zero on the same boot and WLAN SSH recovered.
+
+A separate standard logind test reset the runtime `SuspendState` list
+before selecting `mem`. It recorded real PSCI entry and normal mode 8
+restore after a 46.58-second UTC interval. Logind completed, the same
+desktop seat and panel recovered, the touch input was enabled, and three
+WLAN gateway probes passed. The temporary deep setting was removed and
+the live manual default returned to `freeze`.
+
+With the corrected console hook, another standard `mem` request
+resumed on RTC after 30.92 seconds. The reserved VT was blank on direct
+readback after the actual sleep cycle, and the original console level
+was restored. The same boot, panel, seat, touchscreen input and WLAN
+traffic were verified again. The manual default is `freeze` and
+automatic suspend remains off pending physical-button testing.

@@ -1,0 +1,19 @@
+Subject: Describe the Bluetooth UART sleep states on SM-G955N
+
+The Samsung UART suspend and resume callbacks select btsleep and
+btdefault for ttySAC1. The Korean SM-G955N DT only supplies default,
+rts and tx_dat, so both lookups fail on every system suspend cycle.
+Expose the SoC's existing Bluetooth sleep group on this board and
+alias btdefault to the original active pin group. Keep the existing
+RTS and TX-data mappings.
+
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -321 +321,7 @@ &pd_dpu0 {
+ };
++
++&serial_1 {
++	pinctrl-names = "default", "rts", "tx_dat", "btdefault", "btsleep";
++	pinctrl-3 = <&uart1_bus>;
++	pinctrl-4 = <&uart1_btsleep>;
++};

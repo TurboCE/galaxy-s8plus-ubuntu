@@ -70,6 +70,8 @@ def main():
                         help='Default SM-G955N WLAN system wake off and honor the standard wakeup setting')
     parser.add_argument('--dpu0-system-sleep-retention', action='store_true',
                         help='Keep the Korean SM-G955N display power domain on during system device sleep')
+    parser.add_argument('--bt-uart-sleep-pinctrl', action='store_true',
+                        help='Add the required Bluetooth UART suspend and resume pin states on SM-G955N')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -114,6 +116,8 @@ def main():
         parser.error('--dhd-system-wlan-wake-opt-in requires --dhd-system-suspend-drain')
     if args.dpu0_system_sleep_retention and not args.strict_noirq_power_domain:
         parser.error('--dpu0-system-sleep-retention requires --strict-noirq-power-domain')
+    if args.bt_uart_sleep_pinctrl and not args.dpu0_system_sleep_retention:
+        parser.error('--bt-uart-sleep-pinctrl requires --dpu0-system-sleep-retention')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -175,6 +179,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0049-dhd-respect-system-wlan-wakeup-policy.patch')
     if args.dpu0_system_sleep_retention:
         patchfiles.append(ROOT/'patches/proposals/0050-g955n-keep-dpu0-powered-in-system-device-sleep.patch')
+    if args.bt_uart_sleep_pinctrl:
+        patchfiles.append(ROOT/'patches/proposals/0051-g955n-bluetooth-uart-sleep-pinctrl.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -200,6 +206,7 @@ def main():
             'exynos_wlan_pci_sleep_ownership':args.exynos_wlan_pci_sleep_ownership,
             'strict_noirq_power_domain':args.strict_noirq_power_domain,
             'dpu0_system_sleep_retention':args.dpu0_system_sleep_retention,
+            'bt_uart_sleep_pinctrl':args.bt_uart_sleep_pinctrl,
             'exynos_suspend_unwind':args.exynos_suspend_unwind,
             'exynos_restore_failed_domain_off':args.exynos_restore_failed_domain_off,
             'freeze_voltage_dvfs':args.freeze_voltage_dvfs,

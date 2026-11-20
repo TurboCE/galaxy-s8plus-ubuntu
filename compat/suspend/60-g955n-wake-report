@@ -1,0 +1,53 @@
+#!/bin/sh
+[ "$2" = suspend ] || exit 0
+grep -aq SM-G955N /proc/device-tree/model || exit 0
+printk=/proc/sys/kernel/printk
+saved=/run/g955n-suspend-console-level
+
+case "$1" in
+    pre)
+        # This kernel briefly switches the display to its reserved suspend VT.
+        # Keep ordinary kernel messages in the ring buffer during the switch.
+        [ "$(cat /sys/class/tty/tty0/active)" != tty63 ] || exit 0
+        [ -c /dev/tty63 ] && [ ! -e "$saved" ] || exit 0
+        level=$(awk 'NR == 1 { print $1 }' "$printk") || exit 0
+        [ -n "$level" ] || exit 0
+        (umask 077; printf '%s\n' "$level" > "$saved") || exit 0
+        printf '1\n' > "$printk" || { rm -f "$saved"; exit 0; }
+        printf '\033[2J\033[H' > /dev/tty63
+        exit 0
+        ;;
+    post)
+        if [ -f "$saved" ]; then
+            read -r level < "$saved"
+            current=$(awk 'NR == 1 { print $1 }' "$printk")
+            [ "$current" != 1 ] || printf '%s\n' "$level" > "$printk"
+            rm -f "$saved"
+        fi
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+# systemd invokes post hooks while user sessions can still be frozen.
+irq=$(cat /sys/power/pm_wakeup_irq 2>/dev/null) || irq=
+case "$irq" in
+    ''|*[!0-9]*)
+        printf 'g955n-suspend: wake IRQ unavailable\n'
+        ;;
+    *)
+        source=$(awk -v irq="$irq:" '
+            $1 == irq {
+                for (i = 2; i <= NF; i++) {
+                    if ($i == "Edge" || $i == "Level") {
+                        sub("^.*[[:space:]]" $i "[[:space:]]+", "")
+                        print
+                        exit
+                    }
+                }
+            }
+        ' /proc/interrupts)
+        printf 'g955n-suspend: wake IRQ %s (%s)\n' "$irq" "${source:-unknown}"
+        ;;
+esac

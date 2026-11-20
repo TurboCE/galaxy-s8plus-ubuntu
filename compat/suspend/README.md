@@ -10,6 +10,7 @@ an actual timed RTC wake on that kernel.
 | `60-g955n-suspend-to-idle.conf` | `/etc/systemd/sleep.conf.d/` |
 | `60-g955n-require-suspend-kernel.conf` | `/etc/systemd/system/systemd-suspend.service.d/` |
 | `60-g955n-manual-suspend` | `/etc/dconf/db/local.d/` and `/etc/dconf/db/gdm.d/` |
+| `60-g955n-wake-report` (optional, executable) | `/usr/lib/systemd/system-sleep/` |
 
 Run `dconf update` and check the effective GNOME power settings on both the
 desktop and greeter before unmasking `sleep.target` and `suspend.target`.
@@ -19,6 +20,14 @@ The GNOME profile disables unattended suspend on AC and battery. It also
 disables GNOME's power-button shutdown dialog. The kernel still uses the
 physical button as a wake source. Display idle and screen locking are
 separate GNOME settings.
+
+The optional hook clears the reserved sleep console and limits messages
+printed on it during the switch. Kernel messages remain in the ring
+buffer, and the previous console level is restored after resume. The
+hook also records the kernel-reported wake IRQ in
+`journalctl -u systemd-suspend.service`. Pair it with the kernel suspend
+entry, exit and RTC handler messages. A PMIC IRQ by itself does not
+identify which PMIC event woke the handset.
 
 The image builder retains the initial masks. To return an enabled handset to
 that baseline, mask the two targets again and remove the installed GNOME

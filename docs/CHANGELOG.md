@@ -1492,3 +1492,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   verifying RTC resume and recovery of the panel, desktop, touch and WLAN.
   Added GNOME defaults to keep idle suspend off and suppress the
   power-button shutdown dialog.
+- Kept the reserved sleep console clear during suspend and recorded the
+  kernel wake IRQ on resume. Added the Korean Bluetooth UART pin states
+  to a built DT-only candidate for the repeated suspend and resume errors.
