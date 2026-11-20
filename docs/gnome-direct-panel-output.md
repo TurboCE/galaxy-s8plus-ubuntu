@@ -215,3 +215,10 @@ recreated the verified direct-output lease and passed the same touch login.
 The opaque fullscreen fixture showed zero empty overlay samples and
 continued DECON timeline progress. This is an input-path test from evdev
 through PAM. Physical digitizer latency was not measured.
+
+Eight display off/on cycles passed before reboot and eight afterward.
+Each cycle confirmed X11 and panel runtime states, then submitted new
+compositor work. A separate 129-second workload kept the same GNOME Shell
+and boot with taint 0 and 175 to 179 DECON retirements per sample. System
+sleep targets stayed masked. CPU idle entry counters increased in all
+three observed idle states under the ondemand governor.

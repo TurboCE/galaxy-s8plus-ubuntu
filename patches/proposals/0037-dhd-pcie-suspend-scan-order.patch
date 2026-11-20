@@ -1,0 +1,38 @@
+Subject: Prepare Broadcom cfg80211 before suspending PCIe
+
+The PCI instance exists before wiphy registration, but cfg80211 takes a
+parent pointer populated only by the SDIO path. The resulting orphaned
+wiphy may suspend concurrently with the PCI bus, while a scan still
+holds the driver's wake locks. Parent it to the existing PCI instance
+and use the existing scan-cancel path in the wiphy suspend callback.
+Keep the PCI busy and wake-lock checks unchanged.
+
+--- a/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
++++ b/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
+@@ -8098,6 +8098,13 @@
+ #endif // endif
+ {
+ 	s32 err = BCME_OK;
++#if defined(BCMPCIE) && !defined(DHD_CLEAR_ON_SUSPEND)
++	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
++	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
++
++	if (wl_get_drv_status(cfg, READY, ndev))
++		wl_cfg80211_cancel_scan(cfg);
++#endif
+ #ifdef DHD_CLEAR_ON_SUSPEND
+ 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+ 	struct net_info *iter, *next;
+@@ -18463,7 +18470,12 @@
+ 		return -ENODEV;
+ 	}
+ 	WL_DBG(("func %p\n", wl_cfg80211_get_parent_dev()));
++#ifdef BCMPCIE
++	/* Suspend cfg80211 before the PCI transport it still needs. */
++	dev = dhd_bus_to_dev(dhd->bus);
++#else
+ 	dev = wl_cfg80211_get_parent_dev();
++#endif
+ 
+ 	wdev = (struct wireless_dev *)MALLOCZ(dhd->osh, sizeof(*wdev));
+ 	if (unlikely(!wdev)) {

@@ -1412,3 +1412,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   build. Supervised trials apply the same fullscreen policy as default
   sessions. Explicit rollback cancels its timer to allow immediate retry.
   Verified touch login, fullscreen and display power cycles across reboot.
+- Isolated a kernel36 device-stage suspend failure to the Broadcom PCIe
+  transport with active scan and receive/control wake locks. Built and
+  packed kernel38 with the PCI wiphy parent and a scan cleanup callback.
+  The kernel candidate is pending live testing.

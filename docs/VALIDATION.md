@@ -935,3 +935,22 @@ Fullscreen remained composed and kernel taint was 0 during the checks.
 The active configuration was left enabled. These are display-power checks,
 not whole-system suspend. Kernel logs still showed panel command failures
 in earlier rapid transition tests.
+
+### Kernel36 device suspend and Broadcom candidate
+
+The devices-only kernel PM test returned EBUSY after 0.38 seconds. The
+per-device trace identifies Broadcom PCI device 0000:01:00.0. Its
+RX, control and scan wake locks were active. The diagnostic restored
+`pm_test` to `none` and returned to the same boot with taint 0.
+
+The Wi-Fi-off comparison lost USB networking and console response before
+its completion record could be read. The host requested re-enumeration,
+but the radio restoration and stage outcome could not be confirmed.
+System sleep targets were kept masked in both comparisons.
+
+Proposal0037 associates the PCI wiphy with its actual PCI device before
+registration and cancels an outstanding scan in the wiphy suspend callback.
+This orders the wireless layer's cleanup before PCI suspension. The
+original bus-busy and wake-lock checks remain in force. Kernel38 built
+and packed with the same configuration, DTB and external ramdisk as
+kernel36. It has not been installed or qualified for runtime suspend.
