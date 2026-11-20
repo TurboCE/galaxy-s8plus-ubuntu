@@ -1482,3 +1482,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   setting while preserving the runtime WLAN interrupt.
 - Recovered a kernel48 shallow-sleep DPU0 timeout. Added a Korean board
   comparison that retains DPU0 during system device suspend.
+- Tested a persistent GNOME suspend-to-idle policy on kernel50. It passed
+  a standard RTC wake before reboot. A repeat after reboot lost access.
+  The standard systemd service checks the required kernel properties.

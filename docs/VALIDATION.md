@@ -1395,3 +1395,35 @@ kernel taint remained zero. That bounded test stops before DPU0 noirq.
 Kernel50 compiled and packed with the kernel49 configuration and ramdisk.
 Decoded DTBs differ only by the DPU0 system-sleep retention property.
 All 102 Linux host tests passed.
+
+Installed kernel50 after verifying the kernel49 BOOT backup and protected
+partition readback. With WLAN connected and its system wake disabled, a
+raw `freeze` test resumed on the RTC alarm after 30.20 seconds. The same
+boot recovered WLAN gateway traffic and touchscreen input with active GDM
+and taint zero. The standard systemd path then completed a 24.71 second
+RTC wake using a temporary `SuspendState=freeze` setting. Both RTC events
+occurred inside the corresponding kernel suspend intervals.
+
+The live handset now has the tracked suspend-to-idle configuration in
+`/etc/systemd/sleep.conf.d` and the matched device-tree guard in
+`/etc/systemd/system/systemd-suspend.service.d`. This limits normal GNOME
+suspend to the verified `freeze` path. The service's entry guard requires
+both the board WLAN wake policy and the DPU0 retention property. The
+temporary validation config and boot recovery unit have been removed.
+The rootfs builder's sleep masks remain the initial baseline for unpaired
+images.
+
+A repeat using the installed systemd configuration completed in 24.38
+seconds. The same kernel50 boot remained active, the RTC interrupt preceded
+kernel suspend exit, and systemd finished its suspend service successfully.
+Full `mem`, standby battery draw and physical power-key wake have not been
+qualified under this configuration.
+
+A controlled reboot verified the persistent settings, logind `CanSuspend`,
+GDM, touch and WLAN gateway traffic on the new kernel50 boot. The next
+standard suspend request, after that reboot, then lost USB and Wi-Fi
+completion. The USB serial console did not respond. Repeated post-reboot
+sleep is therefore still unqualified. The persistent files document the
+policy used for the comparison. Do not enable it in a fresh image until
+repeatability is demonstrated. The running handset should be remasked as
+soon as its management link is recovered.
