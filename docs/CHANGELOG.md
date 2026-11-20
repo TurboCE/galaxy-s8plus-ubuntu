@@ -1447,3 +1447,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Recovered the kernel41 deep-sleep entry record following the manual reset.
   Installed kernel42 and verified Wi-Fi reconnect and the complete device
   suspend/resume diagnostic. The two PCIe D3 warnings were absent.
+- Built kernel43 to unwind noirq suspend if a device power domain refuses
+  shutdown. Kernel42's core diagnostic still has no visible return record.

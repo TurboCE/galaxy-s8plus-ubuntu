@@ -1145,3 +1145,18 @@ The matching live trace completed device, late and noirq phases with both
 previous PCI D3 warnings absent. GDM remained active and the touchscreen
 input device was enabled. The later `mem` diagnostic limited to `pm_test
 core` was armed, but did not yield a visible record over USB or Wi-Fi.
+
+### Kernel43 noirq power-domain failure recovery
+
+The generic power-domain noirq callback discarded the hardware power-off
+error, recorded the domain as powered off and allowed the system sleep to
+continue. Proposal0043 returns the error to the PM core, preserves the
+failed domain state and restores the current device before earlier devices
+unwind. When a parent power-off fails, the unwind restores the child and
+its parent usage counts. This prevents proceeding after a noirq power-off
+failure. The cause of the original DPU refusal still requires live traces.
+
+Kernel43 built and packed with kernel42's configuration, DTB and external
+ramdisk. The Linux suite passed all 102 tests. USB re-enumeration did not
+restore a management path after the kernel42 core trial, so kernel43 has
+no device installation or resume record at this checkpoint.
