@@ -1,0 +1,168 @@
+Subject: Defer PCI config access while the Exynos WLAN bus is powered off
+
+The vendor WLAN driver powers off the bus in ordinary suspend and brings
+it back in ordinary resume. The Exynos host caches and restores the root
+port configuration, and DHD does the same for the endpoint. The generic
+noirq transitions run between those callbacks with config access down.
+Use host state for the opt-in Wi-Fi port to avoid those accesses. Leave
+other ports unchanged and keep the driver callbacks that restore the bus.
+
+--- a/include/linux/pci.h
++++ b/include/linux/pci.h
+@@ -582,6 +582,8 @@
+ 	void __iomem *(*map_bus)(struct pci_bus *bus, unsigned int devfn, int where);
+ 	int (*read)(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 *val);
+ 	int (*write)(struct pci_bus *bus, unsigned int devfn, int where, int size, u32 val);
++	/* Optional check for host-managed power during system sleep. */
++	bool (*sleep_config_available)(struct pci_bus *bus);
+ };
+ 
+ /*
+--- a/drivers/pci/host/pcie-designware.h
++++ b/drivers/pci/host/pcie-designware.h
+@@ -63,6 +63,7 @@
+ 	int (*wr_other_conf)(struct pcie_port *pp, struct pci_bus *bus,
+ 			unsigned int devfn, int where, int size, u32 val);
+ 	int (*link_up)(struct pcie_port *pp);
++	bool (*sleep_config_available)(struct pcie_port *pp);
+ 	void (*host_init)(struct pcie_port *pp);
+ 	void (*msi_set_irq)(struct pcie_port *pp, int irq);
+ 	void (*msi_clear_irq)(struct pcie_port *pp, int irq);
+--- a/drivers/pci/host/pcie-designware.c
++++ b/drivers/pci/host/pcie-designware.c
+@@ -706,9 +706,18 @@
+ 	return ret;
+ }
+ 
++static bool dw_pcie_sleep_config_available(struct pci_bus *bus)
++{
++	struct pcie_port *pp = bus->sysdata;
++
++	return !pp->ops->sleep_config_available ||
++		pp->ops->sleep_config_available(pp);
++}
++
+ static struct pci_ops dw_pcie_ops = {
+ 	.read = dw_pcie_rd_conf,
+ 	.write = dw_pcie_wr_conf,
++	.sleep_config_available = dw_pcie_sleep_config_available,
+ };
+ 
+ void dw_pcie_setup_rc(struct pcie_port *pp)
+--- a/drivers/pci/host/pci-exynos.c
++++ b/drivers/pci/host/pci-exynos.c
+@@ -1019,7 +1019,20 @@
+ 	return 0;
+ }
+ 
++static bool exynos_pcie_sleep_config_available(struct pcie_port *pp)
++{
++	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pp);
++
++	if (!of_property_read_bool(pp->dev->of_node,
++				   "samsung,driver-managed-sleep"))
++		return true;
++
++	/* The WLAN driver powers off this host and restores it on resume. */
++	return READ_ONCE(exynos_pcie->state) == STATE_LINK_UP;
++}
++
+ static struct pcie_host_ops exynos_pcie_host_ops = {
++	.sleep_config_available = exynos_pcie_sleep_config_available,
+ 	.rd_own_conf = exynos_pcie_rd_own_conf,
+ 	.wr_own_conf = exynos_pcie_wr_own_conf,
+ 	.rd_other_conf = exynos_pcie_rd_other_conf,
+--- a/drivers/pci/pci-driver.c
++++ b/drivers/pci/pci-driver.c
+@@ -697,6 +697,14 @@
+ 
+ #ifdef CONFIG_SUSPEND
+ 
++static bool pci_sleep_config_available(struct pci_dev *dev)
++{
++	struct pci_bus *bus = dev->bus;
++
++	return !bus->ops->sleep_config_available ||
++		bus->ops->sleep_config_available(bus);
++}
++
+ static int pci_pm_suspend(struct device *dev)
+ {
+ 	struct pci_dev *pci_dev = to_pci_dev(dev);
+@@ -730,7 +738,8 @@
+ 		if (error)
+ 			return error;
+ 
+-		if (!pci_dev->state_saved && pci_dev->current_state != PCI_D0
++		if (pci_sleep_config_available(pci_dev) &&
++		    !pci_dev->state_saved && pci_dev->current_state != PCI_D0
+ 		    && pci_dev->current_state != PCI_UNKNOWN) {
+ 			WARN_ONCE(pci_dev->current_state != prev,
+ 				"PCI PM: State of device not saved by %pF\n",
+@@ -739,7 +748,8 @@
+ 	}
+ 
+  Fixup:
+-	pci_fixup_device(pci_fixup_suspend, pci_dev);
++	if (pci_sleep_config_available(pci_dev))
++		pci_fixup_device(pci_fixup_suspend, pci_dev);
+ 
+ 	return 0;
+ }
+@@ -748,6 +758,10 @@
+ {
+ 	struct pci_dev *pci_dev = to_pci_dev(dev);
+ 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
++
++	/* The host has already saved this bus and removed config access. */
++	if (!pci_sleep_config_available(pci_dev))
++		return 0;
+ 
+ 	if (pci_has_legacy_pm_support(pci_dev))
+ 		return pci_legacy_suspend_late(dev, PMSG_SUSPEND);
+@@ -807,6 +821,9 @@
+ 	struct device_driver *drv = dev->driver;
+ 	int error = 0;
+ 
++	if (!pci_sleep_config_available(pci_dev))
++		return 0;
++
+ 	pci_pm_default_resume_early(pci_dev);
+ 
+ 	if (pci_has_legacy_pm_support(pci_dev))
+@@ -828,18 +845,19 @@
+ 	 * This is necessary for the suspend error path in which resume is
+ 	 * called without restoring the standard config registers of the device.
+ 	 */
+-	if (pci_dev->state_saved)
++	if (pci_sleep_config_available(pci_dev) && pci_dev->state_saved)
+ 		pci_restore_standard_config(pci_dev);
+ 
+ 	if (pci_has_legacy_pm_support(pci_dev))
+ 		return pci_legacy_resume(dev);
+ 
+-	pci_pm_default_resume(pci_dev);
++	if (pci_sleep_config_available(pci_dev))
++		pci_pm_default_resume(pci_dev);
+ 
+ 	if (pm) {
+ 		if (pm->resume)
+ 			error = pm->resume(dev);
+-	} else {
++	} else if (pci_sleep_config_available(pci_dev)) {
+ 		pci_pm_reenable_device(pci_dev);
+ 	}
+ 
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -183,6 +183,10 @@
+ 		io-channel-ranges;
+ 	};
+ 
++	pcie0@116A0000 {
++		samsung,driver-managed-sleep;
++	};
++
+ 	hsi2c_23: hsi2c@108E0000 {
+ 		touchscreen@49 {
+ 			status = "okay";

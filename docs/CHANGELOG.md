@@ -1441,3 +1441,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Scheduled a real `mem` test with RTC wake on kernel41. The test did not
   return a visible completion record, and USB and Wi-Fi became unreachable.
   Normal desktop suspend remains gated pending a verified full resume.
+- Built kernel42 to defer generic PCI config access while the SM-G955N WLAN
+  host is deliberately powered down for system sleep. The existing Exynos
+  host and Broadcom resume paths still restore their saved configuration.

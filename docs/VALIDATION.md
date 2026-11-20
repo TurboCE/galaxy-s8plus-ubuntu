@@ -1100,3 +1100,25 @@ or the captured Wi-Fi address returned a completion record. A targeted USB
 re-enumeration did not restore access. The exact sleep or resume failure point
 and RTC delivery are unverified until the retained record can be retrieved.
 The normal systemd suspend targets remain masked pending this validation.
+
+### Kernel42 Exynos WLAN PCI sleep ownership
+
+The kernel41 platform test logged D3 warnings for both the root port and the
+Broadcom endpoint during noirq resume. The Exynos host backs up and restores
+root-port configuration when it powers the link back on. Broadcom restores
+the endpoint in its regular resume callback. The PCI core's earlier noirq
+restore attempted configuration access between those operations, while the
+host was off.
+
+Proposal0042 makes the Korean revision 10 WLAN PCIe host report configuration
+availability from its existing link state during system sleep. The PCI core
+defers the generic configuration accesses while that host is down. The
+regular driver callbacks remain responsible for restoring power and config.
+Other PCI hosts retain the default policy.
+
+The ARM64 kernel42 build and boot image passed the build checks. The kernel
+configuration and external ramdisk match kernel41. A decoded DTB comparison
+found only the opt-in property on Exynos WLAN PCIe channel 0. The Linux host
+test suite passed all 102 tests. USB, Wi-Fi and TWRP were unreachable, so
+kernel42 remains uninstalled. Live PCIe warning, Wi-Fi reconnection and RTC
+resume results are pending, as is the retained record of kernel41 real sleep.

@@ -52,6 +52,8 @@ def main():
                         help='Freeze Exynos voltage-policy polling before suspend disables I2C interrupts')
     parser.add_argument('--fts-desktop-suspend', action='store_true',
                         help='Preserve desktop touch users and opt in to touch wake explicitly')
+    parser.add_argument('--exynos-wlan-pci-sleep-ownership', action='store_true',
+                        help='Keep PCI system config access behind the Exynos WLAN host power state')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -78,6 +80,8 @@ def main():
         parser.error('--freeze-voltage-dvfs requires --suspend-battery-diagnostic')
     if args.fts_desktop_suspend and not args.build_version:
         parser.error('--fts-desktop-suspend requires an explicit --build-version')
+    if args.exynos_wlan_pci_sleep_ownership and not args.build_version:
+        parser.error('--exynos-wlan-pci-sleep-ownership requires an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -121,6 +125,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0040-freeze-exynos-voltage-dvfs-thread.patch')
     if args.fts_desktop_suspend:
         patchfiles.append(ROOT/'patches/proposals/0041-fts-preserve-desktop-input-across-suspend.patch')
+    if args.exynos_wlan_pci_sleep_ownership:
+        patchfiles.append(ROOT/'patches/proposals/0042-defer-exynos-wlan-pci-system-config.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -139,6 +145,7 @@ def main():
             'dhd_pcie_suspend_order':args.dhd_pcie_suspend_order,
             'mif_int_suspend_comparison':args.mif_int_suspend_comparison,
             'dhd_cancel_pending_pm_work':args.dhd_cancel_pending_pm_work,
+            'exynos_wlan_pci_sleep_ownership':args.exynos_wlan_pci_sleep_ownership,
             'freeze_voltage_dvfs':args.freeze_voltage_dvfs,
             'pmic_wake_irq':args.pmic_wake_irq,
             'suspend_battery_diagnostic':args.suspend_battery_diagnostic,
