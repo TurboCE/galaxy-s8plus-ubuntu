@@ -954,3 +954,24 @@ This orders the wireless layer's cleanup before PCI suspension. The
 original bus-busy and wake-lock checks remain in force. Kernel38 built
 and packed with the same configuration, DTB and external ramdisk as
 kernel36. It has not been installed or qualified for runtime suspend.
+
+### Kernel38 installation and Wi-Fi check
+
+After the owner restarted the phone, the retained kernel36 journal
+confirmed that the Wi-Fi-off devices-stage comparison had returned in
+5.19 seconds with errno 0. The USB transport did not recover in that window.
+
+In TWRP, saved the verified full kernel36 BOOT and protected-partition
+backups. Wrote kernel38 to BOOT only and verified its readback and all
+protected-partition hashes. Ubuntu booted kernel38 with taint 0. The live
+wireless device's parent was the expected PCIe endpoint 0000:01:00.0.
+Wi-Fi associated at 5745 MHz on boot and again after an explicit connection
+disconnect/reconnect. Both checks received three gateway replies out of
+three and completed Wi-Fi-bound HTTPS with HTTP 200.
+
+The connected devices-only PM test on kernel38 then lost USB SSH, USB
+console and the known Wi-Fi route. Mac-side USB re-enumeration succeeded
+at the port but did not restore the session. No matching PM return record
+was available through those transports. System sleep targets stayed
+masked and no full-system sleep cycle was attempted. A recovered journal
+is required to distinguish a PM callback hang from a transport-only failure.
