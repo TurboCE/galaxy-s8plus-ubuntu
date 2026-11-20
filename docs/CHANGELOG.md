@@ -1397,3 +1397,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Fixed the stalled default PCM negotiation by using S16 at 48 kHz and
   read/write access for the built-in speaker only. Verified completed
   playback and RDMA0 hardware pointer progress.
+- Added a one-time snapshot of the active codec and ABOX capture route to
+  the bounded WDMA0 diagnostic. The probe now declines to change mixer
+  controls when built-in speaker playback is already active.

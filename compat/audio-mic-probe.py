@@ -20,6 +20,17 @@ import subprocess
 import time
 
 
+CAPTURE_DAPM = Path('/sys/kernel/debug/asoc/Exynos8895-Madera')
+CAPTURE_WIDGETS = {
+    'dapm': ('DMIC1',),
+    'codec:cs47l92-codec/dapm': ('MICBIAS1A', 'IN3L PGA', 'LHPF1', 'ASRC1IN1L',
+                                'AIF1TX1', 'AIF1TX2', 'AIF1 Capture'),
+    'codec:13e50000.abox/dapm': ('ABOX UAIF0 Capture', 'ABOX NSRC0', 'ABOX RSRC0',
+                                 'ABOX PIFS0', 'ABOX RECP', 'ABOX SPUM ASRC0',
+                                 'ABOX WDMA0 Capture'),
+}
+
+
 def read_text(path):
     try:
         return Path(path).read_text(errors='replace')
@@ -105,6 +116,9 @@ def main():
         raise SystemExit('Unexpected ALSA card; no controls changed')
     if not re.search(r'^00-08:.*capture', read_text('/proc/asound/pcm'), re.M):
         raise SystemExit('WDMA0 capture PCM is not registered; no controls changed')
+    playback_status = Path('/proc/asound/card0/pcm0p/sub0/status')
+    if read_text(playback_status).strip() != 'closed':
+        raise SystemExit('RDMA0 playback is not idle; no controls changed')
     status_dir = Path('/proc/asound/card0/pcm8c/sub0')
     try:
         initial_status = (status_dir / 'status').read_text().strip()
@@ -193,6 +207,14 @@ def main():
                                         status=read_text(status_dir / 'status'),
                                         hw_params=read_text(status_dir / 'hw_params'),
                                         sw_params=read_text(status_dir / 'sw_params'))
+                        if ('RUNNING' in snapshot['status']
+                                and 'running_dapm_widgets' not in report):
+                            report['running_dapm_widgets'] = {
+                                name: read_text(CAPTURE_DAPM / directory / name)
+                                .partition('\n')[0]
+                                for directory, names in CAPTURE_WIDGETS.items()
+                                for name in names
+                            }
                         observations.append(snapshot)
                         evidence.write(json.dumps(snapshot) + '\n')
                         evidence.flush()

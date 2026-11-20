@@ -864,3 +864,26 @@ negotiated 48 kHz S16 capture, but returned EIO with zero captured frames
 and a stationary hardware pointer. The ABOX GIC count did not advance
 during the bounded read. The diagnostic restored the mixer state and
 kernel taint stayed 0. Microphone remains outside the desktop PCM scope.
+
+### Kernel36 hardware retest
+
+The regular GNOME PipeWire speaker completed another two-second stream and
+showed 21 distinct RDMA0 hardware pointer positions. Physical audibility
+remains unverified. BlueZ entered discovery for eight seconds and returned to
+idle without a controller error, but reported no peers in that window.
+NetworkManager was associated at 5745 MHz and received all three replies from
+the default gateway over the Wi-Fi interface. ModemManager listed no modem.
+SensorProxy exposed the accelerometer and reported 24 lux. GNOME's standard
+automatic-brightness setting was enabled during the reading.
+
+The active microphone snapshot showed DMIC1, the codec bias and transmit
+chain, UAIF0 and the WDMA0 route powered during capture. The kernel logged
+both WDMA0 and UAIF0 start triggers. Reducing the period to 1024 frames,
+bypassing SPUM ASRC0, using mmap and enabling automatic RECP rate selection
+each left the hardware pointer at zero. The standard read returned EIO and
+the mmap test timed out. Starting simultaneous silent 48 kHz stereo playback
+also left capture at zero while RDMA0 advanced through 38 distinct positions.
+Every trial restored the controls. The remaining failure is past ALSA route
+selection. Whether samples reach the ABOX DSP and whether WDMA0 starts a
+transfer are still unverified.
+The kernel remained on the same boot with taint 0 during these checks.
