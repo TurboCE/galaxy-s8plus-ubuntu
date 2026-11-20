@@ -1730,3 +1730,36 @@ kernel taint stayed0. No new graphics/kernel fault signatures were found in
 that interval. This is a bounded periodic-workload soak, not continuous maximum
 GPU load or proof of hours-long reliability. The completed test unit and idle
 inhibitor were removed; normal GNOME locking remains available.
+
+### Kernel54 desktop audio continuity
+
+The owner reported inaudible output, then heavily interrupted speech. A normal
+PipeWire playback test reproduced increasing internal hardware errors, despite
+successful pw-play exits. With the default S16LE stereo 48 kHz geometry
+(period1024, buffer32768 frames /128 KiB), the eight-second fixture observed
+20 additional sink errors between active samples and23 backwards ALSA pointer
+transitions. MAX98506 repeatedly restarted within the same playback stream.
+
+The guarded rules now request period2048, eight periods (buffer16384 frames /
+64 KiB) and4096 frames of headroom. The smaller ring alone passed the short
+trial but had one error in a20-second trial. With headroom, a subsequent
+20-second trial had zero hardware errors and zero backwards pointer samples.
+This establishes an effective desktop configuration, not the exact register or
+firmware root cause of the larger-ring failure. No amplifier boost, calibration,
+firmware or partition was modified. The previous rules/manifest remain privately
+backed up; the installed startup manifest was updated and its guard passed.
+
+The owner confirmed that the standard Front Center voice was audible without
+interruptions after the ring change. The final five-second duplex trial had
+zero sink/source hardware-error growth, advancing RDMA0 and WDMA1 pointers,
+both expected synthetic tone responses in microphone data, and zero steady
+capture clipping. Volume/mute were restored and no new kernel fault signatures,
+boot change or taint change were seen. Raw microphone audio was not saved.
+Cold capture still has a transient concentrated in its first100 ms; the test
+reports the first250 ms separately and does not certify speech intelligibility
+or startup quality. This remains an audio quality issue to resolve.
+
+GNOME multimedia-key actions changed sink volume from0.67 to0.61, muted the
+speaker and muted the microphone through the standard services. Original levels
+and mute states were restored. PipeWire, pipewire-pulse and WirePlumber were
+enabled; built-in speaker/mic default names persisted through policy restarts.

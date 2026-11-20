@@ -1522,3 +1522,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   touchscreen/PAM login. Its 304-second periodic-workload soak kept the same
   shell/boot, taint0 and real DECON frame retirement. Kept USB recovery and
   longer-term/physical acceptance limits explicit.
+- Reduced the guarded desktop audio ring to 64 KiB and added scheduling
+  headroom after reproducing frequent RDMA0 pointer resets and choppy sound.
+  Set the built-in speaker/mic as the normal persistent desktop defaults and
+  verified GNOME volume and speaker/mic mute controls. Added a bounded duplex
+  diagnostic which separates hardware errors and startup capture transients
+  from acoustic acceptance. The owner confirmed uninterrupted voice playback.

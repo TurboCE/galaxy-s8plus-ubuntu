@@ -369,3 +369,27 @@ card and exact PCM ID before opening RDMA0 playback or WDMA1 capture.
 The HiFi microphone sends the main digital mic to both PCM channels
 through UAIF0, NSRC0 and SIFM0. Normal PipeWire playback and capture have
 passed on kernel36 with no partition changes. See [hardware validation](../../docs/VALIDATION.md).
+
+### Kernel54 desktop continuity
+
+The scoped RDMA0/WDMA1 nodes use 2,048-frame periods, eight periods and
+4,096 frames of scheduling headroom at 48 kHz S16LE stereo. This requests a
+64 KiB hardware ring instead of the default 128 KiB. On the installed ABOX
+firmware, the larger playback ring repeatedly reset the reported ALSA pointer
+around its halfway point and caused internal PipeWire errors and audible gaps.
+The exact firmware/register cause is not yet established. The extra headroom
+also removed a rarer underrun seen after reducing the ring alone.
+
+After updating these guarded rules, regenerate the installation manifest from
+the reviewed build record and run the startup guard before restarting
+WirePlumber. Keep the original private plugin and its exact PCM-open scope.
+Speaker/mic defaults are normal persistent WirePlumber selections; GNOME's
+volume and mute controls use the ordinary PipeWire/Pulse services.
+
+`check-desktop-audio.py --test-speaker-microphone` explicitly performs a bounded
+five-second duplex test through the desktop defaults. Microphone bytes remain
+in memory, and only numeric statistics are printed. It restores volume/mute and
+checks actual hardware error counters, PCM progress and new kernel faults.
+Missing counters fail qualification. Client completion and a nonconstant signal
+are not acoustic-quality acceptance. The first quarter-second is reported
+separately: cold microphone activation still has a measured startup transient.

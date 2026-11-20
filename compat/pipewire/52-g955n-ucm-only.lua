@@ -37,5 +37,12 @@ table.insert(alsa_monitor.rules, {
     ["audio.format"] = "S16LE",
     ["audio.rate"] = 48000,
     ["api.alsa.disable-mmap"] = true,
+    -- The default 128 KiB ring repeatedly resets RDMA0's reported pointer
+    -- halfway through playback on this ABOX firmware. A 64 KiB ring keeps
+    -- both desktop PCM directions within the measured stable geometry.
+    ["api.alsa.period-size"] = 2048,
+    ["api.alsa.period-num"] = 8,
+    -- Reserve 85 ms for scheduling jitter on the mobile kernel.
+    ["api.alsa.headroom"] = 4096,
   },
 })
