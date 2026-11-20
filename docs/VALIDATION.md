@@ -723,8 +723,17 @@ the direct-output boot service fall back to the original output during
 this kernel trial.
 
 On kernel35, the five-second freeze-processes callback test returned in
-5.16 seconds with errno 0, same boot and taint 0. The following bounded
-device test lost SSH and the USB console before providing a completion
-record. This test is designed to return before late/noirq and before RTC
-wake. Kernel35 does not qualify suspend. Preserve the full kernel32
-backup and collect the latest retained kernel log before any further trial.
+5.16 seconds with errno 0, same boot and taint 0. The bounded device test
+temporarily lost the host transports. After the screen became responsive
+and USB reconnected, live suspend statistics showed two successes and
+zero failures. The persistent journal then confirmed that the device-stage
+test had completed in 5.24 seconds with errno 0, in the same boot as the
+freezer test. The original timeout report reflected transport loss.
+
+The device-stage journal contains a Broadcom DHD PCI-state warning during
+suspend. During later USB recovery, the DWC3 gadget also warned on an endpoint
+command and returned a run/stop timeout before the next successful
+enumeration. These logs confirm two separate driver observations. The
+device-stage test ends before late/noirq or actual system sleep, so the
+platform stage and a timed low-power interval require separate evidence.
+The full kernel32 rollback backup remains available.

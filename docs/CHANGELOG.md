@@ -1362,5 +1362,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   deliberate hard-reset-key panic.
 - Built and installed kernel35 after a verified full kernel32 backup and
   BOOT-only readback. The candidate uses a freezable battery workqueue and
-  exposes the PM stage controls. The freezer test passed. The device-stage
-  test did not return over either userspace transport.
+  exposes the PM stage controls. The freezer and device-stage tests passed.
+  USB transport loss initially hid the device-stage completion. The
+  recovered journal confirmed the return and recorded DHD and DWC3 warnings.
