@@ -1348,3 +1348,24 @@ pending. The Broadcom out-of-band IRQ is separately armed by the vendor
 driver, so the corrected cfg80211 trigger display alone cannot establish
 the cause of host wake or reliable RTC recovery. Both desktop sleep targets
 were restored to masked after the earlier standard systemd trial.
+
+### Kernel49 separates WLAN system wake from the runtime IRQ
+
+The vendor WLAN driver called `enable_irq_wake` at host IRQ registration,
+independently of the WLAN system sleep wakeup setting. The kernel48 first
+trial shows that this separate host IRQ can wake the phone even after
+uninitialized cfg80211 trigger flags are removed.
+
+Proposal0049 opts the Korean revision 10 image into the Linux PCI device
+wakeup control. WLAN system wake defaults off. If enabled on the device,
+the driver uses the kernel wake-IRQ framework for that sleep attempt and
+clears its association during completion. The endpoint's PCI PME request
+follows the same policy during system sleep. Runtime IRQ delivery and the
+separate power-button and RTC paths retain their existing wiring.
+
+Kernel49 compiled and packed. The configuration and ramdisk match kernel48
+and the decoded DTB adds only the board wake opt-in property. All 102 Linux
+tests passed. The enumerated kernel48 USB serial console gave no response,
+SSH and recovery remained unreachable, and USB re-enumeration did not
+restore console access. Kernel49 installation and hardware validation
+remain pending, including RTC sleep and opt-in WLAN wake.

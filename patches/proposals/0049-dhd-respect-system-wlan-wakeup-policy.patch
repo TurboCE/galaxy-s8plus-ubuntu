@@ -1,0 +1,194 @@
+Subject: Respect device wakeup policy for the SM-G955N WLAN system IRQ
+
+The legacy driver armed HOST_WAKE at registration independently of the
+configured triggers. Keep the runtime IRQ, but on this board register it
+with the generic wake IRQ code during system suspend only when the user
+opts in through the device's power/wakeup setting. RTC and key wakeups
+use separate devices. Preserve the existing policy on other boards.
+
+--- a/drivers/net/wireless/bcmdhd4361/dhd_pcie_linux.c
++++ b/drivers/net/wireless/bcmdhd4361/dhd_pcie_linux.c
+@@ -69,10 +69,11 @@
+ #endif /* DHD_PCIE_NATIVE_RUNTIMEPM */
+ 
+ #include <linux/irq.h>
++#include <linux/of.h>
++#include <linux/pm_wakeirq.h>
+ #ifdef USE_SMMU_ARCH_MSM
+ #include <asm/dma-iommu.h>
+ #include <linux/iommu.h>
+-#include <linux/of.h>
+ #include <linux/platform_device.h>
+ #endif /* USE_SMMU_ARCH_MSM */
+ 
+@@ -136,6 +137,8 @@
+ 	bool			oob_irq_registered;
+ 	bool			oob_irq_enabled;
+ 	bool			oob_irq_wake_enabled;
++	bool			system_wake_attached;
++	bool			added_wakeup_capability;
+ 	spinlock_t		oob_irq_spinlock;
+ 	void			*dev;		/* handle to the underlying device */
+ } dhdpcie_os_info_t;
+@@ -376,6 +379,43 @@
+ 	}
+ }
+ 
++#if defined(BCMPCIE_OOB_HOST_WAKE) && defined(DHD_PCIE_RUNTIMEPM)
++static bool dhdpcie_system_wake_opt_in(void)
++{
++#ifdef CONFIG_OF
++	return of_property_read_bool(of_root, "samsung,system-wlan-wake-opt-in");
++#else
++	return false;
++#endif
++}
++
++static int dhdpcie_attach_system_wake(dhdpcie_info_t *pch)
++{
++	dhdpcie_os_info_t *os = pch->os_cxt;
++	struct device *dev = &pch->dev->dev;
++	int ret;
++
++	if (!dhdpcie_system_wake_opt_in() || !device_may_wakeup(dev) ||
++	    !os->oob_irq_registered || os->oob_irq_num <= 0)
++		return 0;
++
++	ret = dev_pm_set_wake_irq(dev, os->oob_irq_num);
++	if (!ret)
++		os->system_wake_attached = true;
++	return ret;
++}
++
++static void dhdpcie_detach_system_wake(dhdpcie_info_t *pch)
++{
++	dhdpcie_os_info_t *os = pch->os_cxt;
++
++	if (os->system_wake_attached) {
++		dev_pm_clear_wake_irq(&pch->dev->dev);
++		os->system_wake_attached = false;
++	}
++}
++#endif
++
+ #ifdef DHD_PCIE_RUNTIMEPM
+ static int dhdpcie_pm_suspend(struct device *dev)
+ {
+@@ -395,6 +435,14 @@
+ 	if (!READ_ONCE(bus->dhd->dongle_reset) &&
+ 	    READ_ONCE(bus->dhd->busstate) == DHD_BUS_DATA)
+ 		dhd_os_wait_for_system_suspend_locks(bus->dhd);
++
++#ifdef BCMPCIE_OOB_HOST_WAKE
++	if (!bus->dhd->dongle_reset) {
++		ret = dhdpcie_attach_system_wake(pch);
++		if (ret)
++			return ret;
++	}
++#endif
+ 
+ 	DHD_GENERAL_LOCK(bus->dhd, flags);
+ 	if (!DHD_BUS_BUSY_CHECK_IDLE(bus->dhd)) {
+@@ -476,6 +524,9 @@
+ 	}
+ 
+ 	bus = pch->bus;
++#ifdef BCMPCIE_OOB_HOST_WAKE
++	dhdpcie_detach_system_wake(pch);
++#endif
+ 	DHD_ENABLE_RUNTIME_PM(bus->dhd);
+ 	bus->chk_pm = FALSE;
+ 
+@@ -716,7 +767,13 @@
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
+ 	pch->state = pci_store_saved_state(dev);
+ #endif /* OEM_ANDROID && LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0) */
+-	pci_enable_wake(dev, PCI_D0, TRUE);
++#if defined(BCMPCIE_OOB_HOST_WAKE) && defined(DHD_PCIE_RUNTIMEPM) && \
++	(LINUX_VERSION_CODE >= KERNEL_VERSION(3, 0, 0))
++	if (dhdpcie_system_wake_opt_in() && bus->chk_pm)
++		pci_enable_wake(dev, PCI_D0, device_may_wakeup(&dev->dev));
++	else
++#endif
++		pci_enable_wake(dev, PCI_D0, TRUE);
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 31))
+ 	if (pci_is_enabled(dev))
+ #endif // endif
+@@ -1091,6 +1148,17 @@
+ 	device_disable_async_suspend(&pdev->dev);
+ #endif /* BCMPCIE_DISABLE_ASYNC_SUSPEND */
+ 
++#if defined(BCMPCIE_OOB_HOST_WAKE) && defined(DHD_PCIE_RUNTIMEPM)
++	if (dhdpcie_system_wake_opt_in()) {
++		dhdpcie_info_t *pch = pci_get_drvdata(pdev);
++		dhdpcie_os_info_t *os = pch->os_cxt;
++
++		os->added_wakeup_capability = !device_can_wakeup(&pdev->dev);
++		device_set_wakeup_capable(&pdev->dev, true);
++		device_set_wakeup_enable(&pdev->dev, false);
++	}
++#endif
++
+ 	DHD_TRACE(("%s: PCIe Enumeration done!!\n", __FUNCTION__));
+ 	return 0;
+ }
+@@ -1150,6 +1218,11 @@
+ #endif // endif
+ 		pci_disable_device(pdev);
+ #ifdef BCMPCIE_OOB_HOST_WAKE
++#ifdef DHD_PCIE_RUNTIMEPM
++	dhdpcie_detach_system_wake(pch);
++	if (((dhdpcie_os_info_t *)pch->os_cxt)->added_wakeup_capability)
++		device_init_wakeup(&pdev->dev, false);
++#endif
+ 	/* pcie os info detach */
+ 	MFREE(osh, pch->os_cxt, sizeof(dhdpcie_os_info_t));
+ #endif /* BCMPCIE_OOB_HOST_WAKE */
+@@ -2255,14 +2328,19 @@
+ 				__FUNCTION__, err));
+ 			return err;
+ 		}
+-		err = enable_irq_wake(dhdpcie_osinfo->oob_irq_num);
+-		if (!err) {
+-			dhdpcie_osinfo->oob_irq_wake_enabled = TRUE;
+-		} else {
+-		/* On Hikey platform enable_irq_wake() is failing with error
+-		 * ENXIO (No such device or address). This is because the callback function
+-		 * irq_set_wake() is not registered in kernel, hence returning BCME_OK.
+-		 */
++#ifdef DHD_PCIE_RUNTIMEPM
++		if (!dhdpcie_system_wake_opt_in())
++#endif
++		{
++			err = enable_irq_wake(dhdpcie_osinfo->oob_irq_num);
++			if (!err) {
++				dhdpcie_osinfo->oob_irq_wake_enabled = TRUE;
++			} else {
++			/* On Hikey platform enable_irq_wake() is failing with error
++			 * ENXIO (No such device or address). This is because the callback function
++			 * irq_set_wake() is not registered in kernel, hence returning BCME_OK.
++			 */
++			}
+ 		}
+ 		dhdpcie_osinfo->oob_irq_enabled = TRUE;
+ 	}
+@@ -2300,6 +2378,9 @@
+ 		DHD_ERROR(("%s: irq is not registered\n", __FUNCTION__));
+ 		return;
+ 	}
++#ifdef DHD_PCIE_RUNTIMEPM
++	dhdpcie_detach_system_wake(pch);
++#endif
+ 	if (dhdpcie_osinfo->oob_irq_num > 0) {
+ 		if (dhdpcie_osinfo->oob_irq_wake_enabled) {
+ 			err = disable_irq_wake(dhdpcie_osinfo->oob_irq_num);
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -28,6 +28,7 @@
+ 	model_info-hw_rev = <10>;
+ 	model_info-hw_rev_end = <255>;
+ 	compatible = "samsung, SM-G955N rev05", "samsung,EXYNOS8895";
++	samsung,system-wlan-wake-opt-in;
+ 
+ 	spi_10: spi@108C0000{
+ 		#address-cells = <1>;

@@ -66,6 +66,8 @@ def main():
                         help='Defer station PM timers during system suspend with WoWLAN enabled')
     parser.add_argument('--dhd-init-wowlan-defaults', action='store_true',
                         help='Initialize unset Broadcom default WoWLAN flags to false')
+    parser.add_argument('--dhd-system-wlan-wake-opt-in', action='store_true',
+                        help='Default SM-G955N WLAN system wake off and honor the standard wakeup setting')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -106,6 +108,8 @@ def main():
         parser.error('--dhd-defer-wowlan-pm-work requires --dhd-cancel-pending-pm-work')
     if args.dhd_init_wowlan_defaults and not args.build_version:
         parser.error('--dhd-init-wowlan-defaults requires an explicit --build-version')
+    if args.dhd_system_wlan_wake_opt_in and not args.dhd_system_suspend_drain:
+        parser.error('--dhd-system-wlan-wake-opt-in requires --dhd-system-suspend-drain')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -163,6 +167,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0047-dhd-defer-station-pm-work-during-wowlan.patch')
     if args.dhd_init_wowlan_defaults:
         patchfiles.append(ROOT/'patches/proposals/0048-dhd-initialize-default-wowlan-triggers.patch')
+    if args.dhd_system_wlan_wake_opt_in:
+        patchfiles.append(ROOT/'patches/proposals/0049-dhd-respect-system-wlan-wakeup-policy.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -184,6 +190,7 @@ def main():
             'dhd_system_suspend_drain':args.dhd_system_suspend_drain,
             'dhd_defer_wowlan_pm_work':args.dhd_defer_wowlan_pm_work,
             'dhd_init_wowlan_defaults':args.dhd_init_wowlan_defaults,
+            'dhd_system_wlan_wake_opt_in':args.dhd_system_wlan_wake_opt_in,
             'exynos_wlan_pci_sleep_ownership':args.exynos_wlan_pci_sleep_ownership,
             'strict_noirq_power_domain':args.strict_noirq_power_domain,
             'exynos_suspend_unwind':args.exynos_suspend_unwind,
