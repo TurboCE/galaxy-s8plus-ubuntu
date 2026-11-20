@@ -3,9 +3,11 @@
 grep -aq SM-G955N /proc/device-tree/model || exit 0
 printk=/proc/sys/kernel/printk
 saved=/run/g955n-suspend-console-level
+display_suspend=/run/g955n-display-suspend
 
 case "$1" in
     pre)
+        printf 'sleeping\n' > "$display_suspend"
         # This kernel briefly switches the display to its reserved suspend VT.
         # Keep ordinary kernel messages in the ring buffer during the switch.
         [ "$(cat /sys/class/tty/tty0/active)" != tty63 ] || exit 0
@@ -18,6 +20,9 @@ case "$1" in
         exit 0
         ;;
     post)
+        # /proc/uptime uses the same clock as the reader's input event timestamps.
+        awk 'NR == 1 {print $1}' /proc/uptime > "$display_suspend.new" &&
+            mv -f "$display_suspend.new" "$display_suspend"
         if [ -f "$saved" ]; then
             read -r level < "$saved"
             current=$(awk 'NR == 1 { print $1 }' "$printk")

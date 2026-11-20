@@ -1,5 +1,5 @@
 [Unit]
-Description=Wake the Samsung SM-G955N GNOME display on a power-key press
+Description=Toggle the Samsung SM-G955N GNOME display with the power key
 After=systemd-logind.service systemd-udev-trigger.service
 ConditionPathExists=/dev/input/by-path/platform-gpio_keys-event
 

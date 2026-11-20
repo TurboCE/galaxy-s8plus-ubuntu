@@ -1567,3 +1567,24 @@ before GPIO input debouncing can report it to the resumed desktop.
 A hook fixture confirmed dispatch for KEY_POWER and no dispatch for
 the RTC's PMIC IRQ. The scheduled display action completed on the
 live X11 session.
+
+### Power key toggles display power
+
+The owner confirmed that the original wake-only action left a lit
+screen on. On the handset, a GPIO power event also wakes X11 DPMS
+with the key service stopped. The toggle therefore records the panel's
+power state before that event and blanks on release, after X11 handles
+the key. The service treats a press during suspend or near resume as
+a wake request.
+
+On the running kernel50 handset, injected power-key presses and releases
+on the GPIO evdev stream completed three active → suspended → active
+DECON cycles. DPMS agreed with the hardware state and the GNOME lock
+state was unchanged. A separate X11 blank followed by a key press
+also returned the panel to active.
+
+An on-device test scheduled a normal GNOME suspend with an RTC alarm,
+then injected the first power press inside the recorded resume window.
+The panel stayed active, the GNOME lock state was unchanged, and the
+test returned on the same boot. The wake IRQ was RTC. A physical key
+wake from system suspend remains unverified.

@@ -1498,3 +1498,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Connected the physical power-key input to display wake in the active
   GNOME session. The short press can restore X11 panel power while leaving
   the screen lock in effect.
+- Made the short power-key press toggle the active display. The wake
+  gesture at system resume still requests display on.

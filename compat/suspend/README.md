@@ -25,7 +25,8 @@ separate GNOME settings.
 
 Enable `g955n-power-key.service` to connect the hardware power key to the
 active GNOME display. The service shares the GPIO input device and runs the
-display wake request with the seat session's user privileges. The X11 path
+display power request with the seat session's user privileges. A short press
+turns an active screen off or wakes a blanked screen. The X11 path
 uses DPMS and the Wayland path uses Mutter's display power property. The
 request preserves screen locking. Suspend is selected from GNOME's menu.
 With the wake-report hook installed, a kernel-reported power-key wake
