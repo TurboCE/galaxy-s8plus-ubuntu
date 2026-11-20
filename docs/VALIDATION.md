@@ -786,3 +786,15 @@ open. The earlier bounded auto-brightness and two-band Wi-Fi results stand.
 Kernel36 builds from kernel35 plus proposal0035. The AArch64 build and
 linked initramfs check passed. The kernel35 configuration and Korean DTB
 match byte for byte.
+
+Verified a fresh full kernel32 BOOT backup and protected partition hashes
+through TWRP, installed kernel36 to BOOT only, and verified readback.
+Kernel36 booted with taint 0. The bounded freezer-stage test returned in
+5.13 seconds with errno 0, the same boot and taint 0. Its trace shows the
+ABOX GIC IRQ being disabled before the DSP is powered down, then runtime
+resume, GIC initialization and DSP power-up after the test.
+
+The next bounded platform-stage request again lost the two host
+transports and USB-console response. No completion record was retrieved
+in the observation window. Full system suspend remains disabled, and
+the platform result must be read after the S8+ becomes accessible.
