@@ -91,6 +91,19 @@ class DirectPanelBootTests(unittest.TestCase):
             notes.unlink()
             self.assertFalse(controller.qualified_kernel())
 
+    def test_kernel50_requires_its_linked_notes(self):
+        notes = self.policy.parent / 'notes50'
+        notes.write_bytes(b'reviewed kernel50')
+        with patch.object(controller, 'KERNEL_NOTES', notes), \
+             patch.object(controller, 'KERNEL50_NOTES_SHA256',
+                          hashlib.sha256(notes.read_bytes()).hexdigest()), \
+             patch.object(controller.subprocess, 'check_output', return_value='#50 SMP\n'):
+            self.assertTrue(controller.qualified_kernel())
+            notes.write_bytes(b'different kernel50')
+            self.assertFalse(controller.qualified_kernel())
+            notes.unlink()
+            self.assertFalse(controller.qualified_kernel())
+
     def test_manual_restore_cancels_transient_timer_before_restarting_gdm(self):
         self.lease.touch()
         calls = []

@@ -39,8 +39,11 @@ through GDM into the ordinary Ubuntu GNOME46 session with **Mali-G71 GLES/EGL
 hardware rendering and composition**. The actual GNOME process loads the
 private EGL bridge and Exynos gralloc, with no swrast driver. Three native
 client/overlay pixel and stable-calendar trials passed. The X11 presentation
-still uses CPU copies and a separate60Hz panel commit pump; this is not a
-zero-copy or measured60FPS claim. See the [native GNOME setup](compat/native-gnome/README.md).
+initially used CPU copies and a separate60Hz panel commit pump. The current
+kernel50 normal GNOME login uses the Mali DMA-BUF to DECON direct-output
+path for its final composition. Application-buffer transfers and actual
+panel FPS require separate measurement. See the
+[direct-output validation](docs/gnome-direct-panel-output.md).
 Automatic login is disabled; credentials and device artifacts remain private.
 The GDM account-row touch repair now passes owner-confirmed password/desktop entry;
 a separate cold-boot regression and other hardware acceptance remain open.

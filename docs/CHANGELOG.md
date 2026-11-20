@@ -1502,3 +1502,7 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   gesture at system resume still requests display on.
 - Changed a short press on the active display to request system suspend.
   A long hold opens a cancellable shutdown confirmation with no countdown.
+- Restored final GNOME DMA-BUF scanout to DECON for the verified kernel50
+  image. Measured lower CPU use and shorter drag-update gaps than the
+  restored X11 copy path. The fallback presenter idles while GNOME owns
+  the panel lease, and boot recovery reports a CPU-copy fallback explicitly.

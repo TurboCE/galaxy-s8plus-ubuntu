@@ -32,6 +32,7 @@ EXTENSION = SHELL_DATA / 'gnome-shell/extensions' / EXTENSION_ID
 POLICY_FILES = (EXTENSION / 'extension.js', EXTENSION / 'metadata.json', PRIVATE_MODE)
 KERNEL_NOTES = Path('/sys/kernel/notes')
 KERNEL36_NOTES_SHA256 = '1bc70f6013b1af4529cef38d8ce0d9529103cd1f9e4b03bdbe0842b11716d01b'
+KERNEL50_NOTES_SHA256 = 'bee62a987879812b61a4e1196ce5b1908154c442edc6e8b051c029e98fe6e1f4'
 
 
 def sync_directory(directory):
@@ -104,10 +105,12 @@ def qualified_kernel():
     version = subprocess.check_output(['uname', '-v'], text=True)
     if version.startswith('#32 '):
         return True
-    if not version.startswith('#36 '):
+    expected = {'#36': KERNEL36_NOTES_SHA256, '#50': KERNEL50_NOTES_SHA256}
+    build = version.split()[0]
+    if build not in expected:
         return False
     try:
-        return digest(KERNEL_NOTES.read_bytes()) == KERNEL36_NOTES_SHA256
+        return digest(KERNEL_NOTES.read_bytes()) == expected[build]
     except OSError:
         return False
 
@@ -139,9 +142,13 @@ def prepare_boot():
             hashes = json.loads(DEFAULT.read_text())
             if hashes == default_hashes():
                 create_lease()
+                print('GNOME direct output prepared for the verified display kernel', flush=True)
                 return
         except (OSError, ValueError) as error:
             print(f'Direct output boot verification: {error}', file=sys.stderr)
+    print('GNOME direct output could not be verified. Restoring CPU-copy output '
+          'from its saved files; requalification is required.',
+          file=sys.stderr, flush=True)
     restore_files()
     remove_backup()
 

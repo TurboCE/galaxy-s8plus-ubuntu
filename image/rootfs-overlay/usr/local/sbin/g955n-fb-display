@@ -133,7 +133,13 @@ try:
                     time.sleep(0.25)
                     next_pan = time.monotonic()
                     continue
-                pans += pan_with_trial_lease(fd, var)
+                if not pan_with_trial_lease(fd, var):
+                    # The direct GNOME output owns the panel. Wait for it
+                    # to release the lease before resuming legacy commits.
+                    time.sleep(0.25)
+                    next_pan = time.monotonic()
+                    continue
+                pans += 1
                 next_pan = max(next_pan + 1.0 / 60.0, time.monotonic())
                 time.sleep(max(0.001, next_pan - time.monotonic()))
                 if now - stats_at >= 30:

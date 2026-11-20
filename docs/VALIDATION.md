@@ -1606,3 +1606,34 @@ system suspend remains unverified.
 
 With only the display blanked, a short press woke DECON and X11 DPMS
 without starting the system suspend service.
+
+### Kernel50 direct-output restoration
+
+The live owner session loaded Mali-G71 and Exynos gralloc while its
+direct-output environment and saved state were absent. A cold boot
+provided a clear-taint baseline. The checked controller now recognizes
+the running image's exact linked ELF notes and installs the previously
+tested v6 direct module for ordinary GNOME logins.
+
+After the normal PAM login the same image logged final GNOME frame
+retirement without CPU pixel transfer and held the panel lease. In
+three synthetic drags, mean whole-machine CPU decreased from 17.00%
+to 10.91%, and median window-position update intervals decreased from
+501–519 ms to 33 ms. These are synthetic input and geometry measurements.
+Application buffer copies and optical panel FPS are separate.
+
+Two DPMS cycles resumed the same GNOME shell with 176 and 177 DECON
+retirements after wake. The fullscreen shape test retained its overlay
+with zero hidden samples. USB reconnection introduced the known DWC3
+warning bit before these graphics tests; it stayed unchanged. The legacy
+overlay-image pixel fixture failed against direct scanout and cannot be
+used to certify its panel pixels.
+
+One system-suspend comparison returned the same kernel boot but GNOME
+exited with bridge status 33 and systemd restarted it. A diagnostic
+rebuild added stderr messages at the existing fence-failure exits without
+changing wait behavior. The next RTC comparison kept the same GNOME
+process. Its later panel-off state was consistent with the lock screen.
+The original reviewed v6 module was restored and its installed hashes
+rechecked. The intermittent fence exit remains unresolved, so direct
+output with system suspend is still under qualification.

@@ -222,3 +222,49 @@ compositor work. A separate 129-second workload kept the same GNOME Shell
 and boot with taint 0 and 175 to 179 DECON retirements per sample. System
 sleep targets stayed masked. CPU idle entry counters increased in all
 three observed idle states under the ondemand governor.
+
+### Kernel50 output recovery and performance
+
+The live owner GNOME was using Mali-G71 EGL and Exynos gralloc, but its
+session had no direct-output flag and the direct-output snapshot was absent.
+The kernel allow check accepted only kernel32 and the linked kernel36.
+The boot recovery policy restores the saved X11 output on other builds.
+Consequently GPU rendering remained enabled while final presentation
+returned to CPU transfer.
+
+Compared the running kernel50 ELF notes with the local linked vmlinux
+and added that exact image to the checked controller. The existing v6
+EGL candidate matched the previously tested file byte for byte. A normal
+login on kernel50 then held the panel lease, opened fb0 from GNOME, loaded
+Mali-G71, and logged 60 retired GNOME frames without CPU pixel transfer.
+The controller logs explicitly when it restores the CPU-copy path.
+
+Three synthetic X11 drags on the copy path used an average 17.00% of
+whole-machine CPU, with median window-position gaps of 501, 519 and
+501 ms. Three trials on direct output averaged 10.91%, with all three
+median gaps at 33 ms. This is about 36% less total CPU activity in that
+workload. Deterministic window-move trials averaged 14.26% before and
+11.05% after, with 17 ms geometry gaps in both cases. Geometry reporting
+does not measure panel FPS or physical touch latency.
+
+The fallback presenter now backs off while GNOME owns the direct-output
+lease. The fullscreen fixture kept the overlay composed with zero hidden
+samples and continued DECON retirement.
+
+The legacy pixel probe reads the X11 overlay backing image and fails
+after final composition is submitted directly to DECON. It cannot
+qualify the direct panel pixels. Optical correctness remains separate
+from these buffer-ownership, fence and response measurements.
+
+The current integration still qualifies individual kernel images.
+Moving DECON to DRM/KMS with PRIME import and matching Mali EGL/GBM
+support is a separate driver and compositor integration task. That path
+would expose buffer formats, planes and page-flip synchronization through
+the standard display UAPI. It must preserve DMA-BUF import, scanout
+lifetimes and suspend/resume before replacing the present direct path.
+
+During the current qualification one system-suspend run caused the
+GNOME process to exit with bridge status 33 and restart within the same
+session. A fence-diagnostic comparison did not reproduce it. The
+installed library was returned to reviewed v6 afterward. This finding
+leaves direct-output system-suspend stability open.
