@@ -28,6 +28,8 @@ active GNOME display. The service shares the GPIO input device and runs the
 display wake request with the seat session's user privileges. The X11 path
 uses DPMS and the Wayland path uses Mutter's display power property. The
 request preserves screen locking. Suspend is selected from GNOME's menu.
+With the wake-report hook installed, a kernel-reported power-key wake
+also schedules a display request after systemd has resumed the session.
 
 The optional hook clears the reserved sleep console and limits messages
 printed on it during the switch. Kernel messages remain in the ring

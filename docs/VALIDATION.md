@@ -1555,3 +1555,15 @@ with a service acknowledgement, the same boot and an unchanged GNOME
 lock state. This exercises the wake service and panel after display
 blanking. A hardware IRQ issued while Linux is suspended is a separate
 test.
+
+The guarded system suspend resumed on its 105.70-second RTC fallback.
+The same boot recovered tty2, active DECON, GDM and WLAN. The captured
+wake IRQ came from the PMIC and the RTC alarm handler ran in the
+interval. It provides no physical-button wake evidence.
+
+The hook now also queues a delayed display wake for a kernel-reported
+`gpio-keys: KEY_POWER` wake IRQ. This covers a brief press released
+before GPIO input debouncing can report it to the resumed desktop.
+A hook fixture confirmed dispatch for KEY_POWER and no dispatch for
+the RTC's PMIC IRQ. The scheduled display action completed on the
+live X11 session.

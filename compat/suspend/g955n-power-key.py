@@ -5,6 +5,7 @@ from pathlib import Path
 import pwd
 import struct
 import subprocess
+import sys
 
 
 INPUT_EVENT = struct.Struct('@llHHi')
@@ -55,6 +56,9 @@ def wake_display():
 def main():
     if b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise SystemExit('Unexpected device model')
+    if sys.argv[1:] == ['--wake']:
+        wake_display()
+        return
     # A normal read shares the device with the compositor and logind.
     with open(GPIO_KEYS, 'rb', buffering=0) as key:
         watch_keys(key)

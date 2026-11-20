@@ -49,5 +49,13 @@ case "$irq" in
             }
         ' /proc/interrupts)
         printf 'g955n-suspend: wake IRQ %s (%s)\n' "$irq" "${source:-unknown}"
+        if [ "$source" = 'gpio-keys: KEY_POWER' ] &&
+           systemctl is-active --quiet g955n-power-key.service; then
+            # A brief press can be released before the resumed input driver samples it.
+            # Defer display access until systemd has unfrozen the graphical session.
+            systemd-run --quiet --collect --on-active=2s \
+                --unit=g955n-wake-display-after-button /usr/bin/python3 \
+                /usr/local/lib/g955n/g955n-power-key.py --wake
+        fi
         ;;
 esac
