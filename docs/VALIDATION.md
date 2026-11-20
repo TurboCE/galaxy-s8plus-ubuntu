@@ -1332,3 +1332,19 @@ allocation explicitly assigned four flags and left `any`, `magic_pkt` and
 `rfkill_release` uninitialized. Those unspecified flags had been reported
 as enabled by `iw`. Kernel48 compiled and packed with kernel47's config,
 DTB and external ramdisk. Its wake timing needs a separate device test.
+
+Installed and verified kernel48 after backing up kernel47 BOOT. With no
+user configuration change, `iw` showed only the four explicitly initialized
+WoWLAN triggers. The first associated suspend-to-idle test entered
+successfully but returned in 0.59 seconds on the Broadcom host-wake IRQ
+before its RTC alarm. Wi-Fi, GDM and touch remained accessible, and kernel
+taint was zero. Initializing the trigger fields corrected their reported
+state but did not prevent that host-wake event. All 102 Linux tests passed.
+
+A second associated kernel48 RTC trial was started after the connection
+settled. USB still enumerated initially, but neither USB SSH nor Wi-Fi
+returned a completion record after the alarm window. The retained log is
+pending. The Broadcom out-of-band IRQ is separately armed by the vendor
+driver, so the corrected cfg80211 trigger display alone cannot establish
+the cause of host wake or reliable RTC recovery. Both desktop sleep targets
+were restored to masked after the earlier standard systemd trial.

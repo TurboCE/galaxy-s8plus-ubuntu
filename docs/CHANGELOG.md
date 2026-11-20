@@ -1475,3 +1475,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Kernel47 entered suspend-to-idle immediately after Wi-Fi reconnect, but
   Broadcom host wake interrupted it before the RTC alarm. Kernel48 zeros
   the unspecified WoWLAN flags in the default driver configuration.
+- Installed kernel48 and confirmed only the four intended WoWLAN defaults.
+  One connected shallow sleep returned early on Broadcom host wake. A later
+  RTC trial had no observable completion. Desktop sleep remains gated.
