@@ -86,6 +86,12 @@ Collectors are read-only; outputs under inventory/ may contain personal data
 and must remain private. Source references and exact commits are in sources.json.
 Build scripts do not flash phones. Never flash G950N/G955F/G965N images here.
 
+For SSH diagnostics when USB is intermittent, pass the USB destination as
+`--host` and the current WLAN destination as `--wifi-host`. Supply
+`--known-hosts` and `--host-key-alias` for the same pinned handset key on both
+addresses. The collector tries WLAN if the initial USB SSH connection fails.
+Check the current lease after reboot if a saved WLAN address stops responding.
+
 See [validation](docs/VALIDATION.md), [engineering notes](docs/PORTING.md),
 [change log](docs/CHANGELOG.md), [installation review](docs/INSTALLATION_REVIEW.md),
 and [attribution](NOTICE).

@@ -1420,10 +1420,34 @@ Full `mem`, standby battery draw and physical power-key wake have not been
 qualified under this configuration.
 
 A controlled reboot verified the persistent settings, logind `CanSuspend`,
-GDM, touch and WLAN gateway traffic on the new kernel50 boot. The next
-standard suspend request, after that reboot, then lost USB and Wi-Fi
-completion. The USB serial console did not respond. Repeated post-reboot
-sleep is therefore still unqualified. The persistent files document the
-policy used for the comparison. Do not enable it in a fresh image until
-repeatability is demonstrated. The running handset should be remasked as
-soon as its management link is recovered.
+GDM, touch and WLAN gateway traffic on the new kernel50 boot. The host
+initially lost management access during the next standard suspend request.
+On USB recovery, the current boot's journal showed the RTC interrupt inside
+the 24.66-second suspend interval and successful systemd suspend completion.
+The handset remained on that boot. SSH to the handset's current WLAN
+address succeeded using the pinned USB host key. The targets were remasked
+for subsequent bounded tests.
+
+A second post-reboot standard suspend trial was scheduled and collected
+entirely through WLAN SSH, with the targets temporarily unmasked. After
+24.22 seconds, the RTC woke the same boot and WLAN SSH reconnected with the
+same pinned key. No new kernel warning appeared in the suspend interval.
+Taint was 512 both before and after the test: the recovered journal shows
+a DWC3 endpoint command warning followed by a gadget run/stop timeout on
+a USB cable detach, over four minutes after the first post-reboot RTC
+wake. The USB detach path needs separate validation.
+
+A two-minute standard suspend trial through WLAN SSH repeated that result.
+The RTC woke the same boot after 120.22 seconds, systemd completed the
+operation, and the existing GNOME Shell process and kernel taint were
+unchanged. No new warning appeared in the suspend interval. GDM was
+active, the touchscreen input remained enabled, and three WLAN gateway
+probes received replies. The timed cleanup restored both sleep target
+masks and removed the temporary boot recovery unit. Enabling daily
+desktop suspend still requires testing physical wake and screen recovery
+without a scheduled RTC alarm. Deep sleep and battery draw remain open.
+
+The SSH collector also verified fallback on the handset using a deliberately
+unreachable primary address and its current WLAN address. Both probes use the
+same pinned key and the capture checks the device model and kernel identity
+before collecting logs.

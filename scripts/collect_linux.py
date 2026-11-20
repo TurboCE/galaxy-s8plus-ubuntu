@@ -31,6 +31,7 @@ def main():
     transport = parser.add_mutually_exclusive_group(required=True)
     transport.add_argument('--host', help='SSH host or user@host; configure host key and authentication first')
     transport.add_argument('--serial-port', help='Explicit G955N USB console port for bring-up without host networking')
+    parser.add_argument('--wifi-host', help='Fallback SSH destination on the same handset if the primary SSH probe cannot connect')
     parser.add_argument('--identity', type=Path)
     parser.add_argument('--known-hosts', type=Path)
     parser.add_argument('--host-key-alias', help='Use the pinned handset key for a different verified address')
@@ -38,8 +39,12 @@ def main():
                         help='Private local credential file for manual USB console login')
     parser.add_argument('--sudo', action='store_true', help='Use existing passwordless sudo for diagnostic reads')
     args = parser.parse_args()
-    if args.host and (args.host.startswith('-') or any(c.isspace() for c in args.host)):
+    if any(host and (host.startswith('-') or any(c.isspace() for c in host))
+           for host in (args.host, args.wifi_host)):
         raise SystemExit('Invalid SSH destination')
+    if args.wifi_host and not (args.host and args.known_hosts and args.host_key_alias):
+        parser.error('--wifi-host requires --host, --known-hosts and --host-key-alias for the same handset')
+    host = args.host
     serial = SerialShell(args.serial_port) if args.serial_port else None
     if args.console_password_file:
         if not serial:
@@ -54,18 +59,26 @@ def main():
             options += ['-o', 'UserKnownHostsFile=' + str(args.known_hosts), '-o', 'StrictHostKeyChecking=yes']
         if args.host_key_alias:
             options += ['-o', 'HostKeyAlias=' + args.host_key_alias]
+        if args.wifi_host:
+            options += ['-o', 'GlobalKnownHostsFile=/dev/null']
         if args.sudo:
             command = 'sudo -n -- sh -c ' + shlex.quote(command)
         if serial:
             return serial.run(command)
         try:
             p = subprocess.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10',
-                                *options, args.host, command], capture_output=True, text=True, timeout=40)
+                                *options, host, command], capture_output=True, text=True, timeout=40)
             return dict(exit_code=p.returncode, stdout=p.stdout, stderr=p.stderr)
         except subprocess.TimeoutExpired:
             return dict(exit_code=124, stdout='', stderr='Capture timed out')
 
-    identity = run('uname -r; cat /proc/device-tree/model')
+    transport_used = 'serial' if serial else 'ssh'
+    identify = 'uname -r; cat /proc/device-tree/model'
+    identity = run(identify)
+    if args.wifi_host and identity['exit_code'] in (124, 255):
+        host = args.wifi_host
+        transport_used = 'wifi_fallback'
+        identity = run(identify)
     if identity['exit_code'] or 'g955n-ubuntu' not in identity['stdout'] or 'SM-G955N' not in identity['stdout']:
         raise SystemExit('Refusing capture: not the expected SM-G955N Ubuntu kernel/DT')
     os.umask(0o077)
@@ -74,7 +87,7 @@ def main():
     directory.mkdir(parents=True, mode=0o700)
     checks = {name: run(command) for name, command in CHECKS.items()}
     kernel = checks['dmesg']
-    report = dict(timestamp_utc=stamp, identity=identity, checks=checks,
+    report = dict(timestamp_utc=stamp, transport=transport_used, identity=identity, checks=checks,
                   kernel_audit=audit(kernel['stdout']) if kernel['exit_code'] == 0 else
                   dict(status='unavailable', reason='Kernel log capture failed'),
                   hardware_validation='Not qualified by service/node enumeration')
