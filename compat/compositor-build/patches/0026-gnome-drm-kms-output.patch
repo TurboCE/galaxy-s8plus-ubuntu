@@ -1,0 +1,61 @@
+Subject: Present the GNOME overlay through standard DRM KMS and PRIME
+
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -45,6 +45,7 @@
+ #include <sys/stat.h>
+ extern "C" {
+ #include "decon-output.h"
++#include "drm-output.h"
+ }
+ 
+ #if ANDROID_VERSION_MAJOR>=4 && ANDROID_VERSION_MINOR>=2 || ANDROID_VERSION_MAJOR>=5
+@@ -391,6 +392,7 @@
+                                const X11NativeWindowBuffer *buffer)
+ {
+     static int panel = -1, lease = -1, previous_fence = -1;
++    static g955n_kms *kms;
+     static unsigned retired;
+     static Window output = None;
+     static bool rejected;
+@@ -453,13 +455,36 @@
+             close(lease);
+             return false;
+         }
+-        panel = open("/dev/fb0", O_RDWR | O_CLOEXEC | O_NOFOLLOW);
+-        if (panel < 0) {
+-            close(lease);
+-            return false;
++        if (getenv("G955N_DRM_KMS")) {
++            int error = g955n_kms_open(&kms);
++            if (error) {
++                fprintf(stderr, "G955N DRM/KMS unavailable: %d\n", -error);
++                close(lease);
++                rejected = true;
++                return false;
++            }
++        } else {
++            panel = open("/dev/fb0", O_RDWR | O_CLOEXEC | O_NOFOLLOW);
++            if (panel < 0) {
++                close(lease);
++                return false;
++            }
+         }
+     }
+     const g955n_panel_frame frame = {handle->data[0], -1, 1440, 2960, G955N_DECON_RGBX8888};
++    if (kms) {
++        int submitted = 0;
++        int error = g955n_kms_present(kms, &frame, &submitted);
++        if (error) {
++            fprintf(stderr, "G955N DRM/KMS frame failed: errno=%d submitted=%d\n",
++                    -error, submitted);
++            _exit(35); /* Do not reuse buffers after an uncertain commit. */
++        }
++        if (output != None && (++retired == 1 || retired == 60))
++            fprintf(stderr, "G955N DRM/KMS retired %u GNOME frames without CPU pixel transfer\n", retired);
++        output = window;
++        return true;
++    }
+     int fence, submitted;
+     const int fd_flags = fcntl(frame.dma_buf, F_GETFD);
+     int error = g955n_decon_submit(panel, &frame, &fence, &submitted);

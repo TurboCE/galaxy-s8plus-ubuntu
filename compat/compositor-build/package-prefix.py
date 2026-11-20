@@ -20,7 +20,7 @@ required=['bin/tinywl-g955n-candidate','lib/libEGL.so.1','lib/libGLESv2.so.2',
           'lib/libhardware.so.2','lib/libgralloc.so.1','lib/libhwc2.so.1']
 # Actual upstream plugin names and versions are checked rather than invented.
 required += ['lib/libhybris/eglplatform_'+name+'.so' for name in ('null','hwcomposer','wayland')]
-if a.include_x11:required.append('lib/libhybris/eglplatform_x11.so')
+if a.include_x11:required += ['lib/libhybris/eglplatform_x11.so','bin/drm-kms-probe']
 required += [str(f.relative_to(prefix)) for f in (prefix/'lib/libhybris/linker').glob('*.so')]
 seen=set(); external=set(); elf={}
 def copy(relative):

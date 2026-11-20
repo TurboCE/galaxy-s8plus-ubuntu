@@ -30,6 +30,7 @@ PRIVATE_MODE = SHELL_DATA / 'gnome-shell/modes/ubuntu.json'
 EXTENSION_ID = 'g955n-direct-panel@local'
 EXTENSION = SHELL_DATA / 'gnome-shell/extensions' / EXTENSION_ID
 POLICY_FILES = (EXTENSION / 'extension.js', EXTENSION / 'metadata.json', PRIVATE_MODE)
+DRM_PROBE = PREFIX / 'bin/drm-kms-probe'
 KERNEL_NOTES = Path('/sys/kernel/notes')
 KERNEL36_NOTES_SHA256 = '1bc70f6013b1af4529cef38d8ce0d9529103cd1f9e4b03bdbe0842b11716d01b'
 KERNEL50_NOTES_SHA256 = 'bee62a987879812b61a4e1196ce5b1908154c442edc6e8b051c029e98fe6e1f4'
@@ -115,9 +116,32 @@ def qualified_kernel():
         return False
 
 
+def kms_selected():
+    return LAUNCHER.is_file() and b"env['G955N_DRM_KMS']='1'" in LAUNCHER.read_bytes()
+
+
+def qualified_kms():
+    # The interface is identified by its version and capabilities, not a kernel
+    # build number. The probe never modesets or maps a pixel buffer.
+    try:
+        for path in (DRM_PROBE, *DRM_PROBE.parents):
+            info = path.stat()
+            if info.st_uid or info.st_mode & 0o022:
+                return False
+        result = subprocess.run([str(DRM_PROBE)], capture_output=True, text=True,
+                                timeout=10, check=False)
+        return (result.returncode == 0 and result.stdout.strip() ==
+                'g955n-decon KMS ABI 1.1: PRIME import, connected DSI 1440x2960')
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def default_hashes():
+    paths = (*FILES, *POLICY_FILES)
+    if kms_selected():
+        paths += (DRM_PROBE,)
     return {str(path.relative_to(PREFIX)): digest(path.read_bytes())
-            for path in (*FILES, *POLICY_FILES)}
+            for path in paths}
 
 
 def prepare_shell_policy():
@@ -137,10 +161,11 @@ def prepare_shell_policy():
 def prepare_boot():
     if LEASE.exists() or not BACKUP.exists():
         return
-    if DEFAULT.is_file() and qualified_kernel():
+    if DEFAULT.is_file():
         try:
             hashes = json.loads(DEFAULT.read_text())
-            if hashes == default_hashes():
+            if (hashes == default_hashes() and
+                    (qualified_kms() if kms_selected() else qualified_kernel())):
                 create_lease()
                 print('GNOME direct output prepared for the verified display kernel', flush=True)
                 return
@@ -153,7 +178,7 @@ def prepare_boot():
     remove_backup()
 
 
-def run(candidate, expected, default):
+def run(candidate, expected, default, drm_kms=False):
     if LEASE.exists() or BACKUP.exists():
         raise RuntimeError('A previous trial still has state; restore it before staging another')
     if b'pan_with_trial_lease' not in Path('/usr/local/sbin/g955n-fb-display').read_bytes():
@@ -202,16 +227,18 @@ def run(candidate, expected, default):
         manifest['files'][KEY]['sha256'] = expected
         replace(LIBRARY, data)
         replace(MANIFEST, json.dumps(manifest, indent=2).encode())
-        settings = b"\n env.pop('G955N_DIRECT_PANEL_TRIAL',None)\n"
+        settings = b"\n env.pop('G955N_DIRECT_PANEL_TRIAL',None)\n env.pop('G955N_DRM_KMS',None)\n"
         settings += b" if Path('/run/lock/g955n-direct-panel-trial').is_file():\n"
         settings += b"  env['G955N_DIRECT_PANEL_TRIAL']='1'\n"
+        if drm_kms:
+            settings += b"  env['G955N_DRM_KMS']='1'\n"
         settings += (b"  env['XDG_DATA_DIRS']="
                      + repr(str(SHELL_DATA) + ':').encode()
                      + b"+(original.get('XDG_DATA_DIRS') or '/usr/local/share:/usr/share')\n")
-        # Include the two dynamic keys in logout cleanup.
+        # Include the dynamic output keys in logout cleanup.
         launcher = original[LAUNCHER].replace(marker, marker + settings.rstrip(b"\n"))
         launcher = launcher.replace(cleanup,
-            b"keys=sorted(set(ENV)|set(REMOVE)|{'XDG_DATA_DIRS','G955N_DIRECT_PANEL_TRIAL'})")
+            b"keys=sorted(set(ENV)|set(REMOVE)|{'XDG_DATA_DIRS','G955N_DIRECT_PANEL_TRIAL','G955N_DRM_KMS'})")
         replace(LAUNCHER, launcher)
         ctl('start', 'gdm.service')
         if default:
@@ -235,6 +262,8 @@ def main():
     mode.add_argument('--boot-recover', action='store_true')
     parser.add_argument('--sha256')
     parser.add_argument('--enable-default', action='store_true')
+    parser.add_argument('--drm-kms', action='store_true',
+                        help='Use the probed standard KMS/PRIME interface')
     args = parser.parse_args()
     if os.getuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise RuntimeError('Requires root on the SM-G955N')
@@ -254,8 +283,8 @@ def main():
             return
         if not args.sha256:
             parser.error('--candidate requires --sha256')
-        if not qualified_kernel():
-            raise RuntimeError('Direct output requires a reviewed display kernel build')
+        if not (qualified_kms() if args.drm_kms else qualified_kernel()):
+            raise RuntimeError('Direct output requires the selected verified display interface')
         if Path('/proc/sys/kernel/tainted').read_text().strip() != '0':
             raise RuntimeError('Expected an untainted kernel before the trial')
         # The delayed root recovery must invoke a trusted copy of this file.
@@ -267,7 +296,7 @@ def main():
             if info.st_uid or info.st_mode & 0o022:
                 raise RuntimeError('Install the trial controller under a root-owned prefix')
         ctl('is-enabled', RECOVERY)
-        run(args.candidate, args.sha256, args.enable_default)
+        run(args.candidate, args.sha256, args.enable_default, args.drm_kms)
 
 
 if __name__ == '__main__':

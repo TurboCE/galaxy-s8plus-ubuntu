@@ -1,0 +1,381 @@
+Subject: Expose opt-in Exynos8895 DECON scanout through DRM/KMS
+
+--- a/drivers/video/fbdev/exynos/dpu/decon.h
++++ b/drivers/video/fbdev/exynos/dpu/decon.h
+@@ -739,6 +739,8 @@
+ };
+ 
+ struct decon_reg_data {
++	struct dma_buf *drm_buffer;
++	int drm_status;
+ 	u32 num_of_window;
+ 	int plane_cnt[MAX_DECON_WIN + 1];
+ 	struct list_head list;
+@@ -1175,7 +1177,11 @@
+ 	FLAG_CHECK_VSYNC = 0,
+ 	FLAG_IGNORE_VSYNC,
+ };
++struct decon_drm;
++
+ struct decon_device {
++	struct decon_drm __rcu *native_drm;
++	bool drm_owned;
+ 	int id;
+ 	enum decon_state state;
+ 
+--- a/drivers/video/fbdev/exynos/dpu/decon_core.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_core.c
+@@ -41,6 +41,7 @@
+ #include <linux/cpufreq.h>
+ 
+ #include "decon.h"
++#include "decon_drm.h"
+ #include "dsim.h"
+ 
+ #include "../../../../staging/android/sw_sync.h"
+@@ -467,14 +468,18 @@
+ 	if (dma->fence)
+ 		sync_fence_put(dma->fence);
+ 
+-	ion_iovmm_unmap(dma->attachment, dma->dma_addr);
++	if (dma->ion_handle)
++		ion_iovmm_unmap(dma->attachment, dma->dma_addr);
++	else
++		iovmm_unmap(dma->attachment->dev, dma->dma_addr);
+ 
+ 	dma_buf_unmap_attachment(dma->attachment, dma->sg_table,
+ 			DMA_TO_DEVICE);
+ 
+ 	dma_buf_detach(dma->dma_buf, dma->attachment);
+ 	dma_buf_put(dma->dma_buf);
+-	ion_free(decon->ion_client, dma->ion_handle);
++	if (dma->ion_handle)
++		ion_free(decon->ion_client, dma->ion_handle);
+ 	memset(dma, 0, sizeof(struct decon_dma_buf_data));
+ }
+ 
+@@ -982,6 +987,8 @@
+ 		}
+ 	}
+ unlock:
++	if (!ret)
++		decon_drm_power_state(decon, check_decon_state(decon));
+ 	if (primary)
+ 		mutex_unlock(&decon_blank_qos_lock);
+ 	return ret;
+@@ -1252,15 +1259,23 @@
+ 	}
+ 
+ 	/* This is DVA(Device Virtual Address) for setting base address SFR */
+-	dma->dma_addr = ion_iovmm_map(dma->attachment, 0,
++	if (ion_handle)
++		dma->dma_addr = ion_iovmm_map(dma->attachment, 0,
++			dma->dma_buf->size, DMA_TO_DEVICE, 0);
++	else
++		dma->dma_addr = iovmm_map(dev, dma->sg_table->sgl, 0,
+ 			dma->dma_buf->size, DMA_TO_DEVICE, 0);
+ 	if (!dma->dma_addr || IS_ERR_VALUE(dma->dma_addr)) {
+ 		decon_err("iovmm_map() failed: %pa\n", &dma->dma_addr);
+ 		goto err_iovmm_map;
+ 	}
+ 
+-	exynos_ion_sync_dmabuf_for_device(dev, dma->dma_buf,
+-		dma->dma_buf->size, DMA_TO_DEVICE);
++	if (ion_handle)
++		exynos_ion_sync_dmabuf_for_device(dev, dma->dma_buf,
++			dma->dma_buf->size, DMA_TO_DEVICE);
++	else
++		dma_sync_sg_for_device(dev, dma->sg_table->sgl,
++			dma->sg_table->nents, DMA_TO_DEVICE);
+ 
+ 	dma->ion_handle = ion_handle;
+ 
+@@ -1292,20 +1307,25 @@
+ 
+ 	regs->plane_cnt[idx] = dpu_get_plane_cnt(config->format);
+ 	for (i = 0; i < regs->plane_cnt[idx]; ++i) {
+-		handle = ion_import_dma_buf(decon->ion_client, config->fd_idma[i]);
+-		if (IS_ERR(handle)) {
+-			decon_err("failed to import fd:%d\n", config->fd_idma[i]);
+-			ret = PTR_ERR(handle);
+-			goto fail;
+-		}
+-
+-		buf = dma_buf_get(config->fd_idma[i]);
+-		if (IS_ERR_OR_NULL(buf)) {
+-			decon_err("failed to get dma_buf:%ld\n", PTR_ERR(buf));
+-			ret = PTR_ERR(buf);
+-			goto fail_buf;
+-		}
+-
++		if (regs->drm_buffer && idx == 0 && i == 0) {
++			handle = NULL;
++			buf = regs->drm_buffer;
++			get_dma_buf(buf);
++		} else {
++			handle = ion_import_dma_buf(decon->ion_client, config->fd_idma[i]);
++			if (IS_ERR(handle)) {
++				decon_err("failed to import fd:%d\n", config->fd_idma[i]);
++				ret = PTR_ERR(handle);
++				goto fail;
++			}
++
++			buf = dma_buf_get(config->fd_idma[i]);
++			if (IS_ERR_OR_NULL(buf)) {
++				decon_err("failed to get dma_buf:%ld\n", PTR_ERR(buf));
++				ret = PTR_ERR(buf);
++				goto fail_buf;
++			}
++		}
+ 		/* idma_type Should be ODMA_WB */
+ 		dpp = v4l2_get_subdevdata(decon->dpp_sd[config->idma_type]);
+ 		buf_size = decon_map_ion_handle(decon, dpp->dev,
+@@ -1328,7 +1348,8 @@
+ fail_map:
+ 	dma_buf_put(buf);
+ fail_buf:
+-	ion_free(decon->ion_client, handle);
++	if (handle)
++		ion_free(decon->ion_client, handle);
+ fail:
+ 	return ret;
+ }
+@@ -2360,6 +2381,12 @@
+ end:
+ 	DPU_EVENT_LOG(DPU_EVT_TRIG_MASK, &decon->sd, ktime_set(0, 0));
+ 
++	if (regs->drm_buffer && regs->num_of_window == 1 &&
++	    decon->frame_cnt >= decon->frame_cnt_target &&
++	    (decon->cur_using_dpp & BIT(IDMA_G1)) &&
++	    !(decon->dpp_err_stat & BIT(IDMA_G1)))
++		regs->drm_status = 0;
++
+ 	decon_release_old_bufs(decon, regs, old_dma_bufs, old_plane_cnt);
+ 	/* signal to acquire fence */
+ 	decon_signal_fence(decon);
+@@ -2697,6 +2724,11 @@
+ 	decon_dbg("%s +\n", __func__);
+ 
+ 	mutex_lock(&decon->lock);
++	if (decon->drm_owned) {
++		ret = -EBUSY;
++		goto err;
++	}
++
+ #ifdef CONFIG_SUPPORT_GRAM_CHECKSUM
+ 	if(decon->gct_on) {
+ 		decon_info("decon is not active because GCT mode : %d\n", decon->gct_on);
+@@ -2803,6 +2835,114 @@
+ 	mutex_unlock(&decon->lock);
+ 	return ret;
+ }
++
++
++#ifdef CONFIG_DRM_EXYNOS8895_NATIVE
++int decon_drm_claim(struct decon_device *decon)
++{
++	mutex_lock(&decon->lock);
++	decon->drm_owned = true;
++	mutex_unlock(&decon->lock);
++	/* Legacy submissions that acquired the lock first must finish. */
++	flush_kthread_worker(&decon->up.worker);
++	return 0;
++}
++
++void decon_drm_release(struct decon_device *decon)
++{
++	struct fb_info *info = decon->win[decon->dt.dft_win]->fbinfo;
++
++	mutex_lock(&decon->lock);
++	if (!decon->drm_owned) {
++		mutex_unlock(&decon->lock);
++		return;
++	}
++	decon->drm_owned = false;
++	mutex_unlock(&decon->lock);
++	if (check_decon_state(decon))
++		decon_pan_display(&info->var, info);
++}
++
++int decon_drm_power(struct decon_device *decon, bool enabled)
++{
++	return decon_blank(enabled ? FB_BLANK_UNBLANK : FB_BLANK_POWERDOWN,
++			   decon->win[decon->dt.dft_win]->fbinfo);
++}
++
++int decon_drm_present(struct decon_device *decon,
++		      const struct decon_drm_frame *frame)
++{
++	struct decon_reg_data *regs;
++	struct decon_win_config_data *data;
++	struct decon_win_config *config;
++	int ret, i, j;
++
++	if (!frame || !frame->buffer ||
++	    frame->width != decon->lcd_info->xres ||
++	    frame->height != decon->lcd_info->yres ||
++	    frame->pitch < frame->width * 4 || frame->pitch % 4 ||
++	    frame->pitch > 4096 * 4 ||
++	    (u64)frame->pitch * frame->height > frame->buffer->size)
++		return -EINVAL;
++	regs = kzalloc(sizeof(*regs), GFP_KERNEL);
++	data = kzalloc(sizeof(*data), GFP_KERNEL);
++	if (!regs || !data) {
++		kfree(regs);
++		kfree(data);
++		return -ENOMEM;
++	}
++	config = &data->config[0];
++	config->state = DECON_WIN_STATE_BUFFER;
++	config->fd_idma[0] = -1;
++	config->fd_idma[1] = -1;
++	config->fd_idma[2] = -1;
++	config->fence_fd = -1;
++	config->plane_alpha = 255;
++	config->idma_type = IDMA_G1;
++	config->format = frame->format;
++	config->src.w = frame->width;
++	config->src.h = frame->height;
++	config->src.f_w = frame->pitch / 4;
++	config->src.f_h = frame->height;
++	config->dst = config->src;
++	config->dst.f_w = frame->width;
++	regs->drm_buffer = frame->buffer;
++	regs->drm_status = -EIO;
++
++	decon_hiber_block_exit(decon);
++	mutex_lock(&decon->lock);
++	if (!decon->drm_owned || !check_decon_state(decon) ||
++	    decon->state == DECON_STATE_TUI) {
++		/* Capture a temporary blank under the same lock as its state.
++		 * An unblank may finish before the caller sees this return. */
++		ret = decon->drm_owned && decon->state == DECON_STATE_OFF ?
++			-EAGAIN : -EHOSTDOWN;
++		goto unlock;
++	}
++	ret = decon_prepare_win_config(decon, data, regs);
++	if (ret) {
++		for (i = 0; i < decon->dt.max_win; i++)
++			for (j = 0; j < regs->plane_cnt[i]; j++)
++				decon_free_dma_buf(decon, &regs->dma_buf_data[i][j]);
++		goto unlock;
++	}
++	/* Share the DECON update sequence, but keep all references in-kernel.
++	 * No fd is created in the worker's process and no pixel is mapped.
++	 */
++	decon->timeline_max++;
++	decon_update_regs(decon, regs);
++	ret = regs->drm_status;
++	regs->drm_buffer = NULL;
++	memcpy(&decon->last_win_update, regs, sizeof(*regs));
++unlock:
++	mutex_unlock(&decon->lock);
++	decon_hiber_unblock(decon);
++	kfree(data);
++	kfree(regs);
++	return ret;
++}
++#endif
++
+ 
+ 
+ #ifdef CONFIG_SUPPORT_DOZE
+@@ -4311,6 +4451,9 @@
+ #ifdef CONFIG_SUPPORT_GRAM_CHECKSUM
+ 	decon->gct_on = 0;
+ #endif
++	ret = decon_drm_register(decon);
++	if (ret)
++		dev_warn(decon->dev, "DRM scanout unavailable: %d\n", ret);
+ 	decon_info("decon%d registered successfully", decon->id);
+ 
+ 	return 0;
+@@ -4349,6 +4492,7 @@
+ 		decon_hiber_unblock(decon);
+ 	}
+ 
++	decon_drm_unregister(decon);
+ 	decon->bts.ops->bts_deinit(decon);
+ 
+ 	pm_runtime_disable(&pdev->dev);
+@@ -4371,6 +4515,7 @@
+ {
+ 	struct decon_device *decon = platform_get_drvdata(pdev);
+ 
++	decon_drm_unregister(decon);
+ 	decon_enter_shutdown(decon);
+ 
+ 	decon_info("%s + state:%d\n", __func__, decon->state);
+--- a/drivers/video/fbdev/exynos/dpu/decon_dsi.c
++++ b/drivers/video/fbdev/exynos/dpu/decon_dsi.c
+@@ -22,6 +22,7 @@
+ #include <linux/exynos-wd.h>
+ 
+ #include "decon.h"
++#include "decon_drm.h"
+ #include "dsim.h"
+ #include "dpp.h"
+ #include "../../../../soc/samsung/pwrcal/pwrcal.h"
+@@ -107,6 +108,7 @@
+ 		wake_up_interruptible_all(&decon->wait_vstatus);
+ 		if (decon->dt.psr_mode == DECON_VIDEO_MODE) {
+ 			decon->vsync.timestamp = timestamp;
++	decon_drm_vblank(decon);
+ 			wake_up_interruptible_all(&decon->vsync.wait);
+ 		}
+ 	}
+@@ -523,6 +525,7 @@
+ #endif
+ 
+ 	decon->vsync.timestamp = timestamp;
++	decon_drm_vblank(decon);
+ 	wake_up_interruptible_all(&decon->vsync.wait);
+ 
+ 	spin_unlock(&decon->slock);
+@@ -944,6 +947,9 @@
+ 
+ 	decon_hiber_block_exit(decon);
+ 	mutex_lock(&decon->lock);
++	if (decon->drm_owned)
++		goto out;
++
+ 	/* DPMS can power down after the caller's state observation. Serialize
+ 	 * the state test and all register updates with blank/unblank. A pan
+ 	 * while blanked only records the viewport for the next unblank. */
+--- a/drivers/video/fbdev/exynos/dpu/Makefile
++++ b/drivers/video/fbdev/exynos/dpu/Makefile
+@@ -18,3 +18,5 @@
+ obj-$(CONFIG_SUPPORT_DSU) += dsu_update.o
+ decon-y += decon_core.o decon_dsi.o decon_displayport.o decon_wb.o helper.o win_update.o bts.o
+ obj-y += dp_logger/
++
++decon-$(CONFIG_DRM_EXYNOS8895_NATIVE) += decon_drm.o
+--- a/drivers/video/fbdev/exynos/Kconfig
++++ b/drivers/video/fbdev/exynos/Kconfig
+@@ -50,3 +50,12 @@
+ endif #EXYNOS_DUAL_DISPLAY
+ endif # SOC_EXYNOS8895
+ endif # EXYNOS_VIDEO
++
++
++config DRM_EXYNOS8895_NATIVE
++	bool "SM-G955N DECON DRM/KMS scanout"
++	depends on DRM=y && SOC_EXYNOS8895 && EXYNOS_SINGLE_DISPLAY
++	select DRM_KMS_HELPER
++	help
++	  Expose the primary DECON panel through DRM/KMS with PRIME DMA-BUF
++	  import. Enabled only on a board with samsung,drm-scanout.
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -316,6 +316,11 @@
+ 	};
+ };
+ 
++/* Native KMS scanout; fbdev remains available. */
++&decon_f {
++	samsung,drm-scanout;
++};
++
+ &pd_dpu0 {
+ 	samsung,keep-on-in-system-sleep;
+ };

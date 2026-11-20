@@ -48,10 +48,13 @@ with tempfile.TemporaryDirectory() as temporary:
      if sha(target)!=sha(repaired):
       direct=next((scripts/'patches').glob('0025-*.patch')).read_text()
       subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=direct,text=True,check=True)
-      if sha(target)!=sha(repaired):raise SystemExit('Unreviewed repaired X11 source: '+name)
+      if sha(target)!=sha(repaired):
+       kms=next((scripts/'patches').glob('0026-*.patch')).read_text()
+       subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=kms,text=True,check=True)
+       if sha(target)!=sha(repaired):raise SystemExit('Unreviewed repaired X11 source: '+name)
       x11_has_direct_patch=True
   else:target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
-for number in ['0014','0015','0018','0019','0021','0022','0023','0024','0025']:
+for number in ['0014','0015','0018','0019','0021','0022','0023','0024','0025','0026']:
  if x11_has_direct_patch and number in ('0019','0024','0025'):continue
  patch=next((scripts/'patches').glob(number+'-*.patch'))
  command=['patch','--fuzz=0','-p1','--batch','--silent','-d',str(hybris)]
@@ -70,24 +73,30 @@ includes=[hybris/'hybris',hybris/'hybris/common',hybris/'hybris/include',hybris/
  hybris/'hybris/egl/platforms/common',hybris/'hybris/platforms/common',work/'input/android9-headers']
 common=['-fPIC','-O2','-g',*[item for path in includes for item in ['-I',str(path)]]]
 env={**os.environ,'PKG_CONFIG_LIBDIR':'/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'}
-packages=['x11','x11-xcb','xcb','xcb-present','xext','pixman-1']
+packages=['x11','x11-xcb','xcb','xcb-present','xext','pixman-1','libdrm']
 flags=subprocess.check_output(['pkg-config','--cflags','--libs',*packages],env=env,text=True).split()
 panel=scripts.parent/'native-gnome/direct-panel'
 panel_object=build/'decon-output.o'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-fPIC','-O2','-Wall','-Wextra','-Werror',
                 '-c',str(panel/'decon-output.c'),'-o',str(panel_object)],check=True)
 common += ['-I',str(panel)]
-objects=[str(panel_object)]
+kms_object=build/'drm-output.o'
+subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-fPIC','-O2','-Wall','-Wextra','-Werror',
+                *flags,'-c',str(panel/'drm-output.c'),'-o',str(kms_object)],check=True)
+objects=[str(panel_object),str(kms_object)]
 for name in ['eglplatform_x11.cpp','x11_window.cpp','xcb_drihybris.c']:
  obj=build/(name+'.o');objects.append(str(obj));cxx=name.endswith('.cpp')
  subprocess.run(['aarch64-linux-gnu-g++' if cxx else 'aarch64-linux-gnu-gcc',*common,*(['-std=c++17'] if cxx else []),'-Wall','-Wextra','-c',str(source/name),'-o',str(obj),*flags],check=True)
 binary=prefix/'lib/libhybris/eglplatform_x11.so'
 subprocess.run(['aarch64-linux-gnu-g++','-shared','-Wl,--no-undefined,-z,relro,-z,now',*objects,'-L'+str(prefix/'lib'),'-Wl,-rpath-link,'+str(prefix/'lib'),
  '-lhybris-eglplatformcommon','-lhybris-platformcommon','-lgralloc','-lsync','-lEGL','-lhybris-common','-lpthread','-ldl',*flags,'-o',str(binary)],check=True)
+kms_probe=prefix/'bin/drm-kms-probe'
+subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-O2','-Wall','-Wextra','-Werror',
+                str(panel/'drm-probe.c'),str(kms_object),*flags,'-o',str(kms_probe)],check=True)
 header=subprocess.check_output(['readelf','-h',str(binary)],text=True);dynamic=subprocess.check_output(['readelf','-d',str(binary)],text=True)
 if 'AArch64' not in header or '(TEXTREL)' in dynamic:raise SystemExit('Unexpected X11 target ELF')
 probe=build/'x11-pixel-probe'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=gnu11','-O2','-g','-Wall','-Wextra','-Werror',str(scripts/'x11-pixel-probe.c'),
  '-I'+str(prefix/'include'),'-L'+str(prefix/'lib'),'-Wl,-rpath-link,'+str(prefix/'lib'),'-lX11','-lEGL','-lGLESv2','-ldl','-o',str(probe)],check=True)
-record={'pixel_probe_sha256':sha(probe),'pixel_probe_source_sha256':sha(scripts/'x11-pixel-probe.c'),'source':pin,'adaptation_sha256':sha(next((scripts/'patches').glob('0013-*.patch'))),'core_integration_sha256':sha(next((scripts/'patches').glob('0014-*.patch'))),'submission_order_sha256':sha(next((scripts/'patches').glob('0019-*.patch'))),'buffer_age_sha256':sha(next((scripts/'patches').glob('0018-*.patch'))),'gralloc_ownership_sha256':sha(next((scripts/'patches').glob('0015-*.patch'))),'gralloc_lifetime_sha256':sha(next((scripts/'patches').glob('0023-*.patch'))),'native_property_snapshot_sha256':sha(next((scripts/'patches').glob('0022-*.patch'))),'legacy_property_hooks_sha256':sha(next((scripts/'patches').glob('0021-*.patch'))),'direct_panel_trial_sha256':sha(next((scripts/'patches').glob('0025-*.patch'))),'overlay_layout_report_sha256':sha(next((scripts/'patches').glob('0024-*.patch'))),'source_hashes':{name:sha(hybris/relative/name) for name in names},'binary_sha256':sha(binary),'decon_submit_source_sha256':sha(panel/'decon-output.c'),'decon_submit_header_sha256':sha(panel/'decon-output.h'),'status':'built only; default XPutImage; opt-in supervised DECON trial'}
+record={'pixel_probe_sha256':sha(probe),'pixel_probe_source_sha256':sha(scripts/'x11-pixel-probe.c'),'source':pin,'adaptation_sha256':sha(next((scripts/'patches').glob('0013-*.patch'))),'core_integration_sha256':sha(next((scripts/'patches').glob('0014-*.patch'))),'submission_order_sha256':sha(next((scripts/'patches').glob('0019-*.patch'))),'buffer_age_sha256':sha(next((scripts/'patches').glob('0018-*.patch'))),'gralloc_ownership_sha256':sha(next((scripts/'patches').glob('0015-*.patch'))),'gralloc_lifetime_sha256':sha(next((scripts/'patches').glob('0023-*.patch'))),'native_property_snapshot_sha256':sha(next((scripts/'patches').glob('0022-*.patch'))),'legacy_property_hooks_sha256':sha(next((scripts/'patches').glob('0021-*.patch'))),'direct_panel_trial_sha256':sha(next((scripts/'patches').glob('0025-*.patch'))),'overlay_layout_report_sha256':sha(next((scripts/'patches').glob('0024-*.patch'))),'source_hashes':{name:sha(hybris/relative/name) for name in names},'binary_sha256':sha(binary),'decon_submit_source_sha256':sha(panel/'decon-output.c'),'decon_submit_header_sha256':sha(panel/'decon-output.h'),'drm_kms_patch_sha256':sha(next((scripts/'patches').glob('0026-*.patch'))),'drm_submit_source_sha256':sha(panel/'drm-output.c'),'drm_submit_header_sha256':sha(panel/'drm-output.h'),'drm_probe_sha256':sha(kms_probe),'drm_probe_source_sha256':sha(panel/'drm-probe.c'),'status':'built only; opt-in supervised DECON or DRM/KMS output'}
 (build/'build.json').write_text(json.dumps(record,indent=2)+'\n');print(json.dumps(record,indent=2))

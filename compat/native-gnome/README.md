@@ -35,8 +35,9 @@ ownership/TLS behavior. Reference licensing is retained in the packaged prefix.
   exports this session's environment to its ordinary user services. Logout
   cleanup restores activation variables. The existing CPU session is retained.
 * The original native X11 presentation transfers GPU buffers through XPutImage /
-  CPU copies. The verified kernel50 normal GNOME session now sends its final
-  composition DMA-BUF directly to DECON. This is a Samsung-specific path.
+  CPU copies. The kernel53 GNOME integration sends its final composition DMA-BUF
+  through standard DRM/KMS/PRIME to DECON. The older Samsung ioctl route stays
+  available for qualified legacy kernels. See [KMS integration](../drm-kms/README.md).
   See [direct-output validation](../../docs/gnome-direct-panel-output.md).
   `60-panel-commit.conf` opts into the reference60Hz DECON commit pump, replacing
   the old200ms checksum loop. Empty Samsung fb0/blank reads mean unknown, not

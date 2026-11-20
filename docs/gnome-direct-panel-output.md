@@ -1,10 +1,13 @@
 # GNOME direct panel output
 
-The current SM-G955N GNOME session uses the vendor Mali-G71 EGL driver. The
-X11 platform's queue path waits for the producer, locks the gralloc buffer and
-submits pixels using XPutImage. Xorg's fbdev path and the panel commit pump
-then present through the Samsung DECON driver. This is the CPU transfer that
-direct output needs to remove. See patch 0013 in compat/compositor-build.
+The SM-G955N GNOME session uses the vendor Mali-G71 EGL driver. The new
+DRM/KMS/PRIME implementation is documented in
+[the native display driver](../compat/drm-kms/README.md). The sections below
+retain the earlier CPU-copy and Samsung-ioctl development evidence.
+
+The original X11 platform queue path waited for the producer, locked the
+gralloc buffer and submitted pixels using XPutImage. Xorg's fbdev path and the panel commit pump
+then present through the Samsung DECON driver. This was the CPU transfer that direct output removed. See patch 0013 in compat/compositor-build.
 
 The running kernel32 exposes /dev/mali0 and no /dev/dri. Its build config has
 CONFIG_DRM disabled. The pinned tree's Exynos DRM drivers do not match an

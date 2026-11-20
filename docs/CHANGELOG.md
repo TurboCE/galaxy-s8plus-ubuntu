@@ -1506,3 +1506,19 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   image. Measured lower CPU use and shorter drag-update gaps than the
   restored X11 copy path. The fallback presenter idles while GNOME owns
   the panel lease, and boot recovery reports a CPU-copy fallback explicitly.
+- Added an opt-in Exynos8895 DRM/KMS/PRIME display driver and connected the
+  existing Mali-rendered GNOME X11 composition directly to it. Kept native
+  fbdev recovery and the qualified legacy Samsung ioctl route.
+- Replaced per-build qualification for the KMS route with a trusted ABI1.1,
+  PRIME, DSI-mode and DPMS capability probe plus installed-file hashes. Added
+  display-card ownership rules to prevent Xorg's unused GPU probe conflict.
+- Fixed deferred page-flip lifetime across panel power transitions and file
+  close, including a concurrent unblank race. Added bounded post-resume event
+  waiting without acknowledging frames that never reached the panel.
+- Built and installed kernels52–54 with BOOT-only backup/readback checks, and
+  recorded actual GNOME/PRIME output, synthetic drag measurements, touchscreen
+  login and the resolved suspend failures in VALIDATION.md.
+- Verified kernel54 default KMS persistence through another clean reboot and
+  touchscreen/PAM login. Its 304-second periodic-workload soak kept the same
+  shell/boot, taint0 and real DECON frame retirement. Kept USB recovery and
+  longer-term/physical acceptance limits explicit.

@@ -29,15 +29,14 @@ class DirectPanelBootTests(unittest.TestCase):
             (backup / path.name).write_bytes(b'original ' + path.name.encode())
         (backup / 'session.py').chmod(0o755)
         values = dict(PREFIX=root, FILES=self.files, POLICY_FILES=(), BACKUP=backup,
-                      DEFAULT=self.policy, LEASE=self.lease)
+                      DEFAULT=self.policy, LEASE=self.lease, LAUNCHER=self.files[2],
+                      DRM_PROBE=root / 'drm-kms-probe')
         options = patch.multiple(controller, **values)
         options.start()
         self.addCleanup(options.stop)
 
     def enable_default(self):
-        self.policy.write_text(json.dumps({
-            path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in self.files
-        }))
+        self.policy.write_text(json.dumps(controller.default_hashes()))
 
     def prepare(self, qualified=True):
         with patch.object(controller, 'qualified_kernel', return_value=qualified):
@@ -103,6 +102,32 @@ class DirectPanelBootTests(unittest.TestCase):
             self.assertFalse(controller.qualified_kernel())
             notes.unlink()
             self.assertFalse(controller.qualified_kernel())
+
+    def select_kms(self):
+        self.files[2].write_bytes(b" env['G955N_DRM_KMS']='1'")
+        controller.DRM_PROBE.write_bytes(b'reviewed capability probe')
+        self.enable_default()
+
+    def test_kms_boot_uses_capabilities_without_kernel_number_allowlist(self):
+        self.select_kms()
+        with patch.object(controller, 'qualified_kms', return_value=True), \
+             patch.object(controller, 'qualified_kernel', side_effect=AssertionError):
+            controller.prepare_boot()
+        self.assertTrue(self.lease.exists())
+        self.assertTrue(self.policy.exists())
+
+    def test_kms_interface_loss_restores_original_files(self):
+        self.select_kms()
+        with patch.object(controller, 'qualified_kms', return_value=False):
+            controller.prepare_boot()
+        self.assert_recovered()
+
+    def test_kms_probe_binary_is_part_of_persistent_hashes(self):
+        self.select_kms()
+        controller.DRM_PROBE.write_bytes(b'changed probe')
+        with patch.object(controller, 'qualified_kms', side_effect=AssertionError('Changed probe must not execute')):
+            controller.prepare_boot()
+        self.assert_recovered()
 
     def test_manual_restore_cancels_transient_timer_before_restarting_gdm(self):
         self.lease.touch()

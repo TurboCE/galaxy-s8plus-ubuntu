@@ -1637,3 +1637,96 @@ process. Its later panel-off state was consistent with the lock screen.
 The original reviewed v6 module was restored and its installed hashes
 rechecked. The intermittent fence exit remains unresolved, so direct
 output with system suspend is still under qualification.
+
+### DRM/KMS/PRIME integration development
+
+Kernel52 registered the new primary-panel DRM card with PRIME import/export,
+GEM, a fixed DSI mode, AddFB2 and asynchronous page flips. Its isolated fixture
+presented 90 buffers through the real DECON update/completion path and restored
+fbdev without kernel taint. The fixture CPU-filled its test patterns once;
+production GNOME imports buffers rendered by Mali and never maps their pixels.
+
+Xorg's unused platform-device probe initially kept DRM master through logind.
+The bridge-specific udev rule separates this display-only card from that probe
+while keeping fbdev, touch and authentication on seat0. A second failure was
+an unnecessary root-only SetMaster request from a file already made master by
+open; the presenter now checks its existing master status first.
+
+The ordinary GNOME session then mapped Mali-G71, owned the DRM card and logged
+60 real page-event retirements. Same-boot kernel52 synthetic drag trials gave:
+
+| Measurement | X11 CPU copy | DRM/KMS/PRIME |
+| --- | ---: | ---: |
+| Whole-device CPU busy, mean of three trials | 15.64% | 12.90% |
+| Trial median window-update gaps | 499.5 / 501 / 501 ms | 33 / 49.5 / 17 ms |
+| Observed position changes out of 180 requests | 7 / 6 / 6 | 85 / 71 / 107 |
+
+These are synthetic input/window geometry measurements, not optical FPS or
+physical finger latency. They do not compare KMS against HWC or the older
+zero-copy Samsung-ioctl route. Both production direct routes avoid a CPU copy
+of GNOME's final composition; individual apps can still copy or render on CPU.
+
+Five kernel52 DPMS cycles kept the same shell/boot and clear taint. System
+suspend exposed an accepted flip reaching the worker after fbcon blanked the
+panel, returning EHOSTDOWN and restarting GNOME. Kernel53 retains that buffer
+and its event until real post-unblank scanout, publishes native power through
+standard connector DPMS, and cancels deferred events before file destruction.
+
+The next RTC trial exposed the userspace deadline spanning suspend-to-idle.
+The presenter now checks already-readable events even at an expired deadline,
+pauses while DPMS is off, and allows one bounded extra interval after a large
+scheduler/suspend delay. It still requires a real completion event; a repeated
+powered timeout fails. After that repair a 23.44-second RTC suspend preserved
+the same kernel and GNOME. Real PAM unlock followed by a motion fixture retired
+93 additional frames. The locked screen had correctly hidden the earlier
+behind-lock fixture, so that zero-progress sample was not a valid drag test.
+
+Kernel54 also records temporary panel blanking under the DECON state lock as
+EAGAIN, closing the race where unblank completes before the worker sees the
+return. The callback fixture verifies this case, off-panel retention, actual
+completion, close cancellation and failure accounting. The real presenter
+fixture verifies DMA-BUF identity caching, bounded eviction, off-panel waiting,
+a single resume grace interval and failure after repeated delayed timeouts.
+
+Kernel54 booted through verified BOOT-only replacement with protected partition
+hashes unchanged. Its existing default files, runtime lease and ABI1.1 probe
+survived the kernel update without adding a kernel54 hash allowlist. Injected
+real touchscreen events selected the account, focused the password field,
+opened the OSK numeric layer and authenticated through GDM/PAM. The owner GNOME
+opened the DRM card and loaded Mali with no swrast mapping; kernel taint was 0.
+Physical finger latency and optical display inspection remain separate checks.
+
+
+Final kernel54 same-boot A/B kept the same application session while reloading
+only GNOME Shell and switching its output activation variables. CPU-copy drag
+CPU busy averaged 15.71%, with trial median geometry gaps 499/333/501 ms and
+8/8/8 position changes. KMS averaged 14.34%, with gaps 34/33/34 ms and
+70/102/74 changes. The saved default files/hashes were unchanged and KMS
+activation was restored. Both routes used Mali rendering. The earlier USB
+warning bit 512 was present before this comparison and did not change.
+
+Kernel54 passed another five DPMS cycles in the same boot/shell with taint0,
+retiring 101–130 additional frames after each wake. Its RTC suspend lasted
+17.90 seconds and the same GNOME process subsequently retired 123 frames.
+The USB/network transports were temporarily unreachable and required recovery;
+this was not evidence of a kernel or GNOME reboot. Recovered logs placed the
+RTC wake and suspend exit around uptime161s, with the DWC3 warning only around
+uptime386s during the later USB recovery. USB recovery remains a separate
+stability limitation; these results do not certify all kernel logs as clean.
+
+A fresh export of the pinned kernel source built successfully using the
+versioned full KMS/stability command. Its configuration and compiled board DTB
+matched the installed kernel54 build, and recorded DRM source hashes matched
+the checked-in sources. The presenter/driver callback fixtures passed, as did
+106 Python tests (nine platform/root skips on macOS; one platform skip in the
+Linux root builder).
+
+After a further clean kernel54 reboot, the saved KMS hashes and capability-based
+activation remained unchanged. Touchscreen/OSK/PAM login again reached the
+ordinary Mali-rendered GNOME session. A 304-second session soak ran eleven
+periodic motion samples, with 92–158 DECON retirements per sample (1,253 total).
+The same shell and boot survived every sample, the panel stayed active, and
+kernel taint stayed0. No new graphics/kernel fault signatures were found in
+that interval. This is a bounded periodic-workload soak, not continuous maximum
+GPU load or proof of hours-long reliability. The completed test unit and idle
+inhibitor were removed; normal GNOME locking remains available.

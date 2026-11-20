@@ -72,6 +72,8 @@ def main():
                         help='Keep the Korean SM-G955N display power domain on during system device sleep')
     parser.add_argument('--bt-uart-sleep-pinctrl', action='store_true',
                         help='Add the required Bluetooth UART suspend and resume pin states on SM-G955N')
+    parser.add_argument('--drm-native-scanout', action='store_true',
+                        help='Build the opt-in SM-G955N DRM/KMS DMA-BUF display interface')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -118,6 +120,8 @@ def main():
         parser.error('--dpu0-system-sleep-retention requires --strict-noirq-power-domain')
     if args.bt_uart_sleep_pinctrl and not args.dpu0_system_sleep_retention:
         parser.error('--bt-uart-sleep-pinctrl requires --dpu0-system-sleep-retention')
+    if args.drm_native_scanout and not args.dpu0_system_sleep_retention:
+        parser.error('--drm-native-scanout requires --dpu0-system-sleep-retention')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -181,6 +185,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0050-g955n-keep-dpu0-powered-in-system-device-sleep.patch')
     if args.bt_uart_sleep_pinctrl:
         patchfiles.append(ROOT/'patches/proposals/0051-g955n-bluetooth-uart-sleep-pinctrl.patch')
+    if args.drm_native_scanout:
+        patchfiles.append(ROOT/'patches/proposals/0052-g955n-decon-drm-scanout.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -207,6 +213,7 @@ def main():
             'strict_noirq_power_domain':args.strict_noirq_power_domain,
             'dpu0_system_sleep_retention':args.dpu0_system_sleep_retention,
             'bt_uart_sleep_pinctrl':args.bt_uart_sleep_pinctrl,
+            'drm_native_scanout':args.drm_native_scanout,
             'exynos_suspend_unwind':args.exynos_suspend_unwind,
             'exynos_restore_failed_domain_off':args.exynos_restore_failed_domain_off,
             'freeze_voltage_dvfs':args.freeze_voltage_dvfs,
@@ -217,6 +224,10 @@ def main():
             'native_ondemand_safety':args.native_ondemand_safety,
             'idle_isolation':'built-in cpuidle.off=1; architectural WFI, not a fix' if args.wfi_only else None,
             'build_only':True,'deployed':False,'hardware_qualified':False}
+    if args.drm_native_scanout:
+        plan['drm_sources'] = {
+            str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in (ROOT/'compat/drm-kms').glob('decon_drm.[ch]')}
     (output/'plan.json').write_text(json.dumps(plan,indent=2)+'\n')
     subprocess.run(['docker','volume','create',volume],check=True)
     archive=subprocess.Popen(['git','-C',str(source),'archive',expected],stdout=subprocess.PIPE)
@@ -247,6 +258,13 @@ def main():
     if args.suspend_battery_diagnostic:
         commands += ['bash scripts/config --file /work/out/.config -e PM_DEBUG',
                      'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig']
+    if args.drm_native_scanout:
+        commands += [
+            'cp /port/compat/drm-kms/decon_drm.c /port/compat/drm-kms/decon_drm.h drivers/video/fbdev/exynos/dpu/',
+            'bash scripts/config --file /work/out/.config -e DRM -e DRM_KMS_HELPER -d DRM_FBDEV_EMULATION -e DRM_EXYNOS8895_NATIVE',
+            'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig',
+            'grep -qx CONFIG_DRM_EXYNOS8895_NATIVE=y /work/out/.config',
+        ]
     commands += [
         'cp /work/out/.config /output/kernel.config',
         'make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" KBUILD_BUILD_VERSION='+str(version)+' Image dtbs',

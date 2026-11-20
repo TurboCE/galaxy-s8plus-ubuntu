@@ -1,0 +1,4 @@
+# The X11 bridge opens this display-only card itself. Keep fbdev Xorg/logind
+# from taking DRM master during their unused GPU probe. The actual touchscreen,
+# fbdev seat and normal GDM authentication stay on seat0.
+SUBSYSTEM=="drm", KERNEL=="card[0-9]*", DRIVERS=="exynos-decon", ENV{ID_SEAT}="seat-g955n-scanout", TAG-="seat", TAG-="master-of-seat", TAG-="uaccess", GROUP="video", MODE="0660"
