@@ -12,6 +12,18 @@ class PanicDecoder(unittest.TestCase):
  def test_old_faults_and_following_loader_excluded(self):
   raw=b'Linux version old\nKernel panic old\n'+B+b'\nokay\n[0: 0.43] Samsung S-Boot 4.0\nKernel panic loader-residue\n'
   r=m.analyze(raw,B,MAP);self.assertEqual(r['faults'],[]);self.assertEqual(r['older_banners_excluded'],1)
+ def test_panic_banner_echo_does_not_start_a_new_boot(self):
+  raw = (b'<5>' + B + b'\n'
+         b'<4>PC is at first+0x14/0x100\n'
+         b'<4>LR is at safe+0x18/0x100\n'
+         b'<4>pc : [<ffffff8008003014>] lr : [<ffffff8008003118>]\n'
+         b'<0>Kernel panic - not syncing: Fatal exception\n'
+         b'<0>sec_debug: ' + B + b'\n')
+  report = m.analyze(raw, B, MAP)
+  self.assertEqual(report['status'], 'segment-matched')
+  self.assertEqual(report['older_banners_excluded'], 0)
+  self.assertEqual(report['relocation'], '0x2000')
+  self.assertIn('Fatal exception', report['faults'][0]['message'])
  def test_corrupt_or_missing_banner_refused(self):
   for raw in (b'Kernel panic without banner',B.replace(b'version',b'versioN')):
    self.assertEqual(m.analyze(raw,B,MAP)['status'],'unmatched')

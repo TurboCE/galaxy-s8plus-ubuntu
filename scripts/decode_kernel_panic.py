@@ -10,6 +10,7 @@ import re
 import tempfile
 
 BANNER = re.compile(rb'Linux version [^\r\n\0]{1,700}')
+BOOT_BANNER = re.compile(rb'^(?:<\d+>)?(?:\[[^\r\n]{1,40}\][ \t]*)?(' + BANNER.pattern + rb')', re.M)
 FAULT = re.compile(r'Unable to handle kernel|Internal error:|Kernel panic|\bBUG:|\bWARNING:|hard LOCKUP|soft lockup', re.I)
 LOADER = re.compile(rb'(?:^|\n)(?:\[[^\r\n]{1,40}\]\s*)?Samsung S-Boot')
 PAIR = re.compile(r'PC is at ([\w.]+)\+0x([\da-f]+)/0x[\da-f]+[^\n]*\n'
@@ -43,13 +44,13 @@ def analyze(raw, expected_banner, symbols):
     names, code = symbols
     report = {'scope': 'Matching retained boot segment only; not hardware acceptance or root-cause proof',
               'hardware_qualified': False, 'status': 'unmatched', 'faults': [], 'panic_callers': []}
-    banners = list(BANNER.finditer(raw))
+    banners = list(BOOT_BANNER.finditer(raw))
     if not banners:
         report['reason'] = 'No intact Linux banner; manual examination required'
         return report
     latest = banners[-1]
     # Never search backward for an older matching image when the latest boot differs.
-    if latest.group() != expected_banner:
+    if latest.group(1) != expected_banner:
         report['reason'] = 'Latest retained banner differs from image, or is damaged'
         return report
     loaders = list(LOADER.finditer(raw, latest.end()))
