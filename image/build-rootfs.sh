@@ -66,7 +66,7 @@ EmitRouter=no
 EOF
 mkdir -p "$R/etc/NetworkManager/conf.d"
 printf '[keyfile]\nunmanaged-devices=interface-name:usb0\n' > "$R/etc/NetworkManager/conf.d/10-g955n-usb.conf"
-chroot "$R" systemctl enable ssh systemd-networkd NetworkManager bluetooth
+chroot "$R" systemctl enable ssh systemd-networkd NetworkManager bluetooth ModemManager
 # Bring-up precaution: automatic sleep is disabled until resume is validated.
 for unit in sleep.target suspend.target hibernate.target hybrid-sleep.target; do
   ln -sf /dev/null "$R/etc/systemd/system/$unit"

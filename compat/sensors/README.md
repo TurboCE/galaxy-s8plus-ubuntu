@@ -93,3 +93,12 @@ the store changed state. Patch0026 fixes that ABI behavior; the backend refuses
 empty/non-numeric snapshots before mutation. The installed guarded candidate is
 stopped until the corrected kernel is tested. The initial requested user motion
 trial produced no acceptance data and must not be counted as a pass.
+
+### Ubuntu image integration
+
+`scripts/build_rootfs.py --sensor-daemon PATH` stages the matching
+AArch64 daemon together with its standard SensorProxy service override,
+udev matches and recovery helpers. Use a fresh reviewed build of the
+driver above. The GNOME shell and settings daemon keep using Ubuntu's
+existing SensorProxy D-Bus API. The installer does not implement a
+rotatable Xorg output or a standard gyroscope or step-counter API.

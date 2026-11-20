@@ -1378,3 +1378,15 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Removed parallel system-sleep callbacks that bypassed runtime PM
   accounting. Kept the existing suspend notifier and made repeated
   disable safe. Built kernel36 on the kernel35 diagnostic base.
+
+### Ubuntu hardware service staging
+
+- Made the reviewed Samsung SSP acceleration and light backend install
+  into the standard SensorProxy service during an opt-in image build.
+- Added opt-in staging of the matching scoped desktop speaker for the
+  standard PipeWire and WirePlumber services. Checked both startup
+  guards before unmasking WirePlumber for the ordinary desktop user.
+- Added the missing compat mount in the finalizer and explicitly enabled
+  ModemManager alongside NetworkManager and BlueZ. No new modem backend
+  was installed. Verified staging with the authentic Ubuntu packages
+  from the rootfs snapshot.

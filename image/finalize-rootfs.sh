@@ -13,6 +13,15 @@ test "$(readlink "$R/etc/systemd/user/wireplumber.service")" = /dev/null
 install -D -m 755 /source/compat/pipewire/g955n-wireplumber "$R/usr/local/libexec/g955n-wireplumber"
 install -D -m 644 /source/compat/pipewire/10-g955n-validated-plugin.conf "$R/etc/systemd/user/wireplumber.service.d/10-g955n-validated-plugin.conf"
 install -D -m 644 /source/compat/pipewire/10-g955n-validated-core.conf "$R/etc/systemd/user/pipewire.service.d/10-g955n-validated-plugin.conf"
+# Stage these only when the builder is supplied the matched local artifacts.
+hardware_args=(--rootfs "$R")
+if [ -f /adapters/sensor-proxy ]; then
+  hardware_args+=(--sensor-daemon /adapters/sensor-proxy)
+fi
+if [ -d /adapters/audio ]; then
+  hardware_args+=(--audio-build /adapters/audio)
+fi
+python3 /source/image/stage-ubuntu-hardware.py "${hardware_args[@]}"
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
 chmod 755 "$R/usr/local/sbin/g955n-grow-root"
 chmod 755 "$R/usr/local/sbin/g955n-android-bsp"

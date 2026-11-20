@@ -13,6 +13,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--volume', default='g955n-ubuntu-rootfs-build')
     parser.add_argument('--finalize-only', action='store_true')
+    parser.add_argument('--sensor-daemon', type=Path,
+                        help='Stage the reviewed AArch64 Samsung SSP SensorProxy executable')
+    parser.add_argument('--audio-build', type=Path,
+                        help='Stage the reviewed scoped ALSA build directory for desktop speaker output')
     args = parser.parse_args()
     if not re.fullmatch(r'g955n-[a-z0-9-]+', args.volume):
         raise SystemExit('Requires a dedicated g955n-* build volume')
@@ -39,9 +43,15 @@ def main():
                         '-v', str(inputs) + ':/inputs:ro',
                         '-v', str(ROOT / 'inventory/vendor') + ':/firmware:ro', builder,
                         'bash', '-c', (ROOT / 'image/build-rootfs.sh').read_text()], check=True)
+    hardware_mounts = []
+    if args.sensor_daemon:
+        hardware_mounts += ['-v', str(args.sensor_daemon.resolve(strict=True)) + ':/adapters/sensor-proxy:ro']
+    if args.audio_build:
+        hardware_mounts += ['-v', str(args.audio_build.resolve(strict=True)) + ':/adapters/audio:ro']
     subprocess.run([*common, '--network', 'none',
                     '-v', str(inputs) + ':/inputs:ro',
-                    '-v', str(ROOT / 'image') + ':/source/image:ro', builder,
+                    '-v', str(ROOT / 'image') + ':/source/image:ro',
+                    '-v', str(ROOT / 'compat') + ':/source/compat:ro', *hardware_mounts, builder,
                     'bash', '-c', (ROOT / 'image/finalize-rootfs.sh').read_text()], check=True)
 
 

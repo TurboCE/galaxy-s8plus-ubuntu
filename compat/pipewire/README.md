@@ -348,3 +348,14 @@ core must not load the stock unscoped plugin after the policy daemon exports a
 node. Both drop-ins and the launcher are staged by image finalization; an image
 without the reviewed binary/manifest fails closed rather than probing hardware.
 Global WirePlumber activation remains masked until fuller qualification.
+
+### Ubuntu image integration
+
+`scripts/build_rootfs.py --audio-build DIRECTORY` optionally stages
+the matching reviewed speaker ABI in a private SPA tree and enables
+the standard WirePlumber service for the Ubuntu desktop account. The
+directory contains the native build's `build.json` and `libspa-alsa.so`.
+The installer checks the two startup guards, distro package version and
+both plugin hashes before removing the mask. Without this explicit
+input, the image keeps WirePlumber masked. Speaker acoustic and
+microphone acceptance are separate runtime work.

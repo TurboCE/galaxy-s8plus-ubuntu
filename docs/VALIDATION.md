@@ -798,3 +798,31 @@ The next bounded platform-stage request again lost the two host
 transports and USB-console response. No completion record was retrieved
 in the observation window. Full system suspend remains disabled, and
 the platform result must be read after the S8+ becomes accessible.
+
+### Ubuntu-native hardware staging
+
+The rootfs builder can stage the already verified Samsung SSP
+SensorProxy backend and the scoped ALSA plugin into their normal Ubuntu
+service paths. Sensor staging installs the matched backend, udev
+matches, runtime recovery helpers and service override together. GNOME
+uses its ordinary SensorProxy D-Bus API for orientation readings and
+ambient light. Xorg runtime output rotation remains a separate task.
+
+Speaker staging verifies the pinned Ubuntu ALSA plugin and reviewed
+candidate against the build record. Both the PipeWire core and
+WirePlumber must have the reviewed launcher before the installer
+removes the default WirePlumber mask. The ordinary ubuntu user service
+then supplies the single reviewed RDMA0 speaker PCM to GNOME Sound.
+There is no microphone or extra PCM in this scope.
+
+A disposable Ubuntu package snapshot passed both staging cases using
+the actual AArch64 SSP daemon and the reviewed scoped ALSA build.
+Missing audio input left the WirePlumber mask in place. This is an
+offline packaging check. SSH and the S8+ USB serial console remained
+unavailable, so the staged changes were not applied to the phone.
+
+The rootfs uses NetworkManager for Wi-Fi, BlueZ for Bluetooth and
+ModemManager for supported modem control. The builder now explicitly
+enables ModemManager. This does not supply a Samsung modem transport,
+a calibrated compass/step integration, a Bluetooth firmware load,
+a GNSS data source or a microphone driver path.
