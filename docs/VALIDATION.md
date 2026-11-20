@@ -1017,3 +1017,22 @@ Wi-Fi and verified gateway reachability. Taint 512 was reported after
 the test. Subsequent USB and Wi-Fi SSH attempts did not retrieve the
 matching kernel trace, so the callback and source of the warning still
 require verification. Full suspend and RTC resume remain untested.
+
+### Broadcom deferred PM work and retained panic decoding
+
+The `pm-1` wake-lock report identified queued Broadcom station power-management
+work as one blocker. Proposal0039 cancels that work from the existing wireless
+suspend callback when WoWLAN is absent. Cancellation releases the corresponding
+wake lock only if it removed the queued work. Already-running work still releases
+its own lock. PCIe checks continue to protect active RX, TX and control work.
+
+Kernel39 compiled and packed successfully. Its kernel configuration, packaged
+DTB and external ramdisk match the kernel38 operating-point comparison image.
+The device was unreachable over USB and Wi-Fi during this build, so kernel39
+has no installation, reconnection or suspend results. The change does not
+establish the source of the kernel38 noirq corruption.
+
+The panic decoder identified the original kernel38 boot record after ignoring
+the copied banner printed by Samsung `sec_debug` during the panic. The exact
+kernel38 build verified the relocation from the reported boot offset and the
+matching PC/LR pair. The retained diagnostic and decoded report stay local.

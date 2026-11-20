@@ -1416,3 +1416,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   transport with active scan and receive/control wake locks. Built and
   packed kernel38 with the PCI wiphy parent and a scan cleanup callback.
   The kernel candidate is pending live testing.
+- Built kernel39 with a targeted Broadcom Wi-Fi suspend fix. Cancel queued
+  station power-management work before the PCIe transport suspends without
+  WoWLAN, and let already-running work release its own wake lock. Verified
+  the boot image against the kernel38 operating-point comparison settings.
+  Device installation and suspend validation are pending.
+- Fixed the retained-panic decoder to skip the Samsung panic-time copy of the
+  boot banner. Decoded the original kernel38 panic against its exact build.

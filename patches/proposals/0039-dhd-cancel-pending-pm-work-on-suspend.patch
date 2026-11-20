@@ -1,0 +1,40 @@
+Subject: Cancel deferred Broadcom PM work on suspend without WoWLAN
+
+The SM-G955N kernel38 platform test observed only the deferred PM
+wake lock active at one suspend rejection. cfg80211 leaves the
+connection without WoWLAN, so cancel delayed station PM work while
+the wireless child still has its PCI transport. Release the wake
+lock only when cancellation removes queued work. A running worker
+still owns the release. Keep the PCI wake-lock checks, including
+active RX, control and TX operations. Applies after proposal0037.
+
+--- a/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
++++ b/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
+@@ -1255,10 +1255,9 @@
+ 	 * so that while cancelling, we are sure that there is no
+ 	 * work getting scheduled.
+ 	 */
+-	if (delayed_work_pending(&cfg->pm_enable_work)) {
+-		cancel_delayed_work(&cfg->pm_enable_work);
++	/* Running work releases its own wake lock. */
++	if (cancel_delayed_work(&cfg->pm_enable_work))
+ 		DHD_PM_WAKE_UNLOCK(cfg->pub);
+-	}
+ 
+ 	if (type == WL_PM_WORKQ_SHORT) {
+ 		wq_duration = WL_PM_ENABLE_TIMEOUT;
+@@ -8102,8 +8101,13 @@
+ 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
+ 	struct net_device *ndev = bcmcfg_to_prmry_ndev(cfg);
+ 
+-	if (wl_get_drv_status(cfg, READY, ndev))
++	if (wl_get_drv_status(cfg, READY, ndev)) {
+ 		wl_cfg80211_cancel_scan(cfg);
++#if (LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 39)) || defined(WL_COMPAT_WIRELESS)
++		if (!wow)
++#endif
++			wl_add_remove_pm_enable_work(cfg, WL_PM_WORKQ_DEL);
++	}
+ #endif
+ #ifdef DHD_CLEAR_ON_SUSPEND
+ 	struct bcm_cfg80211 *cfg = wiphy_priv(wiphy);
