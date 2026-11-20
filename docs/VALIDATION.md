@@ -1315,3 +1315,20 @@ suspend callback, including when WoWLAN is configured. It preserves the
 requested delay and re-arms deferred work on resume. The firmware wake
 configuration and other DHD wake checks stay in place. Kernel47 compiled
 with kernel46's config, DTB and external ramdisk. All 102 Linux tests passed.
+
+Installed kernel47 with a verified kernel46 BOOT backup and BOOT-only
+readback, then verified a new boot. Immediately after a managed Wi-Fi
+reconnect, suspend-to-idle entered and returned without EBUSY. It stayed
+asleep for only 0.56 seconds because the Broadcom host-wake IRQ arrived
+before the RTC alarm. The same boot retained Wi-Fi traffic and touch.
+
+A bounded standard systemd suspend trial also used `freeze` and returned
+within 0.96 seconds. The RTC alarm interrupt occurred over 23 seconds after
+that exit while the device was awake. Checking that event's ordering avoids
+counting the alarm as the wake source. Restored and verified both masks.
+
+Proposal0048 zero-initializes the stock WoWLAN default structure. The old
+allocation explicitly assigned four flags and left `any`, `magic_pkt` and
+`rfkill_release` uninitialized. Those unspecified flags had been reported
+as enabled by `iw`. Kernel48 compiled and packed with kernel47's config,
+DTB and external ramdisk. Its wake timing needs a separate device test.

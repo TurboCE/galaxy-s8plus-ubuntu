@@ -1472,3 +1472,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   deferred station power-management hold with WoWLAN enabled.
 - Kernel47 postpones deferred station PM work during system suspend with
   WoWLAN enabled, and reschedules it after the PCI transport resumes.
+- Kernel47 entered suspend-to-idle immediately after Wi-Fi reconnect, but
+  Broadcom host wake interrupted it before the RTC alarm. Kernel48 zeros
+  the unspecified WoWLAN flags in the default driver configuration.

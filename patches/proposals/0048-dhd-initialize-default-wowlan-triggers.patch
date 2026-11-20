@@ -1,0 +1,18 @@
+Subject: Zero-initialize the Broadcom default WoWLAN configuration
+
+The driver initializes just four default trigger booleans. With ordinary
+MALLOC, cfg80211 can report unrelated wake triggers, including any, from
+whatever bytes were already in the other fields. Zero the allocation and
+retain the explicit defaults and user-configured overrides.
+
+--- a/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
++++ b/drivers/net/wireless/bcmdhd4361/wl_cfg80211.c
+@@ -12580,7 +12580,7 @@
+ 	/* If this is not provided cfg stack will get disconnect
+ 	* during suspend.
+ 	*/
+-	brcm_wowlan_config = MALLOC(dhd->osh, sizeof(struct cfg80211_wowlan));
++	brcm_wowlan_config = MALLOCZ(dhd->osh, sizeof(struct cfg80211_wowlan));
+ 	if (brcm_wowlan_config) {
+ 		brcm_wowlan_config->disconnect = true;
+ 		brcm_wowlan_config->gtk_rekey_failure = true;
