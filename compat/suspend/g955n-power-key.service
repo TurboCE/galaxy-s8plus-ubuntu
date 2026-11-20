@@ -1,0 +1,12 @@
+[Unit]
+Description=Wake the Samsung SM-G955N GNOME display on a power-key press
+After=systemd-logind.service systemd-udev-trigger.service
+ConditionPathExists=/dev/input/by-path/platform-gpio_keys-event
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/g955n/g955n-power-key.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical.target

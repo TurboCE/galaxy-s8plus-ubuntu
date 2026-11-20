@@ -1495,3 +1495,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Kept the reserved sleep console clear during suspend and recorded the
   kernel wake IRQ on resume. Added the Korean Bluetooth UART pin states
   to a built DT-only candidate for the repeated suspend and resume errors.
+- Connected the physical power-key input to display wake in the active
+  GNOME session. The short press can restore X11 panel power while leaving
+  the screen lock in effect.

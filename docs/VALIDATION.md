@@ -1531,3 +1531,27 @@ readback after the actual sleep cycle, and the original console level
 was restored. The same boot, panel, seat, touchscreen input and WLAN
 traffic were verified again. The manual default is `freeze` and
 automatic suspend remains off pending physical-button testing.
+
+### Power key wakes the active GNOME display
+
+When the owner reported a black screen after pressing the power key,
+kernel50 was reachable over WLAN and the hardware KEY_POWER interrupt
+was counting events. The journal showed no new system suspend. Both
+logind and GNOME had their power-key actions disabled to avoid opening
+the shutdown dialog. There was no explicit display-wake action on the
+ordinary GNOME path.
+
+Installed and enabled the SM-G955N power-key service. It listens to the
+same GPIO input as the desktop, selects the local graphical session,
+and issues the display wake request with that user's privileges. The
+Mutter property alone did not drive the native X11 framebuffer's
+DPMS state. The X11 implementation now uses the active X server's
+DPMS path. The Wayland fallback is unqualified on this device.
+
+Three live X11 cycles forced DPMS off and confirmed DECON runtime
+suspend, then injected a press and release into the real GPIO input
+device's evdev stream. Each cycle returned to DPMS on and active DECON,
+with a service acknowledgement, the same boot and an unchanged GNOME
+lock state. This exercises the wake service and panel after display
+blanking. A hardware IRQ issued while Linux is suspended is a separate
+test.

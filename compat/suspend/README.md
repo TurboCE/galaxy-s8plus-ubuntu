@@ -11,6 +11,8 @@ an actual timed RTC wake on that kernel.
 | `60-g955n-require-suspend-kernel.conf` | `/etc/systemd/system/systemd-suspend.service.d/` |
 | `60-g955n-manual-suspend` | `/etc/dconf/db/local.d/` and `/etc/dconf/db/gdm.d/` |
 | `60-g955n-wake-report` (optional, executable) | `/usr/lib/systemd/system-sleep/` |
+| `g955n-power-key.py` | `/usr/local/lib/g955n/` |
+| `g955n-power-key.service` | `/etc/systemd/system/` |
 
 Run `dconf update` and check the effective GNOME power settings on both the
 desktop and greeter before unmasking `sleep.target` and `suspend.target`.
@@ -20,6 +22,12 @@ The GNOME profile disables unattended suspend on AC and battery. It also
 disables GNOME's power-button shutdown dialog. The kernel still uses the
 physical button as a wake source. Display idle and screen locking are
 separate GNOME settings.
+
+Enable `g955n-power-key.service` to connect the hardware power key to the
+active GNOME display. The service shares the GPIO input device and runs the
+display wake request with the seat session's user privileges. The X11 path
+uses DPMS and the Wayland path uses Mutter's display power property. The
+request preserves screen locking. Suspend is selected from GNOME's menu.
 
 The optional hook clears the reserved sleep console and limits messages
 printed on it during the switch. Kernel messages remain in the ring
@@ -31,4 +39,5 @@ identify which PMIC event woke the handset.
 
 The image builder retains the initial masks. To return an enabled handset to
 that baseline, mask the two targets again and remove the installed GNOME
-profile files followed by `dconf update`.
+profile files followed by `dconf update`. The key service can be disabled
+independently with `systemctl disable --now g955n-power-key.service`.
