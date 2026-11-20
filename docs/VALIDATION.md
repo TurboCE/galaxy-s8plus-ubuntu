@@ -1036,3 +1036,31 @@ The panic decoder identified the original kernel38 boot record after ignoring
 the copied banner printed by Samsung `sec_debug` during the panic. The exact
 kernel38 build verified the relocation from the reported boot offset and the
 matching PC/LR pair. The retained diagnostic and decoded report stay local.
+
+### Live kernel39 and voltage-policy suspend comparison
+
+USB reconnection allowed retrieval of the full kernel38 OPP comparison log.
+In the radio-off trial, the fuel-gauge VCELL read hit two Exynos HSI2C transfer
+timeouts after late suspend completed. The PM core aborted the noirq phase,
+and the subsequent resume logged a DWC3 gadget warning while processing a
+USB endpoint completion with an empty request queue. The log does not identify
+which wake source caused the abort or how the USB completion lost its request.
+
+Installed kernel39 from verified SM-G955N TWRP after backing up the kernel38
+OPP BOOT and protected partitions. Verified BOOT readback and unchanged
+protected hashes, then verified a new boot running build 39 over USB SSH.
+On 5745 MHz, automatic association and explicit reconnection each returned
+three gateway replies and interface-bound HTTPS 200 on the same boot without
+taint. The connected devices test returned EBUSY within 0.13 seconds. Broadcom
+reported `pm-0` and `txfl-1`, with no other listed wake lock. The on-device
+radio-off platform test returned EBUSY within 0.26 seconds on the same boot,
+then re-enabled Wi-Fi and reached its gateway with taint still zero. USB and
+Wi-Fi SSH subsequently stopped responding, so no matching callback trace was
+retrieved for that radio-off attempt. Neither test qualified full suspend.
+
+The vendor `vol_dvfs_kthread` independently calls the fuel gauge, bypassing
+the already freezable battery workqueue. Proposal0040 makes that kthread join
+the freezer before device interrupts stop, preserving low-voltage policy
+and normal polling outside suspend. Kernel40 compiled and packed with the
+same config, DTB and external ramdisk as kernel39. The kernel40 change has
+no live evidence yet.

@@ -1423,3 +1423,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Device installation and suspend validation are pending.
 - Fixed the retained-panic decoder to skip the Samsung panic-time copy of the
   boot banner. Decoded the original kernel38 panic against its exact build.
+- Installed kernel39 after taking a verified BOOT and protected-partition
+  backup. Confirmed 5 GHz Wi-Fi autoassociation and explicit reconnection.
+  A connected PM test still met an active TX wake lock. The radio-off
+  platform test also returned busy and both management paths later dropped.
+- Made the Exynos voltage-policy polling thread participate in the system
+  freezer. Built and packed kernel40 for a separate device comparison.
