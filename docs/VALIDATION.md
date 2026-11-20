@@ -692,3 +692,39 @@ line enabled and returns errors from wake setup. The AArch64 kernel34
 build, built-in initramfs check, and comparison with kernel32's exact
 config and Korean DTB passed. This is a candidate. The RTC alarm and
 actual no-transport failure still need a hardware check after recovery.
+
+### Recovered suspend failure and kernel35 staged diagnostics
+
+After a physical restart and USB reconnect, recovered kernel32's previous
+journal and Samsung last_kmsg. The journal confirms system suspend entry.
+The retained buffer contains late-suspend completion, HSI2C transmit
+timeouts, a noirq failure and early-device resume. It contains an S2MPS17
+RTC alarm interrupt and repeated FTS touch messages waiting for PM resume.
+The final panic is in Samsung's deliberate hard-reset key hook. The retained
+buffer has corruption and gaps. It cannot identify the first failing
+callback or prove that the alarm caused normal resume.
+
+For the HSI2C timeout, the controller's address field selects slave 0x36
+on 10970000, the MAX77865 fuel gauge address on this board. The caller
+was not preserved in the buffer. Proposal0034 marks the existing ordered
+battery workqueue as freezable, retaining reclaim semantics and resuming
+queued jobs after thaw. Kernel35 also enables PM_DEBUG and PM_SLEEP_DEBUG
+for bounded freezer/device/platform tests. The AArch64 build, built-in
+initramfs and BOOT pack checks passed. The Korean DTB and external ramdisk
+are byte-identical to kernel32.
+
+Saved and verified the full kernel32 BOOT and a fresh set of seven
+partitions in TWRP. Differences from the older EFS and PARAM references
+were confined to eight EFS superblock bytes and an appended normal/recovery
+boot-history string respectively. Kernel35 was written to BOOT only.
+Protected partition hashes matched immediately before and after the write.
+Kernel35 booted Ubuntu with taint 0. Its deliberate version mismatch made
+the direct-output boot service fall back to the original output during
+this kernel trial.
+
+On kernel35, the five-second freeze-processes callback test returned in
+5.16 seconds with errno 0, same boot and taint 0. The following bounded
+device test lost SSH and the USB console before providing a completion
+record. This test is designed to return before late/noirq and before RTC
+wake. Kernel35 does not qualify suspend. Preserve the full kernel32
+backup and collect the latest retained kernel log before any further trial.

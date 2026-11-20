@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--native-panel-qos',action='store_true',help='Include primary-panel pre-enable QoS ordering and error rollback')
     parser.add_argument('--native-ondemand-safety',action='store_true',help='Hold and check CPU governor private-data lifetime during display events')
     parser.add_argument('--ssp-sysfs-counts',action='store_true',help='Fix SSP IIO poll_delay sysfs EOF/no-progress return counts')
+    parser.add_argument('--suspend-battery-diagnostic', action='store_true',
+                        help='Freeze battery work and enable bounded PM-stage tests')
     parser.add_argument('--pmic-wake-irq', action='store_true', help='Keep the Exynos8895 S2MPS17 wake IRQ available in suspend')
     parser.add_argument('--dpp-shared-dma', action='store_true', help='Map the shared Exynos8895 DPP DMA register block once')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
@@ -39,8 +41,8 @@ def main():
     if args.wfi_only and not args.native_fb_owner:parser.error('--wfi-only requires the native-fb-owner baseline')
     if args.dpp_shared_dma and (not args.native_panel_safety or not args.build_version):
         parser.error('--dpp-shared-dma requires --native-panel-safety and an explicit --build-version')
-    if args.pmic_wake_irq and not args.build_version:
-        parser.error('--pmic-wake-irq requires an explicit --build-version')
+    if (args.pmic_wake_irq or args.suspend_battery_diagnostic) and not args.build_version:
+        parser.error('Suspend candidates require an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -68,6 +70,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0032-dpp-shared-dma-registers.patch')
     if args.pmic_wake_irq:
         patchfiles.append(ROOT/'patches/proposals/0033-s2mps17-keep-wake-irq-enabled.patch')
+    if args.suspend_battery_diagnostic:
+        patchfiles.append(ROOT/'patches/proposals/0034-freeze-sec-battery-workqueue.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -81,6 +85,7 @@ def main():
             'audio_safety':args.audio_safety,
             'dpp_shared_dma':args.dpp_shared_dma,
             'pmic_wake_irq':args.pmic_wake_irq,
+            'suspend_battery_diagnostic':args.suspend_battery_diagnostic,
             'native_panel_safety':args.native_panel_safety,
             'native_panel_qos':args.native_panel_qos,
             'native_ondemand_safety':args.native_ondemand_safety,
@@ -108,6 +113,9 @@ def main():
         commands += ['cp /output/wfi.config /work/out/.config',
                      'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig',
                      'cmp /work/out/.config /output/wfi.config']
+    if args.suspend_battery_diagnostic:
+        commands += ['bash scripts/config --file /work/out/.config -e PM_DEBUG',
+                     'make O=/work/out HOSTCFLAGS="-O2 -fcommon" olddefconfig']
     commands += [
         'cp /work/out/.config /output/kernel.config',
         'make O=/work/out -j4 HOSTCFLAGS="-O2 -fcommon" KCFLAGS="-Wno-error" KBUILD_BUILD_VERSION='+str(version)+' Image dtbs',

@@ -1,0 +1,23 @@
+Subject: Freeze the ordered Samsung battery workqueue during system sleep
+
+Battery monitor, cable and charging work share the ordered queue. Keep
+ordering and reclaim semantics and allow the suspend freezer to drain
+and pause this queue before adapter IRQs are suspended. Entries queued
+during the transition run when workqueues thaw.
+
+diff --git a/drivers/battery_v2/sec_battery.c b/drivers/battery_v2/sec_battery.c
+--- a/drivers/battery_v2/sec_battery.c
++++ b/drivers/battery_v2/sec_battery.c
+@@ -10224,9 +10224,9 @@
+ 	if (battery->pdata->fuelgauge_name == NULL)
+ 		battery->pdata->fuelgauge_name = "sec-fuelgauge";
+ 
+-	/* create work queue */
+-	battery->monitor_wqueue =
+-		create_singlethread_workqueue(dev_name(&pdev->dev));
++	/* Keep charger and gauge work out of the system noirq interval. */
++	battery->monitor_wqueue = alloc_ordered_workqueue("%s",
++				WQ_FREEZABLE | WQ_MEM_RECLAIM, dev_name(&pdev->dev));
+ 	if (!battery->monitor_wqueue) {
+ 		dev_err(battery->dev,
+ 			"%s: Fail to Create Workqueue\n", __func__);
