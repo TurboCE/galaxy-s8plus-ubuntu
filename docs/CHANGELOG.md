@@ -1365,3 +1365,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   exposes the PM stage controls. The freezer and device-stage tests passed.
   USB transport loss initially hid the device-stage completion. The
   recovered journal confirmed the return and recorded DHD and DWC3 warnings.
+- After kernel35's platform-stage test lost both transports and produced
+  no retained result, restored the complete verified kernel32 BOOT and
+  verified its readback. Preserved the protected partitions.
+- Reinstalled GNOME direct output as the default on restored kernel32.
+  Rebooted and verified its lease, installed files and GDM. System suspend
+  remains disabled pending qualification.

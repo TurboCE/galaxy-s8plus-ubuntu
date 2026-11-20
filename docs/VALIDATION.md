@@ -737,3 +737,27 @@ enumeration. These logs confirm two separate driver observations. The
 device-stage test ends before late/noirq or actual system sleep, so the
 platform stage and a timed low-power interval require separate evidence.
 The full kernel32 rollback backup remains available.
+
+A separate kernel35 bounded platform-stage test was scheduled through
+verified Wi-Fi while USB was also available. Both transports stopped
+responding during the test. After a physical power cycle, the previous
+boot's service journal showed the start without a result. Its kernel
+journal recorded suspend entry; its last entries were in ABOX runtime
+power-down. The retained Samsung buffer also contained older boots and
+provided no matching platform-test completion. The last printed callback
+does not identify the first failing component. This test remains
+unqualified. No further system-suspend test was run.
+
+Reentered verified TWRP and restored the full known-good kernel32 BOOT
+from the fresh backup. Full BOOT readback matched the backup; the
+protected partitions matched their immediate pre-write hashes.
+
+After returning to kernel32, reinstalled the default GNOME direct-output
+configuration and rebooted. The boot guard regenerated the lease, all
+installed hashes verified, GDM and the framebuffer service were active,
+and taint was 0. System sleep and suspend targets remained masked.
+
+Replayed touchscreen events through the actual input device and the GDM
+on-screen keyboard. Normal PAM login reached GNOME and the restored
+direct path reported 60 completed DECON frames. The panel was active and
+taint remained 0 in this bounded check.
