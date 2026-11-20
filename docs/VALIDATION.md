@@ -1833,3 +1833,51 @@ and retired60 frames without CPU pixel transfer. This bounded trial does not
 certify indefinite reliability, eliminate the previous DWC3 warning, or replace
 physical power-button wake acceptance. The generated-method fixture and JS/Python
 syntax checks also passed.
+
+### Kernel55 USB sleep ownership and transport recovery
+
+A kernel54 host USB re-enumeration during timed sleep removed the Mac's USB
+interfaces while the phone continued reporting `CONFIGURED`. Wi-Fi stayed
+usable. A composite-only disable/enable attempt failed to restore the host
+interfaces and added three DWC3 failure messages, including an ep0out enable
+failure. Cycling the full peripheral/PHY path restored the actual host serial
+port and model/kernel-verified USB SSH without reboot or owner cable action.
+That first recovery still logged two errors while stopping the already broken
+controller. A subsequent healthy reset with the versioned recovery tool added
+zero USB failures and zero kernel fault signatures. These are separate outcomes;
+device-side `CONFIGURED` is never treated as host transport acceptance.
+
+The retained warning trace enters EndTransfer from resume -> OTG ready -> gadget
+stop -> composite disconnect. Proposal0053 addresses the suspected hardware /
+software sleep-state mismatch by quiescing the peripheral while clocks and PHY
+are available. It keeps physical ID/VBUS inputs so the normal resume state
+machine initializes a fresh peripheral, and excludes host-role policy changes.
+A runner which passed its early ready check must check again under the mutex.
+Real halt errors propagate, retain runtime/PHY ownership and reject system
+sleep while attempting to restore the peripheral. Endpoint warnings are kept.
+
+The fresh pinned-source kernel55 build and genuine builtin-LZ4 checks passed.
+Its kernel configuration and external ramdisk match54. Semantic DT comparison
+found exactly one added boolean on the Korean board's DWC3 node, with all other
+properties and reservation ranges unchanged. Fresh recovery backups, matching
+stock recovery material, BOOT capacity/hash/readback and protected-partition
+hashes were checked. Only BOOT was written; USERDATA was not rewritten.
+
+Kernel55 booted, passed normal touchscreen/OSK/PAM login and selected Mali/KMS.
+The saved boot-start ring covered uptime0, had taint0, zero fault signatures and
+zero DWC3 failure signatures. The USB quiesce/restart markers were actually
+observed in 20.30-, 45.15- and 180.41-second timed cycles, with `CONFIGURED`, no
+boot change, no taint change, no new USB failures and no new kernel faults.
+Actual USB SSH and, after the long cycle, USB serial were independently verified.
+The second and third cycles exposed a separate GNOME presenter timeout and are
+**not whole-desktop suspend passes**. Display-session qualification is recorded
+separately; USB success does not excuse those failures. A changed Wi-Fi DHCP
+address was read over the verified transport and checked with the same pinned
+SSH key before updating the private fallback record.
+
+The explicit recovery tool was installed root-owned and hash-checked, without
+automatic activation. Three fault-injection fixtures checked wrong-role/function
+refusal, cleanup after a failed wait, and not overriding a real unplug/host swap.
+The actual kernel helper fixture passed quiesce, unchanged ID/VBUS, failed-halt
+restore, host exclusion and the stop/runner race under ASan/UBSan. These bounded
+tests do not establish indefinite reliability or physical power-button wake.

@@ -55,3 +55,30 @@ two seconds and cancels the request if blanking fails. A rejected suspend
 request restores display power. Resume resets the X11 screen-saver idle counter
 before forcing DPMS on, so the old idle time cannot immediately blank it again.
 Neither action clears the GNOME screen lock or submits credentials.
+
+## Explicit USB recovery
+
+`recover-usb.py --reset-peripheral` is a recovery operation, not a sleep hook
+or a claim that the USB driver is fixed. Run it as root over the verified Wi-Fi
+route after checking model, recovery materials and private backups. It requires
+the powered SM-G955N peripheral role and exactly the existing Ethernet/serial
+functions. It cycles the driver's peripheral/PHY path, preserves the enabled
+functions and avoids forcing the peripheral back on after an unplug/host swap.
+It never touches partitions, firmware, identifiers or calibration.
+
+If launching over USB, use an independent systemd unit so loss of that transport
+cannot interrupt cleanup, for example after installing the reviewed root-owned
+file under `/usr/local/lib/g955n/`:
+
+```
+sudo systemd-run --collect --unit=g955n-usb-recover /usr/bin/python3 /usr/local/lib/g955n/recover-usb.py --reset-peripheral
+```
+
+Inspect its journal and verify USB from the host afterward. Device-side
+`CONFIGURED` alone is insufficient: the host lost its interfaces in a real
+kernel54 trial while the phone still reported configured. A composite-only
+enable toggle failed; the full peripheral/PHY restart restored both the host
+serial port and verified USB SSH without reboot. Resetting an already broken
+controller still produced real command errors, which the tool reports. A
+subsequent healthy reset produced zero new USB/kernel faults. Nothing is
+silenced, and no unconditional reset is installed on every resume.

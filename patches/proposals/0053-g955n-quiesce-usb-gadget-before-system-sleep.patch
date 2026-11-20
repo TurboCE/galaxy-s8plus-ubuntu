@@ -1,0 +1,144 @@
+Subject: Quiesce the SM-G955N OTG peripheral before system power loss
+
+The Korean board can lose endpoint/core state while OTG software still retains
+B_PERIPHERAL and its request resource indices. A later disconnect then issues
+EndTransfer against that stale state. The live #54 trace reaches it from
+resume -> otg_ready -> start_gadget(off), and a full role/PHY restart recovers
+a stuck link whereas a composite-only reconnect fails.
+
+Opt in on this board only. Stop the peripheral while its core and PHY are still
+powered, keep physical ID/VBUS inputs, and let the existing resume state machine
+initialize a fresh peripheral. Do not change host-mode policy. Serialize against
+a state-machine runner which passed the readiness check before stop.
+
+Propagate real vbus command errors, keep power/runtime ownership on failed halt,
+and reject sleep while trying to restore the peripheral. Do not suppress the
+original endpoint warnings or manufacture command success. Hardware qualification
+of this candidate is required; recovery success is not proof of this repair.
+
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -1393,12 +1393,27 @@
+ {
+ 	struct dwc3	*dwc = dev_get_drvdata(dev);
+ 	unsigned long	flags;
++	int ret;
+ 
+ 	/* bring to full power */
+ 	pm_runtime_get_sync(dev);
+ 
+-	if (dwc->dr_mode == USB_DR_MODE_OTG)
++	if (dwc->dr_mode == USB_DR_MODE_OTG) {
+ 		dwc3_otg_stop(dwc);
++		if (of_property_read_bool(dev->of_node,
++				"samsung,quiesce-gadget-in-system-sleep")) {
++			ret = dwc3_otg_quiesce_gadget(dwc);
++			if (ret) {
++#if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
++				dwc3_otg_ready(dwc);
++#else
++				dwc3_otg_start(dwc);
++#endif
++				pm_runtime_put_sync(dev);
++				return ret;
++			}
++		}
++	}
+ 
+ 	spin_lock_irqsave(&dwc->lock, flags);
+ 
+--- a/drivers/usb/dwc3/core.h
++++ b/drivers/usb/dwc3/core.h
+@@ -1132,6 +1132,7 @@
+ int dwc3_gadget_resize_tx_fifos(struct dwc3 *dwc);
+ int dwc3_otg_start(struct dwc3 *dwc);
+ void dwc3_otg_stop(struct dwc3 *dwc);
++int dwc3_otg_quiesce_gadget(struct dwc3 *dwc);
+ int dwc3_otg_init(struct dwc3 *dwc);
+ void dwc3_otg_exit(struct dwc3 *dwc);
+ #if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
+--- a/drivers/usb/dwc3/otg.c
++++ b/drivers/usb/dwc3/otg.c
+@@ -334,9 +334,12 @@
+ 		wait_for_completion_timeout(&dwc->disconnect,
+ 				msecs_to_jiffies(200));
+ 		ret = usb_gadget_vbus_disconnect(otg->gadget);
+-		if (ret)
++		if (ret) {
+ 			dev_err(dwc->dev, "%s: vbus disconnect failed\n",
+ 					__func__);
++			/* Keep the PHY and runtime reference if halt failed. */
++			return ret;
++		}
+ err2:
+ 		dwc3_core_exit(dwc);
+ err1:
+@@ -370,12 +373,47 @@
+ 		return;
+ 
+ 	mutex_lock(&fsm->lock);
++	/* stop may have closed readiness while this runner waited for the lock. */
++	if (!dotg->ready) {
++		mutex_unlock(&fsm->lock);
++		return;
++	}
+ 
+ 	do {
+ 		state_changed = dwc3_otg_statemachine(fsm);
+ 	} while (state_changed > 0);
+ 
+ 	mutex_unlock(&fsm->lock);
++}
++
++
++/* Called only after OTG notifications are stopped, with core clocks available.
++ * Do not carry endpoint resource indices across the parent's clock/power loss.
++ * Retain the physical ID/VBUS inputs so resume can start a fresh peripheral. */
++int dwc3_otg_quiesce_gadget(struct dwc3 *dwc)
++{
++	struct dwc3_otg *dotg = dwc->dotg;
++	struct otg_fsm *fsm = &dotg->fsm;
++	int ret = 0, restore;
++
++	mutex_lock(&fsm->lock);
++	if (dotg->otg.state != OTG_STATE_B_PERIPHERAL)
++		goto out;
++
++	ret = otg_start_gadget(fsm, 0);
++	if (!ret) {
++		dotg->otg.state = OTG_STATE_B_IDLE;
++		dev_info(dwc->dev, "Gadget quiesced before system sleep\n");
++	} else {
++		/* The core stays powered and suspend is rejected. Restore intent. */
++		restore = usb_gadget_vbus_connect(dotg->otg.gadget);
++		if (restore)
++			dev_err(dwc->dev, "Gadget restore after rejected sleep: %d\n",
++				restore);
++	}
++out:
++	mutex_unlock(&fsm->lock);
++	return ret;
+ }
+ 
+ /* Bind/Unbind the peripheral controller driver */
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -1928,7 +1928,7 @@
+ 		pr_err("%s: TCXO_UFS_BUF_CTRL: %08X\n", __func__, regs[0]);
+ 		iounmap(regs);
+ 	}
+-	return 0;
++	return ret;
+ }
+ 
+ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -326,3 +326,7 @@
+ 	pinctrl-3 = <&uart1_bus>;
+ 	pinctrl-4 = <&uart1_btsleep>;
+ };
++
++&usbdrd_dwc3 {
++	samsung,quiesce-gadget-in-system-sleep;
++};

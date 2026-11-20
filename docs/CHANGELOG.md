@@ -1541,3 +1541,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Verified normal touchscreen GDM login and, with the final minimal overlay,
   a20-second timed suspend followed by touchscreen/OSK/PAM unlock in the same
   GNOME process. Mali-G71 and real KMS frame retirement remained active.
+- Built and installed kernel55 with a board-specific USB peripheral quiesce
+  before system power loss. Retained physical ID/VBUS inputs for fresh resume
+  initialization, closed a stopped-state runner race, propagated halt failures
+  and kept runtime/PHY ownership when halt fails. BOOT-only readback and all
+  protected-partition checks passed. Timed USB recovery passed without a reboot
+  or manual cable reconnection; a separate GNOME timeout remained under repair.
+- Added an explicit, guarded USB peripheral/PHY recovery tool over Wi-Fi after
+  reproducing a host-interface loss that a composite-only toggle could not fix.
+  Verified actual host serial and pinned USB SSH recovery. The tool reports
+  real command errors and is not installed as an unconditional sleep hook.

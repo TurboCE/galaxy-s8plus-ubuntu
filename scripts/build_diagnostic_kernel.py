@@ -74,6 +74,8 @@ def main():
                         help='Add the required Bluetooth UART suspend and resume pin states on SM-G955N')
     parser.add_argument('--drm-native-scanout', action='store_true',
                         help='Build the opt-in SM-G955N DRM/KMS DMA-BUF display interface')
+    parser.add_argument('--usb-gadget-sleep-quiesce', action='store_true',
+                        help='Quiesce the Korean board USB peripheral before system power loss')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -122,6 +124,8 @@ def main():
         parser.error('--bt-uart-sleep-pinctrl requires --dpu0-system-sleep-retention')
     if args.drm_native_scanout and not args.dpu0_system_sleep_retention:
         parser.error('--drm-native-scanout requires --dpu0-system-sleep-retention')
+    if args.usb_gadget_sleep_quiesce and not args.bt_uart_sleep_pinctrl:
+        parser.error('--usb-gadget-sleep-quiesce requires --bt-uart-sleep-pinctrl')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -187,6 +191,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0051-g955n-bluetooth-uart-sleep-pinctrl.patch')
     if args.drm_native_scanout:
         patchfiles.append(ROOT/'patches/proposals/0052-g955n-decon-drm-scanout.patch')
+    if args.usb_gadget_sleep_quiesce:
+        patchfiles.append(ROOT/'patches/proposals/0053-g955n-quiesce-usb-gadget-before-system-sleep.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -214,6 +220,7 @@ def main():
             'dpu0_system_sleep_retention':args.dpu0_system_sleep_retention,
             'bt_uart_sleep_pinctrl':args.bt_uart_sleep_pinctrl,
             'drm_native_scanout':args.drm_native_scanout,
+            'usb_gadget_sleep_quiesce':args.usb_gadget_sleep_quiesce,
             'exynos_suspend_unwind':args.exynos_suspend_unwind,
             'exynos_restore_failed_domain_off':args.exynos_restore_failed_domain_off,
             'freeze_voltage_dvfs':args.freeze_voltage_dvfs,

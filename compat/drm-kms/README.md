@@ -48,7 +48,7 @@ Build the full existing stability profile plus KMS, without device access:
 
 ```sh
 python3 scripts/build_diagnostic_kernel.py --build \
-  --builder g955n-kernel-gcc7-reference:18.04-amd64-lz4 --build-version 54 \
+  --builder g955n-kernel-gcc7-reference:18.04-amd64-lz4 --build-version 55 \
   --audio-safety --native-fb-owner --native-panel-safety --native-panel-qos \
   --native-ondemand-safety --ssp-sysfs-counts --abox-suspend-irq-order \
   --suspend-battery-diagnostic --pmic-wake-irq --dpp-shared-dma \
@@ -58,7 +58,8 @@ python3 scripts/build_diagnostic_kernel.py --build \
   --exynos-suspend-unwind --exynos-restore-failed-domain-off \
   --dhd-system-suspend-drain --dhd-defer-wowlan-pm-work \
   --dhd-init-wowlan-defaults --dhd-system-wlan-wake-opt-in \
-  --dpu0-system-sleep-retention --bt-uart-sleep-pinctrl --drm-native-scanout
+  --dpu0-system-sleep-retention --bt-uart-sleep-pinctrl --drm-native-scanout \
+  --usb-gadget-sleep-quiesce
 ```
 
 Packaging and BOOT-only installation remain separate operations with the
