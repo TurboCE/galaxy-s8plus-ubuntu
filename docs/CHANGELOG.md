@@ -1500,3 +1500,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   the screen lock in effect.
 - Made the short power-key press toggle the active display. The wake
   gesture at system resume still requests display on.
+- Changed a short press on the active display to request system suspend.
+  A long hold opens a cancellable shutdown confirmation with no countdown.

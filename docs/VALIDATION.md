@@ -1588,3 +1588,21 @@ then injected the first power press inside the recorded resume window.
 The panel stayed active, the GNOME lock state was unchanged, and the
 test returned on the same boot. The wake IRQ was RTC. A physical key
 wake from system suspend remains unverified.
+
+### Short-press suspend and long-press shutdown confirmation
+
+On the X11 kernel50 handset, an evdev long press mapped the Power Off
+confirmation window while the key was held. Releasing the key kept the
+window open without requesting suspend. Closing the test window kept the
+same boot. The dialog defaults to Cancel and has no countdown. It is
+shown within the GNOME session, so a locked session must be unlocked to
+interact with it. The test did not activate Power Off.
+
+A separate injected short press on the active panel entered actual
+systemd suspend. The programmed RTC alarm woke the same boot and a key
+event in the resume window kept the panel active without starting a new
+suspend. Kernel taint remained unchanged. A physical-button wake from
+system suspend remains unverified.
+
+With only the display blanked, a short press woke DECON and X11 DPMS
+without starting the system suspend service.

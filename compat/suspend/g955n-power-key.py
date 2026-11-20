@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Toggle the active GNOME display with the handset power key."""
+"""Suspend, wake, or ask to power off from the handset power key."""
 
 import fcntl
 from pathlib import Path
@@ -14,6 +14,7 @@ import time
 INPUT_EVENT = struct.Struct('@llHHi')
 EVIOCSCLOCKID = 0x400445A0
 POWER_KEY = (1, 116)  # EV_KEY, KEY_POWER
+LONG_PRESS = 1.4
 GPIO_KEYS = '/dev/input/by-path/platform-gpio_keys-event'
 PANEL_RUNTIME = Path('/sys/class/graphics/fb0/device/power/runtime_status')
 SLEEP_MARKER = Path('/run/g955n-display-suspend')
@@ -25,7 +26,7 @@ def read_command(*args):
     return subprocess.check_output(args, text=True, timeout=3).strip()
 
 
-def set_display(on):
+def active_session():
     session = read_command('/usr/bin/loginctl', 'show-seat', 'seat0',
                            '-p', 'ActiveSession', '--value')
     if not session:
@@ -42,22 +43,43 @@ def set_display(on):
     bus = Path(f'/run/user/{user.pw_uid}/bus')
     if not bus.is_socket():
         return
-    # Use the session's normal privileges and preserve its lock state.
     run = ['/usr/sbin/runuser', '-u', user.pw_name, '--', '/usr/bin/env',
+           'XDG_RUNTIME_DIR=' + str(bus.parent),
            'DBUS_SESSION_BUS_ADDRESS=unix:path=' + str(bus)]
-    if details['Type'] == 'x11':
+    return session, details['Type'], run
+
+
+def display_environment(run, keys):
+    return [line for line in read_command(*run, '/usr/bin/systemctl', '--user',
+                'show-environment').splitlines()
+            if line.partition('=')[0] in keys]
+
+
+def wake_display(session):
+    _, session_type, run = session
+    if session_type == 'x11':
         # Mutter's property does not drive DPMS on the native X11 server.
-        env = [line for line in read_command(*run, '/usr/bin/systemctl', '--user',
-                   'show-environment').splitlines()
-               if line.startswith(('DISPLAY=', 'XAUTHORITY='))]
+        env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
         if not any(value.startswith('DISPLAY=') for value in env):
             return
-        read_command(*run, *env, '/usr/bin/xset', 'dpms', 'force', 'on' if on else 'off')
+        read_command(*run, *env, '/usr/bin/xset', 'dpms', 'force', 'on')
     else:
         read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
-                     MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '0' if on else '3')
-    print('Power key requested display ' + ('wake' if on else 'blank'), flush=True)
-    return True
+                     MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '0')
+    print('Power key requested display wake', flush=True)
+
+
+def open_power_dialog(session):
+    _, _, run = session
+    wake_display(session)
+    env = display_environment(run, ('DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY'))
+    dialog = subprocess.Popen([
+        *run, *env, '/usr/bin/zenity', '--question', '--modal', '--default-cancel',
+        '--title=Power Off', '--text=Turn off this phone?',
+        '--ok-label=Power Off', '--cancel-label=Cancel',
+    ])
+    print('Power key opened shutdown confirmation', flush=True)
+    return dialog
 
 
 def panel_is_on():
@@ -81,7 +103,8 @@ def main():
     if b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise SystemExit('Unexpected device model')
     if sys.argv[1:] == ['--wake']:
-        set_display(True)
+        if session := active_session():
+            wake_display(session)
         return
     # A normal read shares the device with the compositor and logind.
     with open(GPIO_KEYS, 'rb', buffering=0) as key:
@@ -92,11 +115,34 @@ def main():
 def watch_keys(key):
     was_on = panel_is_on()
     press = None
+    pending_dialog = None
+    dialog_seat = None
     while True:
+        if pending_dialog is not None and pending_dialog.poll() is not None:
+            result = pending_dialog.returncode
+            pending_dialog = None
+            try:
+                if result == 0 and (session := active_session()) and session[0] == dialog_seat:
+                    read_command('/usr/bin/systemctl', 'poweroff')
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                print(f'Confirmed shutdown unavailable ({type(error).__name__})', flush=True)
         if not select.select([key], [], [], 0.2)[0]:
             # X can wake DPMS as soon as it receives a key. Save the earlier
             # hardware state before waiting for the physical key event.
             was_on = panel_is_on()
+            if press is not None:
+                _, pressed_at = press
+                if time.clock_gettime(time.CLOCK_BOOTTIME) - pressed_at >= LONG_PRESS:
+                    press = None
+                    try:
+                        if pending_dialog is None and (session := active_session()):
+                            if not is_resume_press(pressed_at):
+                                pending_dialog = open_power_dialog(session)
+                                dialog_seat = session[0]
+                            else:
+                                wake_display(session)
+                    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+                        print(f'Power dialog unavailable ({type(error).__name__})', flush=True)
             continue
         event = key.read(INPUT_EVENT.size)
         if not event:
@@ -110,15 +156,20 @@ def watch_keys(key):
             before, pressed_at = press
             press = None
             try:
-                on = not before or is_resume_press(pressed_at)
-                if not on:
-                    # Let X process the release before blanking, so it cannot
-                    # immediately turn the screen on again on that release.
-                    time.sleep(0.15)
-                if set_display(on):
-                    was_on = on
+                if pending_dialog is not None or not (session := active_session()):
+                    continue
+                if is_resume_press(pressed_at):
+                    wake_display(session)
+                elif sec + usec / 1_000_000 - pressed_at >= LONG_PRESS:
+                    pending_dialog = open_power_dialog(session)
+                    dialog_seat = session[0]
+                elif before:
+                    print('Power key requested system suspend', flush=True)
+                    read_command('/usr/bin/systemctl', 'suspend')
+                else:
+                    wake_display(session)
             except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
-                print(f'Display power change unavailable ({type(error).__name__})', flush=True)
+                print(f'Power key action unavailable ({type(error).__name__})', flush=True)
 
 
 if __name__ == '__main__':

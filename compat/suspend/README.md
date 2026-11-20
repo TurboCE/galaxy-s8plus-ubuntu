@@ -24,11 +24,15 @@ physical button as a wake source. Display idle and screen locking are
 separate GNOME settings.
 
 Enable `g955n-power-key.service` to connect the hardware power key to the
-active GNOME display. The service shares the GPIO input device and runs the
-display power request with the seat session's user privileges. A short press
-turns an active screen off or wakes a blanked screen. The X11 path
-uses DPMS and the Wayland path uses Mutter's display power property. The
-request preserves screen locking. Suspend is selected from GNOME's menu.
+active GNOME session. With the screen on, a short press requests system
+suspend. From a display-only blank, it wakes the screen. Holding the button
+for about 1.4 seconds opens a Zenity Power Off confirmation with Cancel
+selected by default. The popup has no countdown and is subject to GNOME's
+screen lock. Install Ubuntu's `zenity` package for the confirmation dialog.
+
+The service shares the GPIO input device. Display wake and the dialog run
+with the session user's privileges. X11 wake uses DPMS and Wayland wake
+uses Mutter's display power property. The wake action preserves locking.
 With the wake-report hook installed, a kernel-reported power-key wake
 also schedules a display request after systemd has resumed the session.
 
