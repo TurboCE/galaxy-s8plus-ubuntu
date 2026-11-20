@@ -1,0 +1,8 @@
+[Match]
+Driver=wl
+Path=platform-116a0000.pcie0-pci-0000:01:00.0
+OriginalName=wlan0 wlp1s0f0
+
+[Link]
+# Preserve the name used by existing NetworkManager Wi-Fi profiles.
+Name=wlan0
