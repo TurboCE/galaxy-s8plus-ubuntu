@@ -20,10 +20,13 @@ PANEL_RUNTIME = Path('/sys/class/graphics/fb0/device/power/runtime_status')
 SLEEP_MARKER = Path('/run/g955n-display-suspend')
 MUTTER = 'org.gnome.Mutter.DisplayConfig'
 MUTTER_PATH = '/org/gnome/Mutter/DisplayConfig'
+LOGIND_SUSPEND = ('/usr/bin/busctl', '--system', 'call',
+                  'org.freedesktop.login1', '/org/freedesktop/login1',
+                  'org.freedesktop.login1.Manager', 'Suspend', 'b', 'false')
 
 
-def read_command(*args):
-    return subprocess.check_output(args, text=True, timeout=3).strip()
+def read_command(*args, timeout=3):
+    return subprocess.check_output(args, text=True, timeout=timeout).strip()
 
 
 def active_session():
@@ -72,8 +75,40 @@ def wake_display(session):
     print('Power key requested display wake', flush=True)
 
 
+def session_locked(session):
+    return read_command('/usr/bin/loginctl', 'show-session', session[0],
+                        '-p', 'LockedHint', '--value') == 'yes'
+
+
+def lock_before_sleep(session):
+    run = session[2]
+    if (read_command(*run, '/usr/bin/gsettings', 'get',
+                     'org.gnome.desktop.screensaver', 'ubuntu-lock-on-suspend') != 'true'
+            or read_command(*run, '/usr/bin/gsettings', 'get',
+                            'org.gnome.desktop.lockdown', 'disable-lock-screen') == 'true'):
+        return
+    # ScreenSaver.GetActive describes the shield/blanking state, not whether
+    # credentials are required. In particular it may be false while locked.
+    if session_locked(session):
+        return
+    read_command('/usr/bin/loginctl', 'lock-session', session[0])
+    deadline = time.monotonic() + 3
+    while not session_locked(session):
+        if time.monotonic() >= deadline:
+            raise RuntimeError('Screen lock did not complete; suspend was not requested')
+        time.sleep(.05)
+
+
 def suspend_session(session):
     _, session_type, run = session
+    # Root's direct systemctl path can bypass logind's PrepareForSleep and its
+    # desktop delay inhibitors. Finish the configured lock while rendering is
+    # available, before our explicit blanking barrier.
+    try:
+        lock_before_sleep(session)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        wake_display(session)
+        raise
     if session_type == 'x11':
         # Blank while the graphical session can still process X requests.
         # systemd's later sleep hooks run with user sessions frozen.
@@ -91,7 +126,7 @@ def suspend_session(session):
             raise RuntimeError('Panel did not blank; suspend was not requested')
         time.sleep(.05)
     try:
-        read_command('/usr/bin/systemctl', 'suspend')
+        read_command(*LOGIND_SUSPEND, timeout=10)
     except (OSError, subprocess.SubprocessError):
         wake_display(session)
         raise

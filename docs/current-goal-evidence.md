@@ -1,21 +1,27 @@
 # Current seven-requirement evidence audit
 
-This is an incomplete-goal checkpoint. No requirement is removed or weakened by
-this audit. The latest running kernel is32 with ABOX safety and SSP sysfs count fixes,
-plus the reversible MIF-floor mitigation. Native sensor/brightness response,
-actual Mali GNOME trials and100 sensor-active DPMS cycles have bounded passes.
-The initiating corruption without the floor and the remaining hardware/UI
-acceptance are still open. This is an incomplete-goal checkpoint.
+This remains an incomplete goal. The live SM-G955N runs kernel55 with the
+native GNOME Mali -> DRM/KMS/PRIME -> DECON output. Current bounded evidence
+supersedes the kernel32 checkpoint below; it does not certify all hardware,
+indefinite reliability or an error-free untested subsystem.
 
-| Owner requirement | Evidence actually available | Remaining acceptance |
+| Owner requirement | Current evidence | Remaining acceptance |
 | --- | --- | --- |
-| Boot, select account and enter GNOME by touch | Owner confirmed manual account/password/desktop after repaired GDM and a26 reboot; authentication/autologin settings unchanged | Repeated stable boots and long use; power-hang failures prevent overall pass |
-| Real accelerated GNOME and fast touch response | Actual normal GNOME Mali-G71, EGL/Exynos gralloc, no swrast; three26 composition/popup passes; real27 Mali login | Physical response/latency and sustained application/display-power workload; commits/sec are not FPS |
-| No kernel errors; fix real driver defects | Reproduced/fixed DPP metadata lifetime, pan/power serialization, QoS ordering and Ondemand lifetime source bugs; private real RCU/stack-check fault records | Actual initiating corruption remains unresolved.26/27/28 hang;29 never reached Ubuntu due to a build error. Corrected30 also auto-rebooted without the diagnostic floor. Proposal32 improves a recovery path only |
-| Accel, magnetic, pedometer and ambient-light operation | Real31 raw records;32 native accel/light stream, owner tilt/shade response, measured mount matrix and actual SIGKILL cleanup. Step increase and physical magnetic/gyro acceptance remain open | Boot-time genuine firmware/calibration, actual claim/SIGKILL cleanup, live magnetic/step/ALS and physical motion/light acceptance |
-| Microphone and speaker | Bounded selected speaker PCM progress; scoped audio policy experiment | Acoustic speaker and microphone acceptance, stable routing and safe default policy. WirePlumber remains masked |
-| LTE modem without driver errors | Original protected RADIO/calibration preserved; modem device nodes; no SIM supplied | Actual modem bootstrap/driver checks; native modem control. Later SIM registration, mobile-only data/reconnect; no-SIM is not a modem pass |
-| Automatic rotation/brightness and normal Ubuntu toggles | 32 actual reported light2..189lux and backlight1091..11961 response; standard brightness setting roundtrip. Sensor orientation corrected; fbdev dynamic rotation missing | Runtime screen rotation with correct touch mapping, genuine light response/backlight control, and actual Ubuntu enable/disable behavior |
+| Boot and touch login | Normal kernel55 GDM account/OSK/PAM login and actual lock/PAM unlock after timed resume; autologin remains off | Repeated physical cold starts and prolonged ordinary use |
+| Accelerated, responsive GNOME | Mali-G71, no swrast, real KMS frame retirement without CPU final-buffer transfer; earlier54 same-boot drag comparison is retained | Physical latency and sustained app workload; software movement is not panel FPS |
+| Fix kernel/driver errors | Fresh55 boot-start capture and tested intervals had taint0 and no new fault signatures; USB sleep quiesce/restart exercised | Longer/physical power tests, all remaining driver paths; earlier GNOME exit35 failures remain documented separately |
+| Accelerometer, magnetic, steps and light | Active55 native accelerometer/light service, original measured matrix/calibration; real magnetic/gyro/step records previously captured on36; own inactive release repaired | Physical heading/gyro calibration, genuine step increase, repeated changing-light response on55 |
+| Microphone and speaker | Normal PipeWire defaults/controls; owner confirmed continuous speech on54;55 post-resume duplex had no hardware-error growth and detected the test tones | Cold-capture startup transient, speech intelligibility and further physical audio routing |
+| LTE modem | Protected RADIO/calibration retained; ModemManager enabled, no usable modem; last driver inspection OFFLINE | Native CP bootstrap/control transport, then SIM registration, mobile-only traffic and resume/reconnect; SIM has not been supplied |
+| Rotation, automatic brightness and standard toggles | Genuine lux/brightness response and standard toggle roundtrips previously passed32;55 native properties remain available | Dynamic rotation backend/touch mapping remains unimplemented; current physical response and long-use acceptance |
+
+Recent55 USB trials passed20/45/180-second transport recovery, but two of those
+lost the GNOME process and are not desktop passes. A rebuilt deadline-aware
+presenter subsequently retained GNOME for179seconds. The corrected power-key
+path also passed a30-second unlocked-desktop -> actual lock -> sleep -> wake ->
+normal touchscreen/PAM sequence. ScreenSaver.GetActive alone was an invalid lock
+criterion; the current harness checks logind LockedHint as well. No password or
+authentication policy was weakened. See VALIDATION.md for the exact boundaries.
 
 Supporting state: docs/VALIDATION.md, greeter-touch-validation.md,
 kernel26-power-investigation.md, ondemand-panel-lifetime.md,
@@ -23,7 +29,7 @@ compiler-reference-comparison.md, panic-decoder-and-safe-recovery.md and
 native-rotation-requirements.md. Device records/images and addresses remain in
 ignored private artifacts, not this document.
 
-## Recovery and controlled display-power comparison
+## Historical kernel24-32 recovery and controlled comparisons
 
 The owner returned and recovered the device. The previous connection block is
 resolved.28 accepted owner touch login and three ordinary Mali GNOME composition

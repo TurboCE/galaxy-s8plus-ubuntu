@@ -1940,3 +1940,35 @@ claim, while an unowned release returned a harmless no-op. The subsequent
 29.91-second direct-systemd test had no new light-release denial, no GNOME frame
 failure and no USB/kernel fault. Physical heading, steps, motion/brightness
 response on55 and long-term power consumption remain separate acceptance work.
+
+### Kernel55 power-key lock readiness and desktop integration
+
+The root power handler now uses logind's Suspend method and its normal desktop
+notifications. It honors `ubuntu-lock-on-suspend` and the lockdown setting,
+requests the active session's standard lock and verifies logind `LockedHint`
+before the existing hardware-blanking barrier. It never sets that hint itself
+or submits credentials. If locking cannot complete, sleep is canceled and the
+display is restored. A locked session with ScreenSaver.GetActive=false is
+accepted as locked, without waiting indefinitely for the shield animation.
+The interim GetActive-based lock-check attempt timed out safely and did not
+enter sleep; it was replaced, rather than changing authentication policy.
+
+The final handler was installed with a pinned previous file, verified private
+backup/readback and an active service. Seven tests cover idle-reset ordering,
+lock-before-blank-before-logind ordering, rejected lock/sleep/blanking, honoring
+the lock setting and the already-locked-but-inactive-shield case. A live trial
+started with actual LockedHint=false, used this handler, slept30.15seconds and
+returned with the same boot/Shell, active panel, actual LockedHint=true,
+configured USB and zero new USB/kernel faults. Light-release denials and GNOME
+frame failures were also zero. The readiness-based touchscreen/OSK harness then
+completed normal PAM and checked actual LockedHint=false, no duplicate/lost
+characters and no failed-session UI. Synthetic XTest motion is not physical
+touch acceptance, and physical button wake remains a separate check.
+
+After the kernel55 resume work, a bounded desktop duplex audio trial again
+passed: zero sink/source hardware-error growth,186 playback and224 capture
+pointer positions, both expected synthetic tones detected in the mic, no
+steady clipping or new kernel faults and restored volume/mute. The first
+250ms still contained203 clipped samples. Cold-capture startup quality remains
+open; no raw microphone audio was saved or new physical listening confirmation
+claimed. SensorProxy and the ordinary audio services remain enabled.

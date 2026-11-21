@@ -1562,3 +1562,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   the rebuilt native daemon with a prior-binary pin and rollback; accelerometer
   and genuine lux properties returned. Actual unauthorized new claims remained
   denied and new suspend-time light-release errors were zero in the live trial.
+- Connected the power-key request to logind and checked the real session lock
+  before panel blanking. Kept lock settings and normal PAM, canceled sleep on
+  failed lock readiness and distinguished actual LockedHint from screensaver
+  activation. An unlocked-desktop -> lock -> 30-second sleep -> wake -> touch
+  PAM cycle passed without boot/Shell change or new USB/kernel faults.

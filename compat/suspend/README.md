@@ -56,6 +56,14 @@ request restores display power. Resume resets the X11 screen-saver idle counter
 before forcing DPMS on, so the old idle time cannot immediately blank it again.
 Neither action clears the GNOME screen lock or submits credentials.
 
+Before blanking, the power-key handler honors Ubuntu's lock-on-suspend and
+lockdown settings, requests the active session's normal logind lock if needed
+and waits for its actual `LockedHint`. ScreenSaver.GetActive alone can be false
+while credentials are still required. An incomplete lock cancels sleep and
+restores the display. The sleep request uses logind's Suspend method so desktop
+PrepareForSleep notifications and delay inhibitors remain part of the path.
+No password, autologin setting or authentication result is changed.
+
 ## Explicit USB recovery
 
 `recover-usb.py --reset-peripheral` is a recovery operation, not a sleep hook

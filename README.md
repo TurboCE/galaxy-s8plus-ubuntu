@@ -40,7 +40,7 @@ hardware rendering and composition**. The actual GNOME process loads the
 private EGL bridge and Exynos gralloc, with no swrast driver. Three native
 client/overlay pixel and stable-calendar trials passed. The X11 presentation
 initially used CPU copies and a separate60Hz panel commit pump. The current
-kernel54 normal GNOME login passes Mali DMA-BUFs through DRM/KMS/PRIME to
+kernel55 normal GNOME login passes Mali DMA-BUFs through DRM/KMS/PRIME to
 DECON for its final composition, with no CPU pixel copy. Compatible driver
 capabilities and installed-file hashes preserve this route across kernel
 updates. See the [KMS driver and integration](compat/drm-kms/README.md). Application-buffer transfers and actual
@@ -48,17 +48,23 @@ panel FPS require separate measurement. See the
 [direct-output validation](docs/gnome-direct-panel-output.md).
 Automatic login is disabled; credentials and device artifacts remain private.
 The GDM account-row touch repair now passes owner-confirmed password/desktop entry;
-injected touchscreen/OSK/PAM login also passed after the kernel54 reboot.
+injected touchscreen/OSK/PAM login also passed after the kernel55 reboot and
+timed resume. Kernel55 quiesces USB before sleep; recent bounded tests retained
+the boot, GNOME and taint0. Earlier GNOME failures and remaining qualification
+are recorded in VALIDATION.md. Speaker/mic desktop routing and native
+accelerometer/light integration are active, with microphone startup quality,
+dynamic rotation, native LTE integration and physical sensor acceptance open.
 Physical cold-boot regression and other hardware acceptance remain open.
 
-Kernel24 passed bounded graphics trials, but later unattended operation produced
+Historical failures: Kernel24 passed bounded graphics trials, but later unattended operation produced
 repeated resets and is **not stability-qualified**. A header-only cpuidle option
 was ignored by the bootloader. Kernel25 actually applies built-in
 `cpuidle.off=1`, but also reset: deep idle is not necessary for the failure, and
 this diagnostic is not a repair. A legacy panel-presentation comparison is in
 progress. Proposal29 fixes reproduced DPP metadata-lifetime and native pan/power
 races; kernel26 later hard-hung during repeated desktop DPMS. The source-level
-primary-QoS repair in proposal30 is under build-only evaluation. Historical kernel22 remains
+primary-QoS repair and later lifetime fixes are included in the current tested
+profile. These early failures remain evidence, not the current running build. Kernel22 remains
 quarantined. Recovery/calibration partitions are preserved. See the
 [kernel investigation](docs/kernel22-stability-investigation.md).
 
