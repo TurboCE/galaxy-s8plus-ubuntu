@@ -1607,3 +1607,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   markers, exact-unit/LoadState recovery and durable-progress collection; fixed
   premature host-monitor completion on an older globbed log.22 host tests pass.
   No further modem trial or new kernel is automatically enabled.
+
+
+### Ordinary USB audit within the narrowed scope
+
+- Compared retained macOS USB events with existing Ubuntu55 sleep receipts.
+  Distinguished controlled recovery, host exclusive-open contention, GNOME
+  failure and whole-device loss; an ordinary-use USB root cause remains unknown.
+- Added docs/usb-existing-log-audit.md with evidence and limits. Preserved all
+  logs and existing out-of-scope edits. No handset access, SSH, modem rerun,
+  setting change, reboot/flash or new driver activation was performed.

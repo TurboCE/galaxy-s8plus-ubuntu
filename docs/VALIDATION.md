@@ -2093,3 +2093,16 @@ been exercised on the now-unreachable phone. No new kernel was flashed, no
 permanent CP service was installed and the normal GNOME authentication policy
 was not changed. The current scripted GDM/PAM attempt did not complete; it is not
 an owner-confirmed physical-login regression, and no autologin was substituted.
+
+
+### Ordinary USB existing-log audit (2026-11-21 KST)
+
+Read-only macOS USB records from08:14–09:12 and existing Ubuntu55 receipts
+were compared without handset/SSH access or a new test. Selected19/44/179-second
+host reconnect gaps align with the retained controlled sleep cycles. Chrome/
+ChatGPT exclusive-open denials establish application contention, not a proved
+CDC/serial disconnection cause. Cable/port failure and recent ordinary-use USB
+failure cannot be isolated from these logs alone. No setting, USB state, kernel,
+application ownership or log was changed/cleared. The excluded modem work was
+not retried or modified. See usb-existing-log-audit.md; this is a diagnosis
+boundary, not a newly verified USB fix or live connectivity pass.
