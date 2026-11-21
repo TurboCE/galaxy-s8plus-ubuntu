@@ -30,7 +30,7 @@ path, with packed28-byte firmware and16-byte security arguments. It rejects
 unexpected TOCs, CRC failures, incomplete NV, overlapping/out-of-range sections,
 positive IOCTL failures and incomplete handshake frames before reporting success.
 
-Eleven boot/integrity/inhibitor tests exercise malformed input, actual pointer/packed argument layout,
+Sixteen boot/integrity/inhibitor/read/cleanup tests exercise malformed input, actual pointer/packed argument layout,
 positive return handling, transfer failure, verification-before-power ordering
 and truncated replies:
 
@@ -60,7 +60,7 @@ are sent. Fragmented/coalesced framing is length-bounded and reply type/sequence
 must match; notifications are not reported as successful queries. Payloads,
 identifiers and NV contents are never logged. The RFS endpoint is observed but
 no request is answered, and no NV write/radio-enable/PIN command is implemented.
-Five framing/correlation tests pass. The public older libsamsung-ipc reference
+Six framing/correlation/passive tests pass. The public older libsamsung-ipc reference
 has no G955N/SS355 descriptor, so it is not installed as a ready-made backend.
 
 The first status-query trial subsequently lost USB/Wi-Fi/serial responses.
@@ -76,3 +76,40 @@ This has not yet been retried on the unreachable handset; it does not establish
 that an idle suspend caused the connection loss. The original NV companion
 checksum was separately verified using the public Samsung suffix and matched;
 preflight now checks that as well as the original SHA256 backup pin.
+
+
+## Recovered freeze comparison
+
+After a forced restart, protected firmware/calibration/recovery and original NV
+still matched their private pins. PARAM was archived again as a separate current
+snapshot. The earlier failed trial's retained userspace journal ended just after
+unit start; it did not prove that a status GET had executed. The saved last_kmsg
+had bootloader records and no usable matching Linux banner, so no panic address
+was symbolized from it. A missing transient unit's default Result=success is
+not acceptance: always retain LoadState. Use the explicit .service name when
+recovering a previous unit's journal.
+
+The buffered Python block-reader caused the kernel's illegal UFS TCGETS messages.
+`partition_input()` uses explicit os.open/os.read with EINTR handling and no
+terminal probe. Three actual validation passes had zero new TCGETS errors and
+taint0. Sleep inhibition now covers the entire preflight, with a regression case
+that fails the former ordering. The desktop's configured automatic system-sleep
+actions were both nothing; no automatic-suspend cause is inferred.
+
+A later no-query trial booted/offlined CP, passed six subsequent full preflights
+and about60seconds of further observation without a reboot, with taint0. Another
+trial used the new --observe-only mode, which sends no status request at all.
+Actual FMT frames arrived, then all remote responses stopped again. Passive mode
+is therefore NOT qualified and no further modem boots are enabled/repeated at
+this checkpoint. Normal kernel55 remains installed; there is no persistent CP
+service.
+
+Stage output in these comparisons is fsynced to a private USERDATA log before
+hardware actions. A host-monitor glob accidentally included an older completed
+run and stopped its follower early; completion now also requires the current
+unit to be inactive. That follower's partial capture cannot prove a later phase.
+Recover the newest individual durable log after restart, rather than accepting
+an older completion marker. Additional cleanup markers now distinguish reset
+from power-off, and even a failed log stream cannot prevent attempted power-off
+when reset fails. The later passive freeze's last durable stage still needs
+recovery. None of these diagnostics establishes a freeze root cause or LTE data.

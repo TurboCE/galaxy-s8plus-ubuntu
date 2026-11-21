@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Exercise RAM bounds, actual packed kernel ABI and failure propagation."""
 import ctypes
+from contextlib import contextmanager
 import importlib.util
 from pathlib import Path
 import struct
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 import zlib
@@ -31,6 +33,50 @@ def inputs():
 
 
 class TrialTests(unittest.TestCase):
+    def test_shutdown_still_powers_off_after_reset_or_log_failure(self):
+        class Transport:
+            powered=True
+            def __init__(self):self.calls=[]
+            def command(self,n):
+                self.calls.append(n)
+                if n==0x21:raise OSError('reset failed')
+        def broken_log(step):raise OSError('log unavailable')
+        t=Transport()
+        with self.assertRaisesRegex(OSError,'reset failed'):m.shutdown_trial(t,broken_log)
+        self.assertEqual(t.calls,[0x21,0x20])
+
+    def test_boot_inhibits_before_preflight_not_only_before_ioctl(self):
+        order=[]
+        @contextmanager
+        def inhibitor():
+            order.append('inhibit')
+            try:yield
+            finally:order.append('release')
+        def preflight(*args):
+            order.append('preflight')
+            raise RuntimeError('stop before hardware')
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'inventory.json';p.write_text('{}')
+            with patch.object(sys,'argv',['cp_boot.py','--private-inventory',str(p),'--boot-trial']),patch.object(m,'preflight',side_effect=preflight),patch.object(m,'sleep_inhibitor',inhibitor):
+                with self.assertRaisesRegex(RuntimeError,'before hardware'):m.main()
+        self.assertEqual(order,['inhibit','preflight','release'])
+
+    def test_partition_input_handles_short_reads_and_eintr_without_tty_probe(self):
+        with patch.object(m.os,'open',return_value=7) as opened,patch.object(m.os,'read',side_effect=[InterruptedError(),b'ab',b'c',b'']),patch.object(m.os,'close') as closed,patch.object(m.fcntl,'ioctl') as ioctl:
+            self.assertEqual(m.partition_input('/test/RADIO',retain=True),(3,m.sha256(b'abc'),b'abc'))
+            opened.assert_called_once_with('/test/RADIO',m.os.O_RDONLY|m.os.O_CLOEXEC)
+            closed.assert_called_once_with(7);ioctl.assert_not_called()
+
+    def test_partition_input_closes_on_failure(self):
+        with patch.object(m.os,'open',return_value=7),patch.object(m.os,'read',side_effect=OSError('read failed')),patch.object(m.os,'close') as closed:
+            with self.assertRaises(OSError):m.partition_input('/test/EFS')
+            closed.assert_called_once_with(7)
+
+    def test_partition_input_real_file_streaming(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/'data';data=b'abc'*(1024*1024);p.write_bytes(data)
+            self.assertEqual(m.partition_input(p),(len(data),m.sha256(data),None))
+
     def test_inhibitor_child_holds_pipe_until_cleanup(self):
         actual=m.subprocess.Popen
         children=[]

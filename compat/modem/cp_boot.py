@@ -50,6 +50,33 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def partition_input(path, retain=False):
+    """Read a block node without Python's buffered-open TTY probe.
+
+    This UFS driver logs TCGETS as an illegal UFS ioctl. It is a terminal
+    capability probe, not a storage/CP command. Explicit os.read avoids it.
+    """
+    digest = hashlib.sha256()
+    chunks = [] if retain else None
+    size = 0
+    fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+    try:
+        while True:
+            try:
+                data = os.read(fd, 1024 * 1024)
+            except InterruptedError:
+                continue
+            if not data:
+                break
+            digest.update(data)
+            size += len(data)
+            if chunks is not None:
+                chunks.append(data)
+    finally:
+        os.close(fd)
+    return size, digest.hexdigest(), b''.join(chunks) if chunks is not None else None
+
+
 def validate_nv(nv, expected_sha, companion):
     if len(nv) != 1024 * 1024 or sha256(nv) != expected_sha:
         raise RuntimeError('Existing NV differs from private inventory')
@@ -183,6 +210,24 @@ def modem_state():
     return nodes[0].read_text().strip()
 
 
+def shutdown_trial(transport, progress):
+    def event(step):
+        # Losing a diagnostic output stream must not prevent hardware cleanup.
+        try:
+            progress(step)
+        except Exception:
+            pass
+    if transport and transport.powered:
+        try:
+            event('cleanup-reset-start')
+            transport.command(0x21)
+            event('cleanup-reset-completed')
+        finally:
+            event('cleanup-power-off-start')
+            transport.command(0x20)
+            event('cleanup-power-off-completed')
+
+
 @contextmanager
 def sleep_inhibitor():
     """Hold a real logind inhibitor and confirm readiness before touching CP.
@@ -213,7 +258,7 @@ def sleep_inhibitor():
         child.stdout.close()
 
 
-def preflight(record):
+def preflight(record, progress=lambda step: None):
     if os.geteuid() or platform.machine() != 'aarch64':
         raise RuntimeError('Requires native G955N root')
     tree = Path('/proc/device-tree')
@@ -230,26 +275,22 @@ def preflight(record):
     # Inventory includes verified private raw-backup hashes, never identifiers.
     radio = None
     for name in ('RADIO', 'EFS', 'CPEFS', 'RECOVERY', 'PARAM'):
+        progress('read-' + name.lower())
         path = LABELS / name
         if not stat.S_ISBLK(path.stat().st_mode):
             raise RuntimeError('Protected partition missing: ' + name)
-        with path.open('rb') as stream:
-            digest = hashlib.sha256()
-            size = 0
-            chunks = [] if name == 'RADIO' else None
-            while data := stream.read(1024 * 1024):
-                digest.update(data)
-                size += len(data)
-                if chunks is not None:
-                    chunks.append(data)
+        size, digest, payload = partition_input(path, retain=name == 'RADIO')
         expected = record['partitions'][name]
-        if size != expected['bytes'] or digest.hexdigest() != expected['sha256']:
+        if size != expected['bytes'] or digest != expected['sha256']:
             raise RuntimeError('Protected backup/current mismatch: ' + name)
-        if chunks is not None:
-            radio = b''.join(chunks)
+        if payload is not None:
+            radio = payload
+        progress('checked-' + name.lower())
+    progress('check-existing-nv')
     nv = Path('/efs/nv_data.bin').read_bytes()
     validate_nv(nv, record['nv_sha256'], Path('/efs/nv_data.bin.md5').read_text())
     stages = plan(radio, nv)
+    progress('checked-image-layout')
     if modem_state() != 'OFFLINE':
         raise RuntimeError('CP must be offline before this single trial')
     paths = {'/dev/umts_boot0', '/dev/umts_ipc0', '/dev/umts_rfs0'}
@@ -267,12 +308,26 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--private-inventory', type=Path, required=True)
     parser.add_argument('--boot-trial', action='store_true')
-    parser.add_argument('--query-status', action='store_true',
+    observation = parser.add_mutually_exclusive_group()
+    observation.add_argument('--observe-only', action='store_true',
+                             help='Receive SIPC notifications without sending status queries')
+    observation.add_argument('--query-status', action='store_true',
                         help='Read-only SIPC power/SIM GETs during the bounded trial')
     args = parser.parse_args()
-    if args.query_status and not args.boot_trial:
-        parser.error('--query-status requires --boot-trial')
-    stages = preflight(json.loads(args.private_inventory.read_text()))
+    if (args.query_status or args.observe_only) and not args.boot_trial:
+        parser.error('SIPC observation requires --boot-trial')
+    if args.boot_trial:
+        # The whole preflight must also be protected: an earlier attempt did
+        # not acquire the inhibitor until after hashing every partition.
+        with sleep_inhibitor():
+            validated_trial(args)
+    else:
+        validated_trial(args)
+
+
+def validated_trial(args):
+    progress = lambda step: print(json.dumps({'step': step}), flush=True)
+    stages = preflight(json.loads(args.private_inventory.read_text()), progress)
     print(json.dumps({'validated': True, 'sections': [s.name for s in stages],
                       'storage_write': False, 'boot_requested': args.boot_trial}), flush=True)
     if not args.boot_trial:
@@ -284,7 +339,7 @@ def main():
     fds = []
     transport = None
     os.umask(0o077)
-    with Path('/run/g955n-cp-boot.lock').open('a') as lock, sleep_inhibitor():
+    with Path('/run/g955n-cp-boot.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             Path('/sys/power/wake_lock').write_text('g955n-cp-boot-trial')
@@ -292,22 +347,19 @@ def main():
                 fd = os.open('/dev/' + name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
                 fds.append(fd)
             transport = NativeTransport(fds[0])
-            load_and_handshake(transport, stages,
-                               lambda step: print(json.dumps({'step': step}), flush=True))
+            load_and_handshake(transport, stages, progress)
             print(json.dumps({'cp_after_handshake': modem_state(), 'LTE_qualified': False}), flush=True)
-            if args.query_status:
+            if args.query_status or args.observe_only:
                 from sipc_status import observe
-                print(json.dumps({'sipc_status': observe(fds[1], fds[2], query=True)}), flush=True)
+                progress('status-observation-start')
+                status = observe(fds[1], fds[2], query=args.query_status, progress=progress)
+                print(json.dumps({'sipc_status': status}), flush=True)
             else:
                 time.sleep(5)
             print(json.dumps({'cp_after_observation': modem_state()}), flush=True)
         finally:
             try:
-                if transport and transport.powered:
-                    try:
-                        transport.command(0x21)  # restore OFFLINE, no storage IO
-                    finally:
-                        transport.command(0x20)  # no persistent modem service yet
+                shutdown_trial(transport, progress)
             finally:
                 for fd in reversed(fds):
                     os.close(fd)

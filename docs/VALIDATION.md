@@ -2044,3 +2044,52 @@ public Samsung format; preflight now checks it alongside SHA256. The total is
 11 boot/integrity/inhibitor tests plus5 framing/correlation tests. No persistent
 modem service or new kernel was enabled; current failed-trial evidence remains
 pending transport recovery.
+
+
+### Recovered55 freeze and no-query comparisons
+
+USB reconnection and a short power press did not restore any response. The
+owner forced a restart. Kernel55 returned with CP OFFLINE and taint0, and native
+GPU manifest/startup hashes remained valid. Current protected firmware,
+calibration, recovery and original NV hashes matched the privately verified
+inputs; current PARAM was archived separately again. The retained previous
+journal ended just after the second CP unit started, without a recorded
+validation completion or new modem IOCTL sequence. No status-GET cause is
+established. Last_kmsg contained bootloader records without a usable Linux
+banner and was not decoded as a matched kernel panic.
+
+Read-only partition/NV/CRC checks passed separately without opening a modem
+node. The desktop's AC and battery automatic-sleep actions both read nothing.
+This does not support an automatic desktop-sleep explanation. The original
+buffered block-reader emitted five illegal UFS IOCTL21505 messages, i.e. TCGETS
+terminal probing. The explicit os.open/os.read replacement passed three real
+full preflights with zero new TCGETS errors, no modem commands and taint0. This
+fix is not evidence that the harmless unsupported probe caused the hard hang.
+The sleep inhibitor was also moved ahead of hashing/validation; an ordering
+regression test rejects the former gap.
+
+With model, stock recovery and seven private backups reverified, a separate
+bounded no-query CP trial reached ONLINE, offlined normally, passed six more
+full preflights and about60seconds of subsequent OFFLINE observation; unit
+completed with taint0 and the connection intact. This is bounded acceptance of
+that comparison, not indefinite modem stability.
+
+A subsequent --observe-only trial sent no status request and received genuine
+FMT frames after normal CP boot. It then lost USB/Wi-Fi/console response too.
+No further modem boot trial is enabled at this checkpoint. Its exact final
+stage awaits recovery of the private USERDATA progress stream, which was
+fsynced independently of SSH. The host follower stopped early because its glob
+also read an older completed run; its partial capture is retained, and the
+monitor now requires inactive current-unit state as well as completion text.
+Do not use that older marker or a missing transient unit's default Result=success
+as a pass: retain LoadState and exact .service journal names. The new collector
+also includes the newest individual durable logs.
+
+Sixteen boot/integrity/inhibitor/read/cleanup and six framing/passive tests pass.
+They cover actual pipe receive without any os.write, whole-preflight inhibition,
+short/EINTR reads, descriptor cleanup, and attempted power-off after reset/log
+failure. Added cleanup-stage markers and the later diagnostic changes have not
+been exercised on the now-unreachable phone. No new kernel was flashed, no
+permanent CP service was installed and the normal GNOME authentication policy
+was not changed. The current scripted GDM/PAM attempt did not complete; it is not
+an owner-confirmed physical-login regression, and no autologin was substituted.

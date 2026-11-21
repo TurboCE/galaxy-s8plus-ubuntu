@@ -1,12 +1,29 @@
 #!/usr/bin/env python3
 import importlib.util
+import os
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 p=Path(__file__).resolve().parents[1]/'compat/modem/sipc_status.py'
 spec=importlib.util.spec_from_file_location('status',p);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 class StatusTests(unittest.TestCase):
+ def test_passive_mode_reads_real_pipe_without_sending_queries(self):
+  fr,fw=os.pipe();rr,rw=os.pipe()
+  steps=[]
+  try:
+   os.write(fw,m.FMT.pack(8,0,0,1,1,3)+b'\x01')
+   with patch.object(m.os,'write') as write:
+    result=m.observe(fr,rr,seconds=.04,query=False,progress=steps.append)
+    write.assert_not_called()
+   self.assertTrue(result['power_up_notification'])
+   self.assertFalse(result['queries_sent'])
+   self.assertEqual(result['fmt_frames'],1)
+   self.assertEqual(steps,['status-receiver-ready','status-first-fmt-frame','status-observation-completed'])
+  finally:
+   for fd in (fr,fw,rr,rw):os.close(fd)
+
  def test_fragmented_and_coalesced_messages(self):
   a=m.FMT.pack(8,0,0,1,1,3)+b'\x01';b=m.FMT.pack(9,0,2,5,1,2)+b'\x80\x00'
   r=m.Frames(m.FMT)

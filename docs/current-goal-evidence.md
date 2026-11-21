@@ -25,8 +25,10 @@ authentication policy was weakened. See VALIDATION.md for the exact boundaries.
 
 The first native CP boot trial reached ONLINE and shut down cleanly, with
 post-trial GPU/audio and protected-input checks passing. A later experimental
-read-only SIPC status trial lost all remote responses; its failing stage and
-cause remain pending USB/log recovery. The new modem query path is unqualified
+read-only SIPC status trial lost all remote responses; its retained journal ended just after unit start, without proof of a GET. A
+later no-query boot/off/read/soak comparison passed, but receive-only SIPC then
+also lost all remote responses; its durable final-stage log awaits restart
+recovery. The hard-freeze cause remains unconfirmed. The new modem query path is unqualified
 and is not a persistent boot service. Offline inhibitor/correlation tests do
 not substitute for live recovery or a second successful boot.
 

@@ -1591,3 +1591,19 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   logind sleep/idle inhibitor, with EOF cleanup and failure-before-trial tests.
   Eleven boot/integrity/inhibitor plus five framing tests pass. The follow-up
   inhibitor correction has not been tested on the currently unreachable phone.
+
+
+### Modem preflight and failure capture on55
+
+- Recovered the prior boot after owner restart. Kept the distinction between an
+  unrecorded failure stage, missing-unit default status and actual CP success;
+  preserved raw logs privately and did not symbolize an unmatched last_kmsg.
+- Removed buffered-open TCGETS probes from raw block reads. Three real full
+  preflights produced zero new illegal UFS IOCTL messages. Moved logind sleep
+  inhibition before the whole preflight and added ordering/read failure tests.
+- A bounded no-query CP boot/off/read/soak comparison passed with taint0; a later
+  receive-only comparison got genuine FMT frames then lost all remote responses.
+  The modem path remains unqualified. Added passive-only mode, phase/cleanup
+  markers, exact-unit/LoadState recovery and durable-progress collection; fixed
+  premature host-monitor completion on an older globbed log.22 host tests pass.
+  No further modem trial or new kernel is automatically enabled.
