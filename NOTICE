@@ -32,3 +32,11 @@ Samsung Electronics / LineageOS CP boot contributors:
   BootDumpModap and Protocol SIPC RAM-boot sequence references for the native
   bounded implementation in compat/modem/cp_boot.py. Public source pins and
   Apache-2.0 license text are retained there. No vendor firmware/NV is included.
+
+libsamsung-ipc contributors (Joerie de Gram, Simon Busch, Paul Kocialkowski
+and other upstream contributors):
+  https://github.com/LineageOS/android_external_libsamsung-ipc
+  6d244414f7c66b0d0f93ef4b34f5276023408016 (GPL-2.0-or-later)
+  Public SIPC wire format, command numbers and NV companion checksum format
+  references for the independent native status diagnostic. No original library,
+  supported-device claim or vendor RIL is installed by that diagnostic.

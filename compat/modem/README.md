@@ -30,12 +30,13 @@ path, with packed28-byte firmware and16-byte security arguments. It rejects
 unexpected TOCs, CRC failures, incomplete NV, overlapping/out-of-range sections,
 positive IOCTL failures and incomplete handshake frames before reporting success.
 
-Eight tests exercise malformed input, actual pointer/packed argument layout,
+Eleven boot/integrity/inhibitor tests exercise malformed input, actual pointer/packed argument layout,
 positive return handling, transfer failure, verification-before-power ordering
 and truncated replies:
 
 ```sh
 python3 tests/test_cp_boot.py
+python3 tests/test_sipc_status.py
 ```
 
 On kernel55 the first actual trial reached `ONLINE`, stayed there during the
@@ -50,3 +51,28 @@ backend. Do not enable an unattended modem boot service until those consumers
 and crash/recovery/power behavior have been tested. A SIM has not been supplied;
 registration, mobile-only traffic, calls/SMS/VoLTE and modem suspend/reconnect
 remain unverified. Merely reaching ONLINE does not establish those functions.
+
+## Experimental status-query boundary
+
+`--boot-trial --query-status` adds a bounded FMT receiver and only two GETs:
+phone power state and SIM status. A real packet must validate before queries
+are sent. Fragmented/coalesced framing is length-bounded and reply type/sequence
+must match; notifications are not reported as successful queries. Payloads,
+identifiers and NV contents are never logged. The RFS endpoint is observed but
+no request is answered, and no NV write/radio-enable/PIN command is implemented.
+Five framing/correlation tests pass. The public older libsamsung-ipc reference
+has no G955N/SS355 descriptor, so it is not installed as a ready-made backend.
+
+The first status-query trial subsequently lost USB/Wi-Fi/serial responses.
+Its failing stage/cause is unknown until the independently stored journal is
+recovered. Do not qualify this feature or enable it automatically from the
+successful earlier RAM-boot result. The default invocation remains validation
+only and the default boot trial does not query status.
+
+A follow-up correction holds an acknowledged logind sleep/idle inhibitor in
+addition to the Android kernel wake lock, and closes its pipe on every exit.
+Two real-child host tests cover readiness/EOF cleanup and failure-before-trial.
+This has not yet been retried on the unreachable handset; it does not establish
+that an idle suspend caused the connection loss. The original NV companion
+checksum was separately verified using the public Samsung suffix and matched;
+preflight now checks that as well as the original SHA256 backup pin.

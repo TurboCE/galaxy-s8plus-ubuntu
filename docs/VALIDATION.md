@@ -2016,3 +2016,31 @@ This is CP bootstrap acceptance, not cellular service. ModemManager still lacks
 a compatible native SIPC/RFS/control backend, and the trial is not enabled at
 boot. No SIM was available. Registration, data, calls/SMS/VoLTE, persistent
 modem crash recovery and modem sleep/reconnect remain open.
+
+
+### Experimental SIPC status and recovery boundary
+
+A second independently supervised CP trial added an original bounded FMT/RFS
+receiver and two read-only GETs, power state and SIM status. It does not enable
+RF, submit a SIM PIN, answer RFS or write NV. Five tests pass fragmented and
+coalesced parsing, invalid lengths, exact query restrictions, sequence/type
+correlation and truncated status rejection. Its wire-format reference is the
+pinned public Lineage libsamsung-ipc source; that older device table does not
+supply a G955N/SS355 backend. It was not installed as one.
+
+USB SSH, pinned Wi-Fi SSH and the dedicated serial console stopped responding
+after this trial was started. The unit's actual failing stage and cause have
+not been recovered; neither query success, an automatic reboot nor an idle-
+suspend explanation is inferred. The owner was asked only for USB reconnection.
+The earlier ONLINE/offline, protected-hash and post-trial GNOME/audio receipt
+belongs to the FIRST trial and does not qualify this later experiment.
+
+Offline changes now hold a genuine acknowledged logind sleep/idle inhibitor
+through trial cleanup, in addition to the kernel Android wake lock. Real-child
+host tests cover ready/EOF lifetime and failure before entering the trial body.
+The installed trial predates this correction and the correction has not passed
+live acceptance. The existing NV's salted companion MD5 separately matched the
+public Samsung format; preflight now checks it alongside SHA256. The total is
+11 boot/integrity/inhibitor tests plus5 framing/correlation tests. No persistent
+modem service or new kernel was enabled; current failed-trial evidence remains
+pending transport recovery.

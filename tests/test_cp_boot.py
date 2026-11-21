@@ -31,6 +31,33 @@ def inputs():
 
 
 class TrialTests(unittest.TestCase):
+    def test_inhibitor_child_holds_pipe_until_cleanup(self):
+        actual=m.subprocess.Popen
+        children=[]
+        def start(args,**kwargs):
+            self.assertIn('--what=sleep:idle',args)
+            child=actual(['/bin/cat'],**kwargs);children.append(child);return child
+        with patch.object(m.subprocess,'Popen',side_effect=start):
+            with m.sleep_inhibitor():self.assertIsNone(children[0].poll())
+        self.assertEqual(children[0].returncode,0)
+
+    def test_failed_inhibitor_prevents_trial_body(self):
+        actual=m.subprocess.Popen
+        def start(args,**kwargs):
+            return actual([sys.executable,'-c','import sys; sys.stdin.readline()'],**kwargs)
+        entered=False
+        with patch.object(m.subprocess,'Popen',side_effect=start):
+            with self.assertRaisesRegex(RuntimeError,'inhibitor'):
+                with m.sleep_inhibitor():entered=True
+        self.assertFalse(entered)
+
+    def test_existing_nv_requires_both_backup_pin_and_salted_companion(self):
+        nv=inputs()[1]
+        checksum=m.hashlib.md5(nv+b'Samsung_Android_RIL').hexdigest()
+        m.validate_nv(nv,m.sha256(nv),checksum)
+        with self.assertRaises(RuntimeError):m.validate_nv(nv,'0'*64,checksum)
+        with self.assertRaises(RuntimeError):m.validate_nv(nv,m.sha256(nv),m.hashlib.md5(nv).hexdigest())
+
     def test_missing_or_bad_data_never_qualifies(self):
         radio, nv = inputs()
         self.assertEqual([s.name for s in m.plan(radio, nv)], ['BOOT','MAIN','VSS','NV'])

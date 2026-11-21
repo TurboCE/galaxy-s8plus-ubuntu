@@ -23,6 +23,13 @@ normal touchscreen/PAM sequence. ScreenSaver.GetActive alone was an invalid lock
 criterion; the current harness checks logind LockedHint as well. No password or
 authentication policy was weakened. See VALIDATION.md for the exact boundaries.
 
+The first native CP boot trial reached ONLINE and shut down cleanly, with
+post-trial GPU/audio and protected-input checks passing. A later experimental
+read-only SIPC status trial lost all remote responses; its failing stage and
+cause remain pending USB/log recovery. The new modem query path is unqualified
+and is not a persistent boot service. Offline inhibitor/correlation tests do
+not substitute for live recovery or a second successful boot.
+
 Supporting state: docs/VALIDATION.md, greeter-touch-validation.md,
 kernel26-power-investigation.md, ondemand-panel-lifetime.md,
 compiler-reference-comparison.md, panic-decoder-and-safe-recovery.md and

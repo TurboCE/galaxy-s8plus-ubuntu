@@ -32,5 +32,18 @@
         "git_blob": "ec663f3e5e4c78bee220228eb88c3e05b787cd9b"
       }
     }
+  },
+  "sipc_status_reference": {
+    "url": "https://github.com/LineageOS/android_external_libsamsung-ipc",
+    "commit": "6d244414f7c66b0d0f93ef4b34f5276023408016",
+    "license": "GPL-2.0-or-later",
+    "scope": "wire format and command-number reference only; original bounded Python framing implementation; not a supported G955N backend",
+    "files": {
+      "include/protocol.h": "d6134a92a4c44819ce2321cea58df3ef8219869c6163ca8779144aa32bd67bed",
+      "include/pwr.h": "b2f9ade461551219de8d7c8164887cb739b29ffb2cc396e0005be6aa6ac75729",
+      "include/sec.h": "5432822d5442e88ffe97378b245d779213eddbf5fdcdfe535791ea0a8c810d4b",
+      "include/rfs.h": "9f916c5ca136e8815812027ff948e0e84ef4c00bd27f450af3cbedff744dedaa",
+      "samsung-ipc/rfs.c": "af2fb70fec06e5fd668a57287b4b098e176cf2901209b090cb0473b91840198e"
+    }
   }
 }

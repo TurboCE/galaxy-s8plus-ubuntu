@@ -13,6 +13,7 @@ boots the CP once, observes its read-only state, then powers it off. This is
 not a persistent RIL/RFS backend or evidence of LTE service.
 """
 import argparse
+from contextlib import contextmanager
 import ctypes
 from dataclasses import dataclass
 import fcntl
@@ -47,6 +48,15 @@ class Stage:
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def validate_nv(nv, expected_sha, companion):
+    if len(nv) != 1024 * 1024 or sha256(nv) != expected_sha:
+        raise RuntimeError('Existing NV differs from private inventory')
+    # The companion covers NV plus this public format suffix, not plain MD5.
+    # SHA256 still pins the separately verified private backup.
+    if hashlib.md5(nv + b'Samsung_Android_RIL').hexdigest() != companion.strip().lower():
+        raise RuntimeError('Existing Samsung NV companion checksum mismatch')
 
 
 def plan(radio, nv):
@@ -173,6 +183,36 @@ def modem_state():
     return nodes[0].read_text().strip()
 
 
+@contextmanager
+def sleep_inhibitor():
+    """Hold a real logind inhibitor and confirm readiness before touching CP.
+
+    The pipe's EOF also releases the inhibitor if this parent disappears.
+    Android wake_lock alone is not a substitute for desktop sleep policy.
+    """
+    child = subprocess.Popen(['/usr/bin/systemd-inhibit', '--what=sleep:idle',
+                              '--mode=block', '--who=G955N CP RAM trial',
+                              '--why=Bounded modem initialization', '/bin/cat'],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    try:
+        child.stdin.write(b'ready\n')
+        child.stdin.flush()
+        if not select.select([child.stdout], [], [], 5)[0] or child.stdout.readline() != b'ready\n':
+            raise RuntimeError('Desktop sleep inhibitor did not become ready')
+        yield
+    finally:
+        try:
+            child.stdin.close()
+        except BrokenPipeError:
+            pass
+        try:
+            child.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=3)
+        child.stdout.close()
+
+
 def preflight(record):
     if os.geteuid() or platform.machine() != 'aarch64':
         raise RuntimeError('Requires native G955N root')
@@ -208,8 +248,7 @@ def preflight(record):
         if chunks is not None:
             radio = b''.join(chunks)
     nv = Path('/efs/nv_data.bin').read_bytes()
-    if sha256(nv) != record['nv_sha256']:
-        raise RuntimeError('Existing NV differs from private inventory')
+    validate_nv(nv, record['nv_sha256'], Path('/efs/nv_data.bin.md5').read_text())
     stages = plan(radio, nv)
     if modem_state() != 'OFFLINE':
         raise RuntimeError('CP must be offline before this single trial')
@@ -228,7 +267,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--private-inventory', type=Path, required=True)
     parser.add_argument('--boot-trial', action='store_true')
+    parser.add_argument('--query-status', action='store_true',
+                        help='Read-only SIPC power/SIM GETs during the bounded trial')
     args = parser.parse_args()
+    if args.query_status and not args.boot_trial:
+        parser.error('--query-status requires --boot-trial')
     stages = preflight(json.loads(args.private_inventory.read_text()))
     print(json.dumps({'validated': True, 'sections': [s.name for s in stages],
                       'storage_write': False, 'boot_requested': args.boot_trial}), flush=True)
@@ -241,7 +284,7 @@ def main():
     fds = []
     transport = None
     os.umask(0o077)
-    with Path('/run/g955n-cp-boot.lock').open('a') as lock:
+    with Path('/run/g955n-cp-boot.lock').open('a') as lock, sleep_inhibitor():
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         try:
             Path('/sys/power/wake_lock').write_text('g955n-cp-boot-trial')
@@ -252,7 +295,11 @@ def main():
             load_and_handshake(transport, stages,
                                lambda step: print(json.dumps({'step': step}), flush=True))
             print(json.dumps({'cp_after_handshake': modem_state(), 'LTE_qualified': False}), flush=True)
-            time.sleep(5)
+            if args.query_status:
+                from sipc_status import observe
+                print(json.dumps({'sipc_status': observe(fds[1], fds[2], query=True)}), flush=True)
+            else:
+                time.sleep(5)
             print(json.dumps({'cp_after_observation': modem_state()}), flush=True)
         finally:
             try:

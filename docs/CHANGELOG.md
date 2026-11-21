@@ -1579,3 +1579,15 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   the same boot retained taint0 and ordinary GNOME/audio transport checks passed.
   Original PARAM backup and its three-byte pre-existing difference are retained
   separately from the fresh pretrial pin. LTE control/SIM traffic is unfinished.
+
+
+### Experimental modem status query follow-up
+
+- Added bounded SIPC status framing/correlation and explicit power/SIM GET-only
+  diagnostics; no RF enable, PIN or NV-write backend. The live follow-up lost
+  all remote responses, so status-query acceptance and its failure cause remain
+  pending log recovery; the first CP boot success is not generalized to it.
+- Added original NV's Samsung companion-checksum validation and an acknowledged
+  logind sleep/idle inhibitor, with EOF cleanup and failure-before-trial tests.
+  Eleven boot/integrity/inhibitor plus five framing tests pass. The follow-up
+  inhibitor correction has not been tested on the currently unreachable phone.
