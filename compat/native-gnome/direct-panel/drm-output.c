@@ -29,11 +29,16 @@ struct g955n_kms {
     uint64_t age, completions;
 };
 
-static uint64_t milliseconds(void)
+static uint64_t clock_milliseconds(clockid_t clock)
 {
     struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
+    clock_gettime(clock, &now);
     return (uint64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static uint64_t milliseconds(void)
+{
+    return clock_milliseconds(CLOCK_MONOTONIC);
 }
 
 static int wait_readable(int fd, uint64_t deadline)
@@ -279,8 +284,11 @@ int g955n_kms_present(struct g955n_kms *output,
                             DRM_MODE_PAGE_FLIP_EVENT, output))
             return -errno;
         drmEventContext events = { .version = 2, .page_flip_handler = flipped };
-        uint64_t deadline = milliseconds() + 1500;
+        uint64_t started = milliseconds();
+        uint64_t started_boot = clock_milliseconds(CLOCK_BOOTTIME);
+        uint64_t deadline = started + 1500;
         bool resume_grace = false;
+        bool observed_blank = false;
         while (output->completions < completion) {
             error = wait_readable(output->fd, deadline);
             if (error) {
@@ -288,17 +296,31 @@ int g955n_kms_present(struct g955n_kms *output,
                  * buffers and wait for a real completion after unblank. The
                  * timeout stays bounded whenever the connector is powered. */
                 if (error == -ETIMEDOUT && panel_is_off(output) > 0) {
+                    observed_blank = true;
                     deadline = milliseconds() + 1500;
                     continue;
                 }
-                /* Linux 4.4 suspend-to-idle advances MONOTONIC while
-                 * userspace is frozen. Give a delayed timeout one bounded
-                 * post-resume window, then still require the real event. */
-                if (error == -ETIMEDOUT && !resume_grace &&
-                    milliseconds() > deadline + 250) {
-                    resume_grace = true;
+                /* A wake can occur just before an off-panel poll expires.
+                 * That old deadline is not the powered scanout's budget.
+                 * Give the first visible frame a full bounded interval. */
+                if (error == -ETIMEDOUT && observed_blank) {
+                    observed_blank = false;
                     deadline = milliseconds() + 1500;
-                    fprintf(stderr, "G955N DRM/KMS resumed a delayed page-event wait\n");
+                    fprintf(stderr, "G955N DRM/KMS waiting for the first post-unblank frame\n");
+                    continue;
+                }
+                /* MONOTONIC normally excludes suspend. An expired poll after
+                 * thaw can therefore look punctual despite minutes asleep.
+                 * BOOTTIME records that gap; retain the late-poll fallback
+                 * for kernels/scheduling which advance MONOTONIC instead. */
+                uint64_t now = milliseconds();
+                uint64_t elapsed = now - started;
+                uint64_t elapsed_boot = clock_milliseconds(CLOCK_BOOTTIME) - started_boot;
+                if (error == -ETIMEDOUT && !resume_grace &&
+                    (now > deadline + 250 || elapsed_boot > elapsed + 250)) {
+                    resume_grace = true;
+                    deadline = now + 1500;
+                    fprintf(stderr, "G955N DRM/KMS resumed a suspended/delayed page-event wait\n");
                     continue;
                 }
                 return error;

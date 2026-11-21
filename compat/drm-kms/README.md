@@ -74,6 +74,14 @@ events before recycling old buffers. A DMA-BUF fd number or anonymous inode is
 not used as its identity. The helper retains ambiguous submissions. Its timeout
 is bounded while powered and pauses while standard DPMS reports the panel off.
 
+The first post-unblank frame gets a fresh bounded wait rather than the remainder
+of an off-panel deadline. Suspend detection compares BOOTTIME with MONOTONIC:
+normal MONOTONIC excludes sleep, so a thawed poll can expire without appearing
+late on that clock. A single fresh resume window still requires the real KMS
+completion. A genuinely missing powered completion remains an error; no buffer
+is retired by elapsed time alone. The production-method fixture covers both
+clock behaviors, a wake at the old deadline and bounded failure retention.
+
 The X11 prefix builder now builds the presenter and `bin/drm-kms-probe`; the
 prefix packager includes the probe and records its dependencies. Install the
 root-owned `99-g955n-kms-bridge.rules` from `compat/native-gnome/direct-panel`

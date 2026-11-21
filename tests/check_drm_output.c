@@ -34,7 +34,10 @@
 static unsigned allocations, flips, reads, closed, removed;
 static uint32_t active_fb, queued_fb, next_fb = 100, last_format;
 static int flip_failure, poll_failure, event_failure, prime_failure, blank_timeout, resume_timeout;
+static int wake_at_deadline;
+static int suspend_timeout;
 static uint64_t fake_ms;
+static uint64_t fake_sleep_ms;
 static int simulated_power=DRM_MODE_DPMS_OFF;
 static struct g955n_kms *pending;
 static uint32_t exported[128];
@@ -42,11 +45,15 @@ int fake_open(const char *p, int flags, ...) { (void)p; (void)flags; errno=ENOEN
 int fake_close(int fd) { assert(fd == 55); closed++; return 0; }
 off_t fake_lseek(int fd, off_t off, int whence) { assert(fd>=0 && off==0 && whence==SEEK_END); return 32*1024*1024; }
 int fake_clock(clockid_t id,struct timespec *t) {
-    assert(id==CLOCK_MONOTONIC);t->tv_sec=fake_ms/1000;t->tv_nsec=(fake_ms%1000)*1000000;return 0;
+    assert(id==CLOCK_MONOTONIC || id==CLOCK_BOOTTIME);
+    uint64_t now=fake_ms+(id==CLOCK_BOOTTIME ? fake_sleep_ms : 0);
+    t->tv_sec=now/1000;t->tv_nsec=(now%1000)*1000000;return 0;
 }
 int fake_poll(struct pollfd *p, nfds_t n, int timeout) {
     assert(n==1 && timeout>0); reads++;
     if (blank_timeout) {blank_timeout=0;return 0;}
+    if (wake_at_deadline) {wake_at_deadline=0;simulated_power=DRM_MODE_DPMS_ON;return 0;}
+    if (suspend_timeout) {suspend_timeout=0;fake_sleep_ms+=180000;return 0;}
     if (resume_timeout) {resume_timeout--;fake_ms+=20000;return 0;}
     p->revents = poll_failure ? POLLERR : POLLIN;
     return 1;
@@ -129,6 +136,18 @@ int main(void) {
     assert(removed==allocations-CACHE_SIZE);
     blank_timeout=1;frame.dma_buf=70;
     unsigned previous_reads=reads;
+    assert(g955n_kms_present(&output,&frame,&submitted)==0);
+    assert(reads==previous_reads+2 && !pending && output.current_fb==active_fb);
+    /* Off-panel timeout, then wake immediately before the next deadline.
+     * The old presenter failed here without waiting for a powered frame. */
+    simulated_power=DRM_MODE_DPMS_OFF;blank_timeout=1;wake_at_deadline=1;
+    frame.dma_buf=75;previous_reads=reads;
+    assert(g955n_kms_present(&output,&frame,&submitted)==0);
+    assert(reads==previous_reads+3 && !pending && output.current_fb==active_fb);
+    /* Normal MONOTONIC excludes the sleep interval: no late-clock condition
+     * or previously sampled OFF property tells userspace that it just thawed. */
+    simulated_power=DRM_MODE_DPMS_ON;suspend_timeout=1;frame.dma_buf=76;
+    previous_reads=reads;
     assert(g955n_kms_present(&output,&frame,&submitted)==0);
     assert(reads==previous_reads+2 && !pending && output.current_fb==active_fb);
     simulated_power=DRM_MODE_DPMS_ON;resume_timeout=1;frame.dma_buf=71;

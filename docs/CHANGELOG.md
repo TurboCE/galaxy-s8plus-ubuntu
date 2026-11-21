@@ -1551,3 +1551,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   reproducing a host-interface loss that a composite-only toggle could not fix.
   Verified actual host serial and pinned USB SSH recovery. The tool reports
   real command errors and is not installed as an unconditional sleep hook.
+- Corrected two KMS presenter deadline cases: wake just before an off-panel
+  deadline, and suspend excluded from MONOTONIC. Compare BOOTTIME and retain
+  real-event retirement with bounded powered failure. Installed the rebuilt
+  native bridge/probe with verified startup hashes and rollback. A subsequent
+  179-second trial retained GNOME and the boot; earlier failed trials remain
+  documented separately from this bounded pass.

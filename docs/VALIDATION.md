@@ -1881,3 +1881,35 @@ refusal, cleanup after a failed wait, and not overriding a real unplug/host swap
 The actual kernel helper fixture passed quiesce, unchanged ID/VBUS, failed-halt
 restore, host exclusion and the stop/runner race under ASan/UBSan. These bounded
 tests do not establish indefinite reliability or physical power-button wake.
+
+### Kernel55 GNOME presentation deadlines
+
+The 45.15-second USB trial ended GNOME with presenter errno110, submitted=1 and
+exit35; normal session recovery was required. An initial fresh post-unblank
+budget passed a44.86-second trial but failed the180.41-second trial. Those
+failures are retained and are not USB-driver or kernel-reboot failures.
+
+The final presenter additionally compares elapsed BOOTTIME and MONOTONIC. A
+normal sleep interval is excluded from MONOTONIC, so merely checking whether a
+poll overshot that deadline can miss resume altogether. The late-clock fallback
+is retained for other scheduling/kernel behavior. The real production-method
+ASan/UBSan fixture adds a180-second BOOTTIME-only gap and a wake at the last
+off-panel deadline. The old method fails the new fixture. The final method
+passes while preserving actual-event retirement, bounded powered timeouts,
+DMA-BUF identity, cache bounds and ambiguous-buffer retention.
+
+The rebuilt AArch64 bridge and probe were installed through atomic root-owned
+file replacement with prior-file backups, full GPU manifest/startup hash checks
+and readback. Normal logout/login activated the bridge; no forced Shell reload
+or authentication change was used. The next179.30-second timed cycle retained
+the same boot and GNOME process, panel power and the lock, with taint0 and zero
+new USB/kernel faults. Actual KMS frame-retirement logs and touchscreen/PAM
+unlock were observed afterward. That cycle did not emit the new wait-extension
+marker: this is bounded runtime acceptance, not proof of the exact cause of
+both earlier exits or an overnight stability guarantee.
+
+Lock qualification now also reads logind's actual `LockedHint` and verifies its
+clearing through normal PAM. ScreenSaver.GetActive alone is insufficient: a
+later live sample returned false while logind correctly reported locked and
+GNOME owned the modal input grabs. The interim test interpretation of missing
+automatic locking was incorrect. No unlock/authentication bypass was added.
