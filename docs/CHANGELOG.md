@@ -1567,3 +1567,15 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   failed lock readiness and distinguished actual LockedHint from screensaver
   activation. An unlocked-desktop -> lock -> 30-second sleep -> wake -> touch
   PAM cycle passed without boot/Shell change or new USB/kernel faults.
+
+### Native CP bootstrap checkpoint on55
+
+- Implemented the G955N legacy SIPC SHMEM RAM-boot sequence against the pinned
+  kernel and public Samsung/Lineage CP boot source. Added complete private-input
+  validation, real signed-image/handshake qualification and bounded CP shutdown;
+  no firmware/NV storage writes or persistent modem service were added.
+- Passed eight ABI/bounds/failure tests and a supervised actual ONLINE ->
+  observation -> OFFLINE trial. Protected/NV hashes stayed unchanged afterward,
+  the same boot retained taint0 and ordinary GNOME/audio transport checks passed.
+  Original PARAM backup and its three-byte pre-existing difference are retained
+  separately from the fresh pretrial pin. LTE control/SIM traffic is unfinished.

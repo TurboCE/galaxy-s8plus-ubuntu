@@ -1,0 +1,36 @@
+{
+  "kernel": {
+    "url": "https://github.com/ace2nutzer/Samsung_dreamlte_Kernel",
+    "commit": "54feaea9870dd0e90ceced5623e0544d965b400b",
+    "files": [
+      "drivers/misc/modem_v1/modem_prj.h",
+      "drivers/misc/modem_v1/link_device_shmem.c",
+      "drivers/misc/modem_v1/modem_ctrl_ss310ap.c",
+      "drivers/misc/mcu_ipc/shm_ipc.c"
+    ]
+  },
+  "cpboot_reference": {
+    "url": "https://github.com/LineageOS/android_hardware_samsung_slsi-linaro_exynos",
+    "commit": "e9816cf6ed8123a2f20ea334641794a0e64b1e7f",
+    "license": "Apache-2.0",
+    "directory": "cpboot_v3",
+    "files": {
+      "BootDumpModap.cpp": {
+        "sha256": "95587231f3da7d5f881376a62589efa275076e26348a3c5dd48a6d3fe7d478d3",
+        "git_blob": "478eb28b86fc05bb8b0451368b7c53674ad7f42c"
+      },
+      "ProtocolSipc.cpp": {
+        "sha256": "39fed9601654772755a789cf20204f95536f96b62c90891b33ca9854baee5f22",
+        "git_blob": "6fc7c1f3a6aa4306f98ed5fa362cc9f5ffafb3ac"
+      },
+      "Protocol.cpp": {
+        "sha256": "297f2134410368ec638b1f63e82dd932a07a769cc0973418564687fd4d84be21",
+        "git_blob": "70698d41813ce776e08dfa539497b13f93959c97"
+      },
+      "Type.h": {
+        "sha256": "415298f28540db946ad5677506f3e50c3d760014f7e422bc4d03becd0e53ba67",
+        "git_blob": "ec663f3e5e4c78bee220228eb88c3e05b787cd9b"
+      }
+    }
+  }
+}

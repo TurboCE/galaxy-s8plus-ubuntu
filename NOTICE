@@ -25,3 +25,10 @@ from TurboCE/galaxy-s9plus-ubuntu commit
 SheroAbi/galaxy-s9plus-mainline-linux project and dtbtool-exynos work credited
 there. Only source-format helpers are reused; no G965N image, device tree or
 firmware is used on G955N. The GPL-2.0 text is included in LICENSE.
+
+Samsung Electronics / LineageOS CP boot contributors:
+  https://github.com/LineageOS/android_hardware_samsung_slsi-linaro_exynos
+  cpboot_v3 at e9816cf6ed8123a2f20ea334641794a0e64b1e7f (Apache-2.0)
+  BootDumpModap and Protocol SIPC RAM-boot sequence references for the native
+  bounded implementation in compat/modem/cp_boot.py. Public source pins and
+  Apache-2.0 license text are retained there. No vendor firmware/NV is included.

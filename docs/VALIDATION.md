@@ -1972,3 +1972,47 @@ steady clipping or new kernel faults and restored volume/mute. The first
 250ms still contained203 clipped samples. Cold-capture startup quality remains
 open; no raw microphone audio was saved or new physical listening confirmation
 claimed. SensorProxy and the ordinary audio services remain enabled.
+
+### Kernel55 native CP RAM boot
+
+Read-only inspection found SS355AP using the SS310AP/SIPC5 SHMEM driver, OFFLINE,
+with no active users of the three bootstrap/control nodes. The own RADIO's
+BOOT/MAIN/VSS section CRCs matched. Existing NV has the expected1MiB length;
+its bytes matched the privately extracted verified EFS backup. A plain MD5 did
+not match its companion file; no claim of corruption was made from that
+comparison, no regeneration was attempted and the existing bytes were retained.
+
+The new bounded native tool validates the exact layout, reserved-memory bounds,
+non-overlap, CRCs and private hashes before any modem IOCTL. It uses packed28-
+byte firmware and16-byte security arguments. The pinned old kernel does not
+map modern mode7/12 security parameters, so its normal signed BOOT/MAIN path is
+used. Only reinit return11 is accepted; normal verification must return0.
+Eight tests cover invalid data, real pointer/layout, nonzero return propagation,
+ordering/failure and truncated replies. Public Samsung/Lineage source blobs
+were verified against their pinned Git tree and attribution/license retained.
+
+All seven most recent pre55 partition backup files and the matching stock
+recovery were verified on the host. The older backup's EFS hash differed; the
+most recent pre55 EFS matched the running device. PARAM differed from the
+preboot backup in three bytes (offsets0x700200,0x700cfa,0x700cfb) before any CP
+trial. Original backups were kept and the current PARAM was separately captured
+and pinned; no field meaning or cause is inferred. Preflight then matched all
+five protected current hashes and the original NV. It does not silently accept
+arbitrary future differences.
+
+An independently supervised65-second systemd trial actually loaded the four
+sections into CP RAM, passed signed verification0, received both boot replies,
+observed CP_START/INIT_END and normal init completion, and reported ONLINE
+both immediately and five seconds later. Cleanup reset/powered off the CP and
+read-only state returned OFFLINE; unit exit0. No raw partition/NV storage write,
+Android init, crash/dump/panic/reboot command or status-clearing IOCTL was used.
+Post-trial preflight again matched every protected/NV hash. The boot was the
+same with taint0; the ordinary GPU manifest/startup hashes stayed valid and
+failed-session UI was absent. The subsequent normal PipeWire duplex had zero
+hardware-error growth,182/221 playback/capture positions, both test tones and
+zero new kernel faults. Its193 startup-clipped samples remain a known issue.
+
+This is CP bootstrap acceptance, not cellular service. ModemManager still lacks
+a compatible native SIPC/RFS/control backend, and the trial is not enabled at
+boot. No SIM was available. Registration, data, calls/SMS/VoLTE, persistent
+modem crash recovery and modem sleep/reconnect remain open.
