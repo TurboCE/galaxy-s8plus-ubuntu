@@ -1913,3 +1913,30 @@ clearing through normal PAM. ScreenSaver.GetActive alone is insufficient: a
 later live sample returned false while logind correctly reported locked and
 GNOME owned the modal input grabs. The interim test interpretation of missing
 automatic locking was incorrect. No unlock/authentication bypass was added.
+
+### Kernel55 SensorProxy release after inactivation
+
+GNOME logged `Release of light sensors failed` with claim authorization denied
+while its session became inactive. Ubuntu SensorProxy3.5 checked the claim action
+for both Claim and Release. Patch0001 retains authorization for new claims and
+leaves `client_release()` restricted to the unique caller's existing table
+entry. It does not grant another client's reference or bypass authentication.
+
+Actual unmodified dispatch/refcount/release methods failed the inactive-own-
+release fixture. The patched production methods passed with real GLib under
+ASan/UBSan: new unauthorized claims fail, own inactive release succeeds, a
+foreign release does not remove ownership, and polling stops only after the
+last reference is released. Unknown methods remain rejected before dispatch.
+The pinned Ubuntu source plus the unchanged SSP backend cross-built for
+AArch64. The installed prior daemon matched a retained reviewed build; the
+replacement was installed root-owned with verified backup and rollback, then
+the normal service was restarted. Existing calibration/mount-matrix and
+startup/lease recovery helpers were kept.
+
+Both native accelerometer and ambient-light interfaces returned. Later samples
+reported genuine158lux; `undefined` orientation while flat is not a fabricated
+pose result. An actual inactive unprivileged client could not make a new light
+claim, while an unowned release returned a harmless no-op. The subsequent
+29.91-second direct-systemd test had no new light-release denial, no GNOME frame
+failure and no USB/kernel fault. Physical heading, steps, motion/brightness
+response on55 and long-term power consumption remain separate acceptance work.

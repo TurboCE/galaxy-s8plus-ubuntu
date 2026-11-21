@@ -20,6 +20,8 @@ shutil.copy2(scripts/'drv-samsung-ssp.c',root/'src/drv-samsung-ssp.c')
 p=root/'src/meson.build';s=p.read_text();assert s.count("  'drivers.c',")==1;s=s.replace("  'drivers.c',","  'drivers.c',\n  'drv-samsung-ssp.c',");p.write_text(s)
 p=root/'src/drivers.h';p.write_text(p.read_text()+'\nextern SensorDriver samsung_ssp_accel;\nextern SensorDriver samsung_ssp_light;\n')
 p=root/'src/iio-sensor-proxy.c';s=p.read_text();assert s.count('static const SensorDriver * const drivers[] = {')==1;p.write_text(s.replace('static const SensorDriver * const drivers[] = {','static const SensorDriver * const drivers[] = {\n\t&samsung_ssp_accel,\n\t&samsung_ssp_light,'))
+patch=scripts/'0001-release-owned-claims-after-session-inactivation.patch'
+subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=patch.read_bytes(),check=True)
 subprocess.run(['meson','setup',str(a.output/'build'),str(root),'--cross-file',str(scripts/'cross-arm64.ini'),'--prefix=/opt/g955n-sensors','--libexecdir=libexec','--wrap-mode=nodownload','-Dgtk-tests=false','-Dtests=false','-Dgtk_doc=false','-Dudevrulesdir=/lib/udev/rules.d','-Dsystemdsystemunitdir=/lib/systemd/system'],check=True)
 subprocess.run(['ninja','-C',str(a.output/'build'),'src/iio-sensor-proxy','src/monitor-sensor'],check=True)
 for name in ['iio-sensor-proxy','monitor-sensor']:

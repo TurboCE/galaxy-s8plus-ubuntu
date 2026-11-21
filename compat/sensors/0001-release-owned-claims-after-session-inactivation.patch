@@ -1,0 +1,24 @@
+Subject: Allow clients to release their own sensor claims after locking
+
+GNOME releases ambient-light sensors as its session becomes inactive. Checking
+the claim Polkit action again rejects that cleanup and leaves polling enabled.
+Keep authorization for all new claims. Release still uses the unique D-Bus
+sender's own hash-table entry; an unrelated sender cannot release another
+client's claim. Unknown methods continue to fail before dispatch.
+
+Applies to the hash-pinned Ubuntu iio-sensor-proxy 3.5 source (GPL-3.0-only).
+
+--- a/src/iio-sensor-proxy.c
++++ b/src/iio-sensor-proxy.c
+@@ -541,7 +541,10 @@
+ 		return;
+ 	}
+ 
+-	if (!check_claim_permission (data, sender, &error)) {
++	/* Releasing an existing per-sender claim must work after session lock.
++	 * client_release() cannot remove another sender's ownership. */
++	if (g_str_has_prefix (method_name, "Claim") &&
++	    !check_claim_permission (data, sender, &error)) {
+ 		g_dbus_method_invocation_return_gerror (invocation, error);
+ 		return;
+ 	}

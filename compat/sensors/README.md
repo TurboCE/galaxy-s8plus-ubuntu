@@ -1,11 +1,12 @@
 # Samsung SSP native sensor work
 
-This directory contains a **runtime candidate** backend for the Ubuntu
-iio-sensor-proxy 3.5 API. It was installed on31, then stopped after a kernel
-poll_delay return-count defect blocked actual claims. The guarded daemon now
-refuses empty settings without mutation; fixed32 runtime acceptance is pending. It is not hardware acceptance or a completed
-rotation/brightness solution. Display-power stability remains separately tracked; a temporary MIF-floor
-mitigation is being qualified on30.
+This directory contains the native Samsung SSP backend for Ubuntu's
+iio-sensor-proxy 3.5 API. Genuine accelerometer/light claims, response, measured
+mount matrix and process-death cleanup passed on32; the service remains active
+on55. It refuses empty settings without mutation. Display rotation, physical
+heading/step acceptance and long-term power behavior remain separate open work.
+See VALIDATION.md for current results; the early bring-up failures below are
+historical checkpoints.
 
 The existing stock sensor proxy incorrectly identifies `hrm_sensor` input axes
 as an accelerometer. The actual Samsung SSP IIO devices contain packed records
@@ -35,7 +36,7 @@ from this Dockerfile. It cross-compiles the real daemon and monitor, checks
 AArch64 ELF headers and does not access a handset. The reviewed prototype builds
 without compiler warnings. Binary output and device inputs remain ignored.
 
-Before production deployment, complete at least:
+The original production checklist (completed items are recorded in VALIDATION.md):
 
 * Actual claim/sample/release tests, preserving other sensors and original state.
 * Abrupt process termination and a persistent recoverable ownership lease; the
@@ -102,3 +103,19 @@ udev matches and recovery helpers. Use a fresh reviewed build of the
 driver above. The GNOME shell and settings daemon keep using Ubuntu's
 existing SensorProxy D-Bus API. The installer does not implement a
 rotatable Xorg output or a standard gyroscope or step-counter API.
+
+### Releasing sensor ownership after locking
+
+Ubuntu 3.5 checks the claim Polkit action for release as well. GNOME's light
+release was denied while its session became inactive during sleep. Patch0001
+keeps authorization on new claims and lets `client_release()` remove only the
+caller's existing unique D-Bus sender entry. It does not grant new access to an
+inactive process or let it remove another client's ownership. Unknown methods
+still fail before dispatch.
+
+The actual dispatch, refcount and release methods are exercised by
+`tests/check_sensor_release.py --source SOURCE/src/iio-sensor-proxy.c` with a
+native compiler, ASan/UBSan and native `gio-2.0` development files. The unpatched
+methods fail inactive release. The patched methods deny a new unauthorized
+claim, permit own release, retain foreign ownership and stop polling only after
+the last client releases. This fixture is distinct from runtime acceptance.

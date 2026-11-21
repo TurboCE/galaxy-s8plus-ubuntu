@@ -1557,3 +1557,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   native bridge/probe with verified startup hashes and rollback. A subsequent
   179-second trial retained GNOME and the boot; earlier failed trials remain
   documented separately from this bounded pass.
+- Kept SensorProxy claim authorization while allowing each D-Bus client to
+  release only its own sensor reference after session inactivation. Installed
+  the rebuilt native daemon with a prior-binary pin and rollback; accelerometer
+  and genuine lux properties returned. Actual unauthorized new claims remained
+  denied and new suspend-time light-release errors were zero in the live trial.
