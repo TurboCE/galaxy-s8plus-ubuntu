@@ -2106,3 +2106,17 @@ failure cannot be isolated from these logs alone. No setting, USB state, kernel,
 application ownership or log was changed/cleared. The excluded modem work was
 not retried or modified. See usb-existing-log-audit.md; this is a diagnosis
 boundary, not a newly verified USB fix or live connectivity pass.
+
+
+### Existing-log narrowing of the later USB nonresponse
+
+The10:25–10:55 KST macOS collection records three endpoint0 timeout
+completions,39 transaction errors and two bulk-pipe aborts against the S8+,
+without a named S8+ detach event in the later interval. This is request
+nonresponse, not proof of a healthy cable or a whole-system hang. The final
+kernel follower stopped early, so its last line is not a proved freeze site
+and absence of a suspend/panic marker in that short capture cannot exclude
+a later transition. Host machTimestamp ordering was checked within one boot;
+a wall-clock-adjustment warning limits precise cross-clock correlation.
+No handset/SSH access, excluded test/code work or settings/firmware change was
+performed. See usb-response-loss-window.md for remaining candidates and limits.

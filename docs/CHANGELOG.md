@@ -1617,3 +1617,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added docs/usb-existing-log-audit.md with evidence and limits. Preserved all
   logs and existing out-of-scope edits. No handset access, SSH, modem rerun,
   setting change, reboot/flash or new driver activation was performed.
+
+
+### Existing-log USB response-loss refinement
+
+- Identified endpoint0 timeouts and bulk-pipe aborts while the Mac retained its
+  S8+ device object; kept physical-link and host/device causes unconfirmed.
+- Corrected the interpretation of a prematurely ended kernel capture and noted
+  the wall-clock-adjustment warning. Recorded candidate priorities without
+  live access, test replay or changes to excluded code.

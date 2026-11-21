@@ -84,3 +84,9 @@ existing-log review.
 
 See [the earlier USB sleep validation](VALIDATION.md#kernel55-usb-sleep-ownership-and-transport-recovery)
 for the separately recorded kernel54/55 observations and their limitations.
+
+
+A follow-up existing-log review narrowed the later symptom to registered-device
+USB control-request nonresponse and corrected the last-capture interpretation.
+See [the response-loss window review](usb-response-loss-window.md). It does not
+establish a root cause or qualify a fix.
