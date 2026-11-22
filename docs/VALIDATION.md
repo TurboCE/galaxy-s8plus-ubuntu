@@ -2541,3 +2541,11 @@ connector and buffer lifetime paths handled the panel submissions.
 A temporary GNOME trial stages the two drivers, Xorg configuration and GPU
 manifest together. Test status and limits are in
 [native rotation requirements](native-rotation-requirements.md).
+
+### Kernel57 stock RFS file-open qualification
+
+Stock vendor dispatch identifies RFS command 0x11 as file open. A new passive
+receipt classified one read-only and one potentially modifying open request
+after validating the wire lengths. It exposed no filenames, file contents
+or raw request payload. The test sent no RFS reply. CP exited OFFLINE, on the
+same boot with taint zero. ModemManager still detects no modem.

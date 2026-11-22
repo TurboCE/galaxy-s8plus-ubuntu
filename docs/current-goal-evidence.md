@@ -1,19 +1,19 @@
 # Current seven-requirement evidence audit
 
-This remains an incomplete goal. The live SM-G955N runs kernel55 with the
-native GNOME Mali -> DRM/KMS/PRIME -> DECON output. Current bounded evidence
-supersedes the kernel32 checkpoint below; it does not certify all hardware,
-indefinite reliability or an error-free untested subsystem.
+The SM-G955N is currently on kernel57. Earlier qualified GNOME trials used
+Mali → DRM/KMS/PRIME → DECON. The current rotation build is supervised,
+with restoration of the previous Xorg and EGL files at the end of a trial.
+The table tracks live and earlier results separately.
 
 | Owner requirement | Current evidence | Remaining acceptance |
 | --- | --- | --- |
 | Boot and touch login | Normal kernel55 GDM account/OSK/PAM login and actual lock/PAM unlock after timed resume; autologin remains off | Repeated physical cold starts and prolonged ordinary use |
-| Accelerated, responsive GNOME | Mali-G71, no swrast, real KMS frame retirement without CPU final-buffer transfer; earlier54 same-boot drag comparison is retained | Physical latency and sustained app workload; software movement is not panel FPS |
-| Fix kernel/driver errors | Fresh55 boot-start capture and tested intervals had taint0 and no new fault signatures; USB sleep quiesce/restart exercised | Longer/physical power tests, all remaining driver paths; earlier GNOME exit35 failures remain documented separately |
-| Accelerometer, magnetic, steps and light | Active55 native accelerometer/light service, original measured matrix/calibration; real magnetic/gyro/step records previously captured on36; own inactive release repaired | Physical heading/gyro calibration, genuine step increase, repeated changing-light response on55 |
+| Accelerated, responsive GNOME | Earlier normal-session Mali-G71/KMS frame retirement without CPU final-buffer transfer. On 57 the rotated Mali buffers completed KMS flips in an isolated display test | Default GNOME rotation output, physical latency and sustained app workload |
+| Fix kernel/driver errors | Kernel57 remained untainted in the panel tests. A previous 25.49-second RTC sleep on 57 recovered USB and Wi-Fi on the same boot | Longer and repeated physical power tests including a logged-in desktop and all remaining driver paths |
+| Accelerometer, magnetic, steps and light | On 57 SensorProxy advertises accelerometer, ambient light and proximity. IIO exposes the magnetometer, gyroscope and step counter. Earlier captures recorded these device streams | Physical heading and gyro calibration, genuine step increase and longer-range light response |
 | Microphone and speaker | Normal PipeWire defaults/controls; owner confirmed continuous speech on54;55 post-resume duplex had no hardware-error growth and detected the test tones | Cold-capture startup transient, speech intelligibility and further physical audio routing |
-| LTE modem | Native55 signed CP RAM boot and real ONLINE handshake passed; bounded trial shut down to OFFLINE with protected hashes intact; ModemManager has no usable transport | Native SIPC/RFS/control backend, then SIM registration, mobile-only traffic and resume/reconnect; SIM has not been supplied |
-| Rotation, automatic brightness and standard toggles | Genuine lux/brightness response and standard toggle roundtrips previously passed32;55 native properties remain available | Dynamic rotation backend/touch mapping remains unimplemented; current physical response and long-use acceptance |
+| LTE modem | Eight kernel57 trials returned the CP to OFFLINE. The latest captured two stock file-open requests, one carrying flags that can modify data. ModemManager still detects no modem | SIPC/RFS or a qualified vendor RIL adapter, then SIM registration, mobile-only traffic and reconnect |
+| Rotation, automatic brightness and standard toggles | Earlier lux/brightness response and standard toggle round trips passed. On 57 all four orientations passed in the separate Xorg and GDM reported `PanelOrientationManaged=true` with the candidate | Ordinary authenticated GNOME automatic rotation, rotation lock and touch on the rotated screen |
 
 Recent55 USB trials passed20/45/180-second transport recovery, but two of those
 lost the GNOME process and are not desktop passes. A rebuilt deadline-aware
@@ -23,12 +23,11 @@ normal touchscreen/PAM sequence. ScreenSaver.GetActive alone was an invalid lock
 criterion; the current harness checks logind LockedHint as well. No password or
 authentication policy was weakened. See VALIDATION.md for the exact boundaries.
 
-The first native CP boot trial reached ONLINE and shut down cleanly, with
+Before the seven kernel57 passes, the first native CP boot trial reached ONLINE and shut down cleanly, with
 post-trial GPU/audio and protected-input checks passing. A later experimental
 read-only SIPC status trial lost all remote responses; its retained journal ended just after unit start, without proof of a GET. A
 later no-query boot/off/read/soak comparison passed, but receive-only SIPC then
-also lost all remote responses; its durable final-stage log awaits restart
-recovery. The hard-freeze cause remains unconfirmed. The new modem query path is unqualified
+also lost all remote responses. Its last-stage evidence was incomplete. The hard-freeze cause remains unconfirmed. The new modem query path is unqualified
 and is not a persistent boot service. Offline inhibitor/correlation tests do
 not substitute for live recovery or a second successful boot.
 

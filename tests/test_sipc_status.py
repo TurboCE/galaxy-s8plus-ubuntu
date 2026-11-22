@@ -14,7 +14,10 @@ class StatusTests(unittest.TestCase):
   steps=[]
   try:
    os.write(fw,m.FMT.pack(8,0,0,1,1,3)+b'\x01'+m.FMT.pack(9,0,0,5,1,3)+b'\x80\x00')
-   os.write(rw,m.RFS.pack(m.RFS.size+1,1,1)+b'\x00')
+   name=b'synthetic-path'
+   payload=m.RFS_OPEN.pack(0,len(name))+name
+   os.write(rw,m.RFS.pack(m.RFS.size+1,1,1)+b'\x00'
+            +m.RFS.pack(m.RFS.size+len(payload),0x11,2)+payload)
    with patch.object(m.os,'write') as write:
     result=m.observe(fr,rr,seconds=.04,query=False,progress=steps.append)
     write.assert_not_called()
@@ -22,11 +25,21 @@ class StatusTests(unittest.TestCase):
    self.assertFalse(result['queries_sent'])
    self.assertEqual(result['fmt_frames'],2)
    self.assertEqual(result['status_notifications'],{'sim':{'not-present':1}})
-   self.assertEqual(result['rfs_commands'],{'01':1})
+   self.assertEqual(result['rfs_commands'],{'01':1,'11':1})
+   self.assertEqual(result['rfs_open_access'],{'read-only':1})
+   self.assertNotIn(name.decode(),repr(result))
    self.assertEqual(result['replies'],{})
    self.assertEqual(steps,['status-receiver-ready','status-first-fmt-frame','status-observation-completed'])
   finally:
    for fd in (fr,fw,rr,rw):os.close(fd)
+
+ def test_rfs_open_reports_access_without_interpreting_path(self):
+  request=m.RFS_OPEN.pack
+  for flags in (1,2,0x40,0x200,0x400,0x400000):
+   self.assertEqual(m.rfs_open_access(request(flags,1)+b'x'),'may-write')
+  for payload in (b'',request(0,3)+b'x',request(0,0),request(3,1)+b'x',
+                  request(0,1025)+b'x'*1025):
+   self.assertEqual(m.rfs_open_access(payload),'invalid')
 
  def test_fragmented_and_coalesced_messages(self):
   a=m.FMT.pack(8,0,0,1,1,3)+b'\x01';b=m.FMT.pack(9,0,2,5,1,2)+b'\x80\x00'

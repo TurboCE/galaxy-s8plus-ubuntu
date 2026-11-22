@@ -103,3 +103,10 @@ its digest. The rotation trial restores the original Xorg files, bridge,
 manifest and session launcher on timeout or reboot. Default activation is
 reserved until the real GNOME session passes automatic orientation, rotation
 lock, physical touch, screen power and performance testing.
+
+
+In the normal GDM trial the actual Mutter greeter recognized the candidate
+`DSI-1` as the primary built-in panel and reported
+`PanelOrientationManaged=true`. The user GNOME session was not entered during
+the four-minute window. The phone restored all five snapshotted files
+byte-for-byte, cleared the lease and returned to its original GDM.

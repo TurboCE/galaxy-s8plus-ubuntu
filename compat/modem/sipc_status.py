@@ -15,6 +15,10 @@ import time
 
 FMT = struct.Struct('<HBBBBB')
 RFS = struct.Struct('<IBB')
+RFS_OPEN = struct.Struct('<II')
+RFS_PATH_LIMIT = 1024
+# Linux/Bionic open flags in the stock ARM64 vendor protocol.
+RFS_WRITE_OPEN_FLAGS = 0x40 | 0x200 | 0x400 | 0x400000
 GEN_RESULT = struct.Struct('<BBBH')
 MAX_FRAME = 1024 * 1024 + 16
 
@@ -76,6 +80,19 @@ def query_acknowledgement(fields, payload, pending):
     return name, code
 
 
+def rfs_open_access(payload):
+    """Classify stock G955N opcode 0x11 without opening or disclosing the path."""
+    if len(payload) < RFS_OPEN.size:
+        return 'invalid'
+    flags, path_size = RFS_OPEN.unpack_from(payload)
+    access = flags & 3
+    if access == 3 or not 0 < path_size <= RFS_PATH_LIMIT or path_size != len(payload) - RFS_OPEN.size:
+        return 'invalid'
+    if access or flags & RFS_WRITE_OPEN_FLAGS:
+        return 'may-write'
+    return 'read-only'
+
+
 def observe(fmt_fd, rfs_fd, seconds=5, query=False, progress=lambda step: None):
     readers = {fmt_fd: Frames(FMT), rfs_fd: Frames(RFS)}
     poll = select.poll()
@@ -84,7 +101,7 @@ def observe(fmt_fd, rfs_fd, seconds=5, query=False, progress=lambda step: None):
     result = {'fmt_frames': 0, 'rfs_frames': 0, 'power_up_notification': False,
               'queries_sent': False, 'replies': {}, 'commands': {},
               'query_acknowledgements': {}, 'status_notifications': {}, 'rfs_commands': {},
-              'rfs_requests_answered': False}
+              'rfs_open_access': {}, 'rfs_requests_answered': False}
     pending = {}
     progress('status-receiver-ready')
     deadline = time.monotonic() + seconds
@@ -137,6 +154,10 @@ def observe(fmt_fd, rfs_fd, seconds=5, query=False, progress=lambda step: None):
                     command = f'{fields[1]:02x}'
                     counts = result['rfs_commands']
                     counts[command] = counts.get(command, 0) + 1
+                    if fields[1] == 0x11:
+                        access = rfs_open_access(payload)
+                        counts = result['rfs_open_access']
+                        counts[access] = counts.get(access, 0) + 1
     result['incomplete_bytes'] = sum(len(r.pending) for r in readers.values())
     progress('status-observation-completed')
     return result

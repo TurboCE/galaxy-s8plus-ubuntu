@@ -144,3 +144,12 @@ treating the control device as a generic AT port. A confined vendor RIL
 adapter or native SIPC/RFS implementation is still needed. ModemManager
 enumeration on kernel57 still returned no modem. No Android radio process
 was launched and no NV data was read or modified by this inspection.
+
+The stock RIL's RFS dispatcher maps command 0x11 to file open. Its first two
+payload fields are little-endian open flags and path length. The passive monitor
+now records only the classified access and validates that the path's declared
+length matches the frame. In the next kernel57 trial, the two requests were
+one read-only and one with flags that could modify data. Neither request was
+answered. CP returned to OFFLINE on the same boot with taint zero. The write
+intent is a reason to use an isolated writable RFS backing store for later
+backend qualification.
