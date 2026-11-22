@@ -2303,3 +2303,27 @@ and stock-gestures records.
 - ModemManager is running and lists no modems. The exposed Samsung SIPC
   channels do not supply a supported control interface to ModemManager. Mobile
   Network settings and SIM registration are pending a functional backend.
+
+### Automatic brightness ramp on kernel55
+
+The Ubuntu 46.0-1ubuntu1.24.04.1 ARM64 power candidate built with the Ubuntu
+source patches, and the device resolved its dependencies without undefined
+symbols. A local fixture executed the patched ramp step and covered gradual
+convergence, a missing write acknowledgement and a disabled adjustment.
+Offline staging accepted the matching AArch64 build and rejected a rootfs with
+a different package version.
+
+The first activation attempt exposed a stalled graphical session. Mutter's
+DisplayConfig and IdleMonitor calls timed out, including against the original
+power service, and the compositor backtrace showed a synchronous KMS page
+completion wait. X11 reported the monitor off. The established X11 wake
+operation restored both Mutter calls without restarting the desktop or
+touching login state. Retrying the version-matched power service then passed.
+
+The running candidate reported 6% via its GNOME D-Bus brightness property.
+The standard automatic-brightness setting accepted off and on, and the
+original on value was restored. Accelerometer, ALS and proximity remained
+available. A 32-second live recording saw a stable 338 lux at 6% brightness.
+The ramp code is fixture-tested and installed; a timed physical light change
+and optical transition are still open. This recording also does not qualify
+the display path across arbitrary DPMS and system sleep sequences.

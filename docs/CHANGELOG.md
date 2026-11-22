@@ -1671,3 +1671,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   The owner covered and uncovered the sensor during a live recording. The
   D-Bus client observed four near/far pairs and release restored the original
   FIFO and polling attributes.
+
+## 2026-11-22 — GNOME automatic brightness ramp
+
+- Build an Ubuntu package-matched ARM64 GNOME power plugin that advances
+  brightness in bounded steps based on real SensorProxy lux. Use the same
+  GNOME automatic-brightness option, backlight service and manual controls.
+- Add a version-matched service drop-in and opt-in offline image staging.
+  The handset is running the modified power service. The original enabled
+  setting was restored after the on/off check.

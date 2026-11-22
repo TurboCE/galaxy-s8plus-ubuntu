@@ -15,6 +15,8 @@ def main():
     parser.add_argument('--finalize-only', action='store_true')
     parser.add_argument('--sensor-daemon', type=Path,
                         help='Stage the reviewed AArch64 Samsung SSP SensorProxy executable')
+    parser.add_argument('--ambient-power-daemon', type=Path,
+                        help='Stage the reviewed AArch64 GNOME power daemon with ambient brightness ramping')
     parser.add_argument('--audio-build', type=Path,
                         help='Stage the reviewed scoped ALSA build directory for desktop speaker output')
     args = parser.parse_args()
@@ -46,6 +48,8 @@ def main():
     hardware_mounts = []
     if args.sensor_daemon:
         hardware_mounts += ['-v', str(args.sensor_daemon.resolve(strict=True)) + ':/adapters/sensor-proxy:ro']
+    if args.ambient_power_daemon:
+        hardware_mounts += ['-v', str(args.ambient_power_daemon.resolve(strict=True)) + ':/adapters/gsd-power:ro']
     if args.audio_build:
         hardware_mounts += ['-v', str(args.audio_build.resolve(strict=True)) + ':/adapters/audio:ro']
     subprocess.run([*common, '--network', 'none',

@@ -18,6 +18,9 @@ hardware_args=(--rootfs "$R")
 if [ -f /adapters/sensor-proxy ]; then
   hardware_args+=(--sensor-daemon /adapters/sensor-proxy)
 fi
+if [ -f /adapters/gsd-power ]; then
+  hardware_args+=(--ambient-power-daemon /adapters/gsd-power)
+fi
 if [ -d /adapters/audio ]; then
   hardware_args+=(--audio-build /adapters/audio)
 fi

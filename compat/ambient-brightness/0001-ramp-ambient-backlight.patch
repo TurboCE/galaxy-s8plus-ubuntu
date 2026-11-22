@@ -1,0 +1,276 @@
+Subject: Ramp automatic brightness even for a single on-change sample
+
+--- a/plugins/power/gsd-power-manager.c
++++ b/plugins/power/gsd-power-manager.c
+@@ -22,6 +22,7 @@
+
+ #include "config.h"
+
++#include <math.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <glib/gi18n.h>
+@@ -184,11 +185,14 @@
+         GDBusProxy              *iio_proxy;
+         guint                    iio_proxy_watch_id;
+         gboolean                 ambient_norm_required;
+-        gdouble                  ambient_accumulator;
++        gboolean                 ambient_panel_blank;
++        guint                    ambient_ramp_id;
++        gint                     ambient_target;
++        gint                     ambient_pending;
++        gint64                   ambient_step_deadline;
+         gdouble                  ambient_norm_value;
+         gdouble                  ambient_percentage_old;
+         gdouble                  ambient_last_absolute;
+-        gint64                   ambient_last_time;
+
+         /* Power Profiles */
+         GDBusProxy              *power_profiles_proxy;
+@@ -1269,6 +1273,8 @@
+         gboolean ret;
+         GError *error = NULL;
+
++        manager->ambient_panel_blank = FALSE;
++
+         iio_proxy_claim_light (manager, TRUE);
+         ret = gnome_rr_screen_set_dpms_mode (manager->rr_screen,
+                                              GNOME_RR_DPMS_ON,
+@@ -1287,6 +1293,9 @@
+ {
+         gboolean ret;
+         GError *error = NULL;
++
++        manager->ambient_panel_blank = TRUE;
++        g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
+
+         iio_proxy_claim_light (manager, FALSE);
+         ret = gnome_rr_screen_set_dpms_mode (manager->rr_screen,
+@@ -2564,6 +2573,14 @@
+                                 const gchar *key,
+                                 GsdPowerManager *manager)
+ {
++        if (g_str_equal (key, "ambient-enabled")) {
++                if (g_settings_get_boolean (settings, key))
++                        iio_proxy_changed (manager);
++                else
++                        g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
++                return;
++        }
++
+         if (g_str_has_prefix (key, "sleep-inactive") ||
+             g_str_equal (key, "idle-delay") ||
+             g_str_equal (key, "idle-dim")) {
+@@ -2947,75 +2964,88 @@
+         gnome_settings_profile_end (NULL);
+ }
+
++static gboolean
++ambient_can_adjust (GsdPowerManager *manager)
++{
++        return manager->backlight && manager->iio_proxy &&
++               manager->session_is_active &&
++               manager->current_idle_mode <= GSD_POWER_IDLE_MODE_NORMAL &&
++               !manager->ambient_panel_blank &&
++               g_settings_get_boolean (manager->settings, "ambient-enabled");
++}
++
++static gboolean
++ambient_ramp_step (gpointer user_data)
++{
++        GsdPowerManager *manager = user_data;
++        gint current, next;
++
++        if (!ambient_can_adjust (manager) || manager->ambient_norm_required)
++                goto stop;
++
++        current = gsd_backlight_get_brightness (manager->backlight, NULL);
++        if (current < 0 || current == manager->ambient_target)
++                goto stop;
++
++        /* Wait for the previous write to reach the hardware. */
++        if (manager->ambient_pending >= 0 && current != manager->ambient_pending) {
++                if (g_get_monotonic_time () < manager->ambient_step_deadline)
++                        return G_SOURCE_CONTINUE;
++                goto stop;
++        }
++
++        /* Rate-limit brightness, not the measured lux. An on-change sensor
++         * can report one large jump and then deliver no more samples. */
++        next = current + CLAMP (manager->ambient_target - current, -3, 3);
++        gsd_backlight_set_brightness_async (manager->backlight, next, NULL, NULL, NULL);
++        manager->ambient_pending = next;
++        manager->ambient_step_deadline = g_get_monotonic_time () + G_TIME_SPAN_SECOND;
++        return G_SOURCE_CONTINUE;
++
++stop:
++        manager->ambient_ramp_id = 0;
++        return G_SOURCE_REMOVE;
++}
++
+ static void
+ iio_proxy_changed (GsdPowerManager *manager)
+ {
+-        GVariant *val_has = NULL;
+-        GVariant *val_als = NULL;
+-        gdouble brightness;
+-        gdouble alpha;
+-        gint64 current_time;
+-        gint pc;
+-
+-        /* no display hardware */
+-        if (!manager->backlight)
+-                return;
+-
+-        /* disabled */
+-        if (!g_settings_get_boolean (manager->settings, "ambient-enabled"))
+-                return;
+-
+-        /* get latest results, which do not have to be Lux */
+-        val_has = g_dbus_proxy_get_cached_property (manager->iio_proxy, "HasAmbientLight");
+-        if (val_has == NULL || !g_variant_get_boolean (val_has))
+-                goto out;
+-        val_als = g_dbus_proxy_get_cached_property (manager->iio_proxy, "LightLevel");
+-        if (val_als == NULL || g_variant_get_double (val_als) == 0.0)
+-                goto out;
+-        manager->ambient_last_absolute = g_variant_get_double (val_als);
+-        g_debug ("Read last absolute light level: %f", manager->ambient_last_absolute);
+-
+-        /* the user has asked to renormalize */
++        g_autoptr(GVariant) available = NULL;
++        g_autoptr(GVariant) light = NULL;
++        gdouble level;
++
++        if (!ambient_can_adjust (manager))
++                return;
++
++        available = g_dbus_proxy_get_cached_property (manager->iio_proxy, "HasAmbientLight");
++        light = g_dbus_proxy_get_cached_property (manager->iio_proxy, "LightLevel");
++        if (!available || !g_variant_get_boolean (available) || !light)
++                return;
++
++        level = g_variant_get_double (light);
++        if (!isfinite (level) || level < 0)
++                return;
++
++        manager->ambient_last_absolute = level;
+         if (manager->ambient_norm_required) {
+-                g_debug ("Renormalizing light level from old light percentage: %.1f%%",
+-                         manager->ambient_percentage_old);
+-                manager->ambient_accumulator = manager->ambient_percentage_old;
++                if (level <= 0)
++                        return;
++                manager->ambient_percentage_old =
++                        MAX (1, gsd_backlight_get_brightness (manager->backlight, NULL));
+                 ch_backlight_renormalize (manager);
+         }
+
+-        /* time-weighted constant for moving average */
+-        current_time = g_get_monotonic_time();
+-        if (manager->ambient_last_time)
+-                alpha = 1.0f / (1.0f + (GSD_AMBIENT_TIME_CONSTANT / (current_time - manager->ambient_last_time)));
+-        else
+-                alpha = 0.0f;
+-        manager->ambient_last_time = current_time;
+-
+-        /* calculate exponential weighted moving average */
+-        brightness = manager->ambient_last_absolute * 100.f / manager->ambient_norm_value;
+-        brightness = MIN (brightness, 100.f);
+-        brightness = MAX (brightness, 0.f);
+-
+-        manager->ambient_accumulator = (alpha * brightness) +
+-                (1.0 - alpha) * manager->ambient_accumulator;
+-
+-        /* no valid readings yet */
+-        if (manager->ambient_accumulator < 0.f)
+-                goto out;
+-
+-        /* set new value */
+-        g_debug ("Setting brightness from ambient %.1f%%",
+-                 manager->ambient_accumulator);
+-        pc = manager->ambient_accumulator;
+-
+-        if (manager->backlight)
+-                gsd_backlight_set_brightness_async (manager->backlight, pc, NULL, NULL, NULL);
+-
+-        /* Assume setting worked. */
+-        manager->ambient_percentage_old = pc;
+-out:
+-        g_clear_pointer (&val_has, g_variant_unref);
+-        g_clear_pointer (&val_als, g_variant_unref);
++        if (!isfinite (manager->ambient_norm_value) || manager->ambient_norm_value <= 0)
++                return;
++
++        /* Keep a visible minimum; DPMS owns actual display blanking. */
++        manager->ambient_target = (gint) (CLAMP (level * 100.0 /
++                                              manager->ambient_norm_value, 1.0, 100.0) + 0.5);
++        if (!manager->ambient_ramp_id) {
++                manager->ambient_pending = -1;
++                manager->ambient_ramp_id = g_timeout_add (100, ambient_ramp_step, manager);
++                g_source_set_name_by_id (manager->ambient_ramp_id, "[gsd-power] ambient ramp");
++        }
+ }
+
+ static void
+@@ -3111,11 +3141,9 @@
+                                   iio_proxy_vanished_cb,
+                                   manager, NULL);
+         manager->ambient_norm_required = TRUE;
+-        manager->ambient_accumulator = -1.f;
+         manager->ambient_norm_value = -1.f;
+         manager->ambient_percentage_old = -1.f;
+         manager->ambient_last_absolute = -1.f;
+-        manager->ambient_last_time = 0;
+
+         gnome_settings_profile_end (NULL);
+         return TRUE;
+@@ -3125,6 +3153,7 @@
+ gsd_power_manager_stop (GsdPowerManager *manager)
+ {
+         g_debug ("Stopping power manager");
++        g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
+
+         if (manager->inhibit_lid_switch_timer_id != 0) {
+                 g_source_remove (manager->inhibit_lid_switch_timer_id);
+@@ -3258,6 +3287,7 @@
+         brightness = gsd_backlight_set_brightness_finish (backlight, res, &error);
+
+         /* ambient brightness no longer valid */
++        g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
+         manager->ambient_percentage_old = brightness;
+         manager->ambient_norm_required = TRUE;
+
+@@ -3288,6 +3318,7 @@
+         brightness = gsd_backlight_set_brightness_finish (backlight, res, NULL);
+
+         if (brightness >= 0) {
++                g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
+                 manager->ambient_percentage_old = brightness;
+                 manager->ambient_norm_required = TRUE;
+         }
+@@ -3310,6 +3341,7 @@
+
+         g_object_set_data_full (G_OBJECT (invocation), "gsd-power-manager", g_object_ref (manager), g_object_unref);
+
++        g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
+         if (g_strcmp0 (method_name, "StepUp") == 0) {
+                 g_debug ("screen step up");
+                 gsd_backlight_step_up_async (manager->backlight, NULL, backlight_brightness_step_cb, invocation);
+@@ -3456,6 +3488,7 @@
+                  * But none of our DBus API users actually read the result. */
+                 g_variant_get (value, "i", &brightness_value);
+                 if (manager->backlight) {
++                        g_clear_handle_id (&manager->ambient_ramp_id, g_source_remove);
+                         gsd_backlight_set_brightness_async (manager->backlight, brightness_value,
+                                                             NULL,
+                                                             backlight_brightness_set_cb, g_object_ref (manager));
+--- a/plugins/power/gsd-backlight.c
++++ b/plugins/power/gsd-backlight.c
+@@ -493,6 +493,7 @@
+                                                      backlight->brightness_max,
+                                                      backlight->brightness_target);
+                         g_task_return_int (task, percent);
++                        g_object_unref (task);
+                 } else {
+                         task_data = g_new0 (BacklightHelperData, 1);
+                         task_data->value = backlight->brightness_target;

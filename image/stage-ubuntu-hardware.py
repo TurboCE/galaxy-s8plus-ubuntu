@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 
 SOURCE = Path(__file__).resolve().parents[1]
+AMBIENT = SOURCE / 'compat/ambient-brightness'
 AUDIO = SOURCE / 'compat/pipewire'
 SENSORS = SOURCE / 'compat/sensors'
 STOCK_SPA = Path('usr/lib/aarch64-linux-gnu/spa-0.2')
@@ -58,6 +59,23 @@ def install_sensors(root, daemon):
         (SENSORS / '90-g955n-ssp.conf', 'etc/systemd/system/iio-sensor-proxy.service.d/90-g955n-ssp.conf', 0o644),
     ):
         stage(root, target, input_file.read_bytes(), mode)
+
+
+def install_ambient_power(root, daemon):
+    binary = daemon.read_bytes()
+    if not arm64_elf(daemon) or b'[gsd-power] ambient ramp' not in binary:
+        raise ValueError('Expected the AArch64 ambient brightness power daemon')
+    package = subprocess.check_output(
+        ['dpkg-query', '--admindir=' + str(root / 'var/lib/dpkg'), '-W',
+         '-f=${Version}', 'gnome-settings-daemon'], text=True)
+    launcher = (AMBIENT / 'run-power.sh').read_bytes()
+    if b'built_for=' + package.encode() + b'\n' not in launcher:
+        raise ValueError('Ambient brightness daemon does not match the Ubuntu package')
+    stage(root, 'opt/g955n-ambient-brightness/gsd-power', binary, 0o755)
+    stage(root, 'opt/g955n-ambient-brightness/run-power.sh', launcher, 0o755)
+    name = '60-g955n-ambient-brightness.conf'
+    stage(root, 'etc/systemd/user/org.gnome.SettingsDaemon.Power.service.d/' + name,
+          (AMBIENT / name).read_bytes())
 
 
 def link(root, name, target):
@@ -123,12 +141,15 @@ def main():
     parser.add_argument('--rootfs', required=True, type=Path)
     parser.add_argument('--sensor-daemon', type=Path)
     parser.add_argument('--audio-build', type=Path)
+    parser.add_argument('--ambient-power-daemon', type=Path)
     args = parser.parse_args()
     root = args.rootfs.resolve(strict=True)
     if root == Path('/') or (root / 'etc/hostname').read_text().strip() != 'g955n-ubuntu':
         parser.error('requires the offline SM-G955N Ubuntu rootfs')
     if args.sensor_daemon:
         install_sensors(root, args.sensor_daemon)
+    if args.ambient_power_daemon:
+        install_ambient_power(root, args.ambient_power_daemon)
     if args.audio_build:
         install_audio(root, args.audio_build)
 
