@@ -2120,3 +2120,41 @@ a later transition. Host machTimestamp ordering was checked within one boot;
 a wall-clock-adjustment warning limits precise cross-clock correlation.
 No handset/SSH access, excluded test/code work or settings/firmware change was
 performed. See usb-response-loss-window.md for remaining candidates and limits.
+
+
+### System Monitor ordinary desktop launch (2026-11-22)
+
+The live SM-G955N/kernel55 owner session had System Monitor46.0-1build1 and a
+valid org.gnome.SystemMonitor.desktop entry. Initial direct and desktop-entry
+launches registered the application but exposed only an unmapped1x1 X window
+during the observation. Both GL and Cairo trials showed this condition while
+logind reported LockedHint=yes. That does not establish the cause of the
+owner's earlier app-grid failure. The owner later confirmed a visible, updating
+window during the Cairo comparison after unlocking.
+
+A GNOME stack snapshot in g955n_kms_present/wait_readable was initially
+interpreted as a stall. A later stack was in the ordinary GLib main loop and
+ScreenSaver.GetActive replied in0.03seconds. The snapshot is therefore not
+proof of a deadlocked presenter or a justification for a driver replacement.
+An incompletely supplied diagnostic launch context also produced a linker-path
+error; the actual Shell and user activation-manager GPU environments matched.
+That diagnostic error is not attributed to the normal app-grid launcher.
+
+After the owner unlocked, the original GL configuration produced a sized
+window in1.04seconds. The comparison unit was then stopped and the original
+desktop entry launched through Gio.DesktopAppInfo using the actual Shell
+environment, with child output detached from the SSH capture pipe. Its launcher
+returned success and a normal window became IsViewable in1.11seconds
+after the launcher returned. The app retained GSK_RENDERER=gl, mapped the Mali
+vendor library and had no swrast mapping. These are process/window and library
+observations, not an independent GPU benchmark or physical touch retest of
+this final launch. The owner's visible-update confirmation belongs to the
+preceding Cairo trial, not the final GL run.
+
+The graph-update-interval readback remained100ms. No per-user desktop override,
+software-renderer default, authentication change, kernel/firmware update or
+modem/USB recovery was installed. The temporary idle inhibitor was released
+and the comparison unit was inactive. The app was left running from its normal
+desktop entry. Recovery is observed; recurrence prevention and the original
+failure's cause are not qualified. Private evidence is under
+artifacts/system-monitor-current/normal-final.private.log.

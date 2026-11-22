@@ -1626,3 +1626,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Corrected the interpretation of a prematurely ended kernel capture and noted
   the wall-clock-adjustment warning. Recorded candidate priorities without
   live access, test replay or changes to excluded code.
+
+
+### System Monitor launch recovery (2026-11-22)
+
+- Diagnosed the owner-reported app launch on SM-G955N/kernel55 without changing
+  the kernel, GNOME output path or the100ms graph preference. Restarted only
+  System Monitor and verified the ordinary desktop entry creates a viewable
+  window with the original GL configuration. No persistent renderer override
+  was installed; the initial failure's root cause remains unproven.
