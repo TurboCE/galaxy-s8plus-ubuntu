@@ -2478,3 +2478,14 @@ accelerometer, ambient light and proximity. Cardinal, tilted, wraparound,
 zero and vertical-vector math fixtures passed. Absolute heading, movement
 tracking and physical calibration are open. No latitude or longitude was
 requested or recorded during this check.
+
+
+### Mali native-buffer rotation on kernel55
+
+An AArch64 EGL diagnostic used the same pinned libhybris EGL libraries and
+owner X11 display as the normal session. Mali-G71 rendered both 90-degree
+turns from a 2960x1440 RGBX gralloc buffer into a 1440x2960 RGBX gralloc buffer.
+Both native handles matched the direct presenter's linear layout and each
+turn's four pixel regions matched their expected colors. Diagnostic FBO
+readback verified the result; no CPU mapping was used in the transform.
+The test did not control the panel, acquire DRM master or replace GNOME.

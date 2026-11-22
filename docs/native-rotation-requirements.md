@@ -51,3 +51,29 @@ identification are required before enabling the GNOME rotation control on
 this path. The presenter additionally guards native portrait dimensions and
 format, so rotated rendering must still deliver correctly arranged pixels in
 the native Mali DMA-BUFs that DECON scans out.
+
+
+### Mali rotation of native buffers
+
+`compat/compositor-build/x11-rotation-probe.c` uses the existing private
+libhybris EGL stack in the owner X11 session. It allocates separate
+2960x1440 and 1440x2960 RGBX gralloc buffers, checks the same layout used by the
+direct DECON presenter, and imports each as an EGLImage-backed texture. Mali
+paints a source pattern and renders both quarter-turns into the portrait
+buffer. The probe checks the expected four destination regions per turn.
+Pixel readback is used only for the test. Neither gralloc buffer is CPU-mapped.
+The probe uses an EGL pbuffer and opens no visible window or KMS scanout.
+
+The actual SM-G955N on kernel55 passed both directions on the Mali-G71, with
+the stock phone display session still running. This establishes a GPU path
+between the logical and panel-size buffers. The Xorg output transform, touch
+coordinate mapping, and submission of rotated frames by GNOME remain open.
+
+Build the diagnostic in the existing X11 cross builder with its private
+libhybris build prefix available at `/work/prefix`.
+
+```sh
+aarch64-linux-gnu-gcc -O2 -Wall -Wextra -Werror -I/work/prefix/include \
+  /source/x11-rotation-probe.c -L/work/prefix/lib -lEGL -lGLESv2 -lX11 \
+  -o /out/x11-rotation-probe
+```

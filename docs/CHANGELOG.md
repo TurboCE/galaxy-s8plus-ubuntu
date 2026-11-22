@@ -1721,3 +1721,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Publish SSP rotation-vector headings through the standard Compass interface.
 - Reuse checked sensor claims and restore the rotation-vector lease on release.
+
+
+## 2026-11-22 — Hardware rotation proof for GNOME buffers
+
+- Verify both 90-degree GLES transforms between native Samsung gralloc
+  buffers at desktop and panel sizes on the real Mali-G71.
