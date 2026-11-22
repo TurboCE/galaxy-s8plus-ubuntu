@@ -2549,3 +2549,24 @@ receipt classified one read-only and one potentially modifying open request
 after validating the wire lengths. It exposed no filenames, file contents
 or raw request payload. The test sent no RFS reply. CP exited OFFLINE, on the
 same boot with taint zero. ModemManager still detects no modem.
+
+### Kernel57 GNOME rotated-output and logged-in sleep retest
+
+The normal GDM touchscreen/OSK/PAM path entered Ubuntu GNOME. The original
+portrait candidate passed three screen-off/on cycles with the same shell,
+Mali renderer and KMS file. Its first quarter-turn exited while creating
+the GPU program. The rebuilt provider-dispatch version completed 0°, 90°,
+270°, 180° and 0° through Mutter while preserving the session. Each
+transform matched the direct touchscreen's coordinate matrix. The shell
+reported at least 60 KMS retirements in the test session.
+
+The subsequent RTC suspend produced an approximately 24-second elapsed
+entry/exit interval in the kernel. USB and Wi-Fi returned and the same
+logged-in GNOME session remained on the same boot, with taint zero.
+The immediate journal read timed out and the attempted post-resume touch
+unlock did not complete. The trial rolled back the bridge and Xorg files.
+
+In a separate logged-in kernel57 audio test, the internal microphone
+recorded both speaker tones. The playback and capture pointers advanced,
+with zero hardware-error growth and zero steady clipping. The initial
+capture transient showed 201 clipped samples during its first 250 ms.

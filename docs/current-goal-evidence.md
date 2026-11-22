@@ -7,13 +7,13 @@ The table tracks live and earlier results separately.
 
 | Owner requirement | Current evidence | Remaining acceptance |
 | --- | --- | --- |
-| Boot and touch login | Normal kernel55 GDM account/OSK/PAM login and actual lock/PAM unlock after timed resume; autologin remains off | Repeated physical cold starts and prolonged ordinary use |
-| Accelerated, responsive GNOME | Earlier normal-session Mali-G71/KMS frame retirement without CPU final-buffer transfer. On 57 the rotated Mali buffers completed KMS flips in an isolated display test | Default GNOME rotation output, physical latency and sustained app workload |
-| Fix kernel/driver errors | Kernel57 remained untainted in the panel tests. A previous 25.49-second RTC sleep on 57 recovered USB and Wi-Fi on the same boot | Longer and repeated physical power tests including a logged-in desktop and all remaining driver paths |
+| Boot and touch login | Kernel57 used the normal touchscreen, OSK and PAM to reach the Mali/KMS desktop | Repeated cold starts and reliable touch unlock after suspend |
+| Accelerated, responsive GNOME | Kernel57 normal GNOME kept Mali/KMS and retired at least 60 frames across the rotation exercise | Default GNOME rotation output, physical latency and sustained app workload |
+| Fix kernel/driver errors | Kernel57 remained untainted in the panel tests. A roughly 24-second RTC sleep recovered USB and Wi-Fi with the same owner GNOME session | Longer and repeated physical power tests including a logged-in desktop and all remaining driver paths |
 | Accelerometer, magnetic, steps and light | On 57 SensorProxy advertises accelerometer, ambient light and proximity. IIO exposes the magnetometer, gyroscope and step counter. Earlier captures recorded these device streams | Physical heading and gyro calibration, genuine step increase and longer-range light response |
-| Microphone and speaker | Normal PipeWire defaults/controls; owner confirmed continuous speech on54;55 post-resume duplex had no hardware-error growth and detected the test tones | Cold-capture startup transient, speech intelligibility and further physical audio routing |
+| Microphone and speaker | Kernel57 duplex captured both built-in speaker test tones on the internal mic, with zero hardware-error growth | Cold-capture startup transient, speech intelligibility and further physical audio routing |
 | LTE modem | Eight kernel57 trials returned the CP to OFFLINE. The latest captured two stock file-open requests, one carrying flags that can modify data. ModemManager still detects no modem | SIPC/RFS or a qualified vendor RIL adapter, then SIM registration, mobile-only traffic and reconnect |
-| Rotation, automatic brightness and standard toggles | Earlier lux/brightness response and standard toggle round trips passed. On 57 all four orientations passed in the separate Xorg and GDM reported `PanelOrientationManaged=true` with the candidate | Ordinary authenticated GNOME automatic rotation, rotation lock and touch on the rotated screen |
+| Rotation, automatic brightness and standard toggles | Earlier lux/brightness response and standard toggle round trips passed. Kernel57 normal GNOME passed all four commanded orientations and updated the internal touch device coordinate transform | Ordinary authenticated GNOME automatic rotation, rotation lock and touch on the rotated screen |
 
 Recent55 USB trials passed20/45/180-second transport recovery, but two of those
 lost the GNOME process and are not desktop passes. A rebuilt deadline-aware

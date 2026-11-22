@@ -1743,3 +1743,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verified all four directions on the handset and submitted the rotated Mali
   DMA-BUFs through the physical display controller. Added rollback for Xorg
   as part of the same supervised GNOME trial.
+
+### Normal GNOME Mali rotation follow-up
+
+- Resolve the rotation shaders and draws through the active Mali EGL provider.
+  The real GNOME session completed all four orientations and updated the
+  physical touchscreen's X11 matrix.

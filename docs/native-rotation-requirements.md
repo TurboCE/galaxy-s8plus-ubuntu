@@ -110,3 +110,21 @@ In the normal GDM trial the actual Mutter greeter recognized the candidate
 `PanelOrientationManaged=true`. The user GNOME session was not entered during
 the four-minute window. The phone restored all five snapshotted files
 byte-for-byte, cleared the lease and returned to its original GDM.
+
+
+A subsequent kernel57 trial used the normal GDM touchscreen and numeric
+on-screen keyboard through PAM. The first GNOME quarter-turn exited while
+creating the GPU program, although the rotation pbuffer had bound successfully.
+Resolving the GLES calls explicitly through the active Mali EGL provider
+fixed the failure. The unchanged GNOME Shell then completed all five
+temporary Mutter configurations (0°, 90°, 270°, 180°, 0°), with the expected
+root dimensions and coordinate transforms on the real touchscreen. The
+compositor reported at least 60 retired KMS frames in that session.
+
+An RTC-alarmed system sleep produced kernel entry and exit records about
+24 seconds apart. After resume the same boot, owner session, KMS lease, USB
+and Wi-Fi were present. A journal query in the original receipt worker timed
+out just after resume and the separately attempted on-screen PIN unlock did
+not complete. This leaves post-suspend touch authentication open. Sensor-driven
+motion, physical touch latency, and permanent activation are still separate
+acceptance items.

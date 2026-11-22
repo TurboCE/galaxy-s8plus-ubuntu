@@ -85,21 +85,19 @@ kms_object=build/'drm-output.o'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-fPIC','-O2','-Wall','-Wextra','-Werror',
                 *flags,'-c',str(panel/'drm-output.c'),'-o',str(kms_object)],check=True)
 objects=[str(panel_object),str(kms_object)]
-rotation_libs = []
 if a.native_rotation:
  common.append('-DG955N_NATIVE_ROTATION=1')
  rotation_object = build / 'panel-rotation.o'
  subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-fPIC','-O2','-Wall','-Wextra','-Werror',
                  '-I'+str(prefix/'include'),'-c',str(panel/'panel-rotation.c'),'-o',str(rotation_object)],check=True)
  objects.append(str(rotation_object))
- rotation_libs.append('-lGLESv2')
 
 for name in ['eglplatform_x11.cpp','x11_window.cpp','xcb_drihybris.c']:
  obj=build/(name+'.o');objects.append(str(obj));cxx=name.endswith('.cpp')
  subprocess.run(['aarch64-linux-gnu-g++' if cxx else 'aarch64-linux-gnu-gcc',*common,*(['-std=c++17'] if cxx else []),'-Wall','-Wextra','-c',str(source/name),'-o',str(obj),*flags],check=True)
 binary=prefix/'lib/libhybris/eglplatform_x11.so'
 subprocess.run(['aarch64-linux-gnu-g++','-shared','-Wl,--no-undefined,-z,relro,-z,now',*objects,'-L'+str(prefix/'lib'),'-Wl,-rpath-link,'+str(prefix/'lib'),
- '-lhybris-eglplatformcommon','-lhybris-platformcommon','-lgralloc','-lsync','-lEGL','-lhybris-common','-lpthread','-ldl',*rotation_libs,*flags,'-o',str(binary)],check=True)
+ '-lhybris-eglplatformcommon','-lhybris-platformcommon','-lgralloc','-lsync','-lEGL','-lhybris-common','-lpthread','-ldl',*flags,'-o',str(binary)],check=True)
 kms_probe=prefix/'bin/drm-kms-probe'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-O2','-Wall','-Wextra','-Werror',
                 str(panel/'drm-probe.c'),str(kms_object),*flags,'-o',str(kms_probe)],check=True)
