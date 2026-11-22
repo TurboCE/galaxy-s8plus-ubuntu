@@ -71,16 +71,18 @@ Compositor patch 0026 adds the standard libdrm presenter in
 `compat/native-gnome/direct-panel/drm-output.c`. It imports gralloc DMA-BUFs,
 caches at most eight framebuffer IDs by GEM handle, and waits for real flip
 events before recycling old buffers. A DMA-BUF fd number or anonymous inode is
-not used as its identity. The helper retains ambiguous submissions. Its timeout
-is bounded while powered and pauses while standard DPMS reports the panel off.
+not used as its identity. The helper retains ambiguous submissions.
+Patch 0027 returns control to GNOME when DPMS reports a blank panel. It
+retains the last scanout and at most one outstanding flip. A new frame may
+be skipped while the panel is blank. X11 keeps three buffers so Mutter can
+continue to render and process input while the two display buffers are held.
 
-The first post-unblank frame gets a fresh bounded wait rather than the remainder
-of an off-panel deadline. Suspend detection compares BOOTTIME with MONOTONIC:
-normal MONOTONIC excludes sleep, so a thawed poll can expire without appearing
-late on that clock. A single fresh resume window still requires the real KMS
-completion. A genuinely missing powered completion remains an error; no buffer
-is retired by elapsed time alone. The production-method fixture covers both
-clock behaviors, a wake at the old deadline and bounded failure retention.
+A returned pending flip gets a fresh powered wait when rendering resumes.
+The powered wait samples DPMS in bounded poll intervals and can grant one
+extra budget after a genuine sleep interval observed with BOOTTIME. The
+presenter retires a buffer only after an actual KMS event for its replacement.
+The production-method fixture exercises blank before submission, blank
+after acceptance, wake completion, suspend clocks and a powered timeout.
 
 The X11 prefix builder now builds the presenter and `bin/drm-kms-probe`; the
 prefix packager includes the probe and records its dependencies. Install the

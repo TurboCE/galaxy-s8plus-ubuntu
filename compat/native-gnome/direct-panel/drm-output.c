@@ -16,14 +16,17 @@
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
-enum { PANEL_WIDTH = 1440, PANEL_HEIGHT = 2960, CACHE_SIZE = 8 };
+enum {
+    PANEL_WIDTH = 1440, PANEL_HEIGHT = 2960, CACHE_SIZE = 8,
+    FLIP_TIMEOUT_MS = 1500, FLIP_POLL_SLICE_MS = 25,
+};
 struct frame_entry {
     uint32_t handle, fb, pitch, format;
     uint64_t used;
 };
 struct g955n_kms {
     int fd;
-    uint32_t crtc, connector, dpms_property, current_fb;
+    uint32_t crtc, connector, dpms_property, current_fb, pending_fb;
     drmModeModeInfo mode;
     struct frame_entry cache[CACHE_SIZE];
     uint64_t age, completions;
@@ -245,6 +248,51 @@ static void flipped(int fd, unsigned sequence, unsigned seconds,
     ++((struct g955n_kms *)data)->completions;
 }
 
+int g955n_kms_progress(struct g955n_kms *output)
+{
+    if (!output || !output->pending_fb)
+        return -EINVAL;
+    int off = panel_is_off(output);
+    if (off)
+        return off < 0 ? off : G955N_KMS_DEFERRED;
+
+    uint64_t completion = output->completions + 1;
+    uint64_t started = milliseconds();
+    uint64_t started_boot = clock_milliseconds(CLOCK_BOOTTIME);
+    uint64_t deadline = started + FLIP_TIMEOUT_MS;
+    bool resume_grace = false;
+    drmEventContext events = { .version = 2, .page_flip_handler = flipped };
+    while (output->completions < completion) {
+        uint64_t now = milliseconds();
+        uint64_t slice = now + FLIP_POLL_SLICE_MS;
+        int error = wait_readable(output->fd, slice < deadline ? slice : deadline);
+        if (error == -ETIMEDOUT) {
+            off = panel_is_off(output);
+            if (off)
+                return off < 0 ? off : G955N_KMS_DEFERRED;
+
+            now = milliseconds();
+            uint64_t elapsed = now - started;
+            uint64_t elapsed_boot = clock_milliseconds(CLOCK_BOOTTIME) - started_boot;
+            if (!resume_grace &&
+                (now > deadline + 250 || elapsed_boot > elapsed + 250)) {
+                resume_grace = true;
+                deadline = now + FLIP_TIMEOUT_MS;
+            }
+            if (now >= deadline)
+                return error;
+            continue;
+        }
+        if (error)
+            return error;
+        if (drmHandleEvent(output->fd, &events))
+            return -errno;
+    }
+    output->current_fb = output->pending_fb;
+    output->pending_fb = 0;
+    return 0;
+}
+
 int g955n_kms_present(struct g955n_kms *output,
                       const struct g955n_panel_frame *frame, int *submitted)
 {
@@ -256,6 +304,12 @@ int g955n_kms_present(struct g955n_kms *output,
         frame->allocation_height < PANEL_HEIGHT || frame->allocation_height > 4096 ||
         !pixel_format(frame->format))
         return -EINVAL;
+    if (output->pending_fb)
+        return -EBUSY;
+    int off = panel_is_off(output);
+    if (off)
+        return off < 0 ? off : G955N_KMS_DEFERRED;
+
     off_t size = lseek(frame->dma_buf, 0, SEEK_END);
     if (size < 0)
         return -errno;
@@ -277,58 +331,14 @@ int g955n_kms_present(struct g955n_kms *output,
         if (drmModeSetCrtc(output->fd, output->crtc, fb, 0, 0,
                            &output->connector, 1, &output->mode))
             return -errno;
-    } else {
-        uint64_t completion = output->completions + 1;
-        *submitted = 1;
-        if (drmModePageFlip(output->fd, output->crtc, fb,
-                            DRM_MODE_PAGE_FLIP_EVENT, output))
-            return -errno;
-        drmEventContext events = { .version = 2, .page_flip_handler = flipped };
-        uint64_t started = milliseconds();
-        uint64_t started_boot = clock_milliseconds(CLOCK_BOOTTIME);
-        uint64_t deadline = started + 1500;
-        bool resume_grace = false;
-        bool observed_blank = false;
-        while (output->completions < completion) {
-            error = wait_readable(output->fd, deadline);
-            if (error) {
-                /* A blanked display cannot complete scanout. Preserve all
-                 * buffers and wait for a real completion after unblank. The
-                 * timeout stays bounded whenever the connector is powered. */
-                if (error == -ETIMEDOUT && panel_is_off(output) > 0) {
-                    observed_blank = true;
-                    deadline = milliseconds() + 1500;
-                    continue;
-                }
-                /* A wake can occur just before an off-panel poll expires.
-                 * That old deadline is not the powered scanout's budget.
-                 * Give the first visible frame a full bounded interval. */
-                if (error == -ETIMEDOUT && observed_blank) {
-                    observed_blank = false;
-                    deadline = milliseconds() + 1500;
-                    fprintf(stderr, "G955N DRM/KMS waiting for the first post-unblank frame\n");
-                    continue;
-                }
-                /* MONOTONIC normally excludes suspend. An expired poll after
-                 * thaw can therefore look punctual despite minutes asleep.
-                 * BOOTTIME records that gap; retain the late-poll fallback
-                 * for kernels/scheduling which advance MONOTONIC instead. */
-                uint64_t now = milliseconds();
-                uint64_t elapsed = now - started;
-                uint64_t elapsed_boot = clock_milliseconds(CLOCK_BOOTTIME) - started_boot;
-                if (error == -ETIMEDOUT && !resume_grace &&
-                    (now > deadline + 250 || elapsed_boot > elapsed + 250)) {
-                    resume_grace = true;
-                    deadline = now + 1500;
-                    fprintf(stderr, "G955N DRM/KMS resumed a suspended/delayed page-event wait\n");
-                    continue;
-                }
-                return error;
-            }
-            if (drmHandleEvent(output->fd, &events))
-                return -errno;
-        }
+        output->current_fb = fb;
+        return 0;
     }
-    output->current_fb = fb;
-    return 0;
+
+    *submitted = 1;
+    if (drmModePageFlip(output->fd, output->crtc, fb,
+                        DRM_MODE_PAGE_FLIP_EVENT, output))
+        return -errno;
+    output->pending_fb = fb;
+    return g955n_kms_progress(output);
 }

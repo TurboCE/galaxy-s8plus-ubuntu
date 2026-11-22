@@ -1,0 +1,126 @@
+Subject: Return to the GNOME event loop while an off-panel DRM flip is deferred
+
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -386,13 +386,20 @@
+     dlclose(lib);
+ }
+
++struct DirectFrameUse {
++    bool retained = true;
++    bool kms = false;
++    X11NativeWindowBuffer *retired[2] = {};
++};
++
+ /* The root-owned test supervisor supplies an exclusive lease and disables
+  * the legacy pan pump before authorizing this experimental path. */
+ static bool direct_panel_frame(Display *display, Window window,
+-                               const X11NativeWindowBuffer *buffer)
++                               X11NativeWindowBuffer *buffer, DirectFrameUse &use)
+ {
+     static int panel = -1, lease = -1, previous_fence = -1;
+     static g955n_kms *kms;
++    static X11NativeWindowBuffer *scanout, *pending;
+     static unsigned retired;
+     static Window output = None;
+     static bool rejected;
+@@ -473,16 +480,42 @@
+     }
+     const g955n_panel_frame frame = {handle->data[0], -1, 1440, 2960, G955N_DECON_RGBX8888};
+     if (kms) {
++        output = window;
++        use.kms = true;
++        unsigned completed = 0;
++        if (pending) {
++            int status = g955n_kms_progress(kms);
++            if (status == G955N_KMS_DEFERRED) {
++                use.retained = false;
++                return true;
++            }
++            if (status) {
++                fprintf(stderr, "G955N DRM/KMS deferred flip failed: errno=%d\n", -status);
++                _exit(35);
++            }
++            use.retired[completed++] = scanout;
++            scanout = pending;
++            pending = nullptr;
++        }
++
+         int submitted = 0;
+-        int error = g955n_kms_present(kms, &frame, &submitted);
+-        if (error) {
++        int status = g955n_kms_present(kms, &frame, &submitted);
++        if (status == G955N_KMS_DEFERRED) {
++            if (submitted)
++                pending = buffer;
++            else
++                use.retained = false;
++            return true;
++        }
++        if (status) {
+             fprintf(stderr, "G955N DRM/KMS frame failed: errno=%d submitted=%d\n",
+-                    -error, submitted);
++                    -status, submitted);
+             _exit(35); /* Do not reuse buffers after an uncertain commit. */
+         }
+-        if (output != None && (++retired == 1 || retired == 60))
++        use.retired[completed] = scanout;
++        if (scanout && (++retired == 1 || retired == 60))
+             fprintf(stderr, "G955N DRM/KMS retired %u GNOME frames without CPU pixel transfer\n", retired);
+-        output = window;
++        scanout = buffer;
+         return true;
+     }
+     int fence, submitted;
+@@ -545,9 +578,10 @@
+     unlock();
+
+     report_panel_layout(m_display, m_window, wnb);
+-    const bool direct = direct_panel_frame(m_display, m_window, wnb);
++    DirectFrameUse use;
++    const bool direct = direct_panel_frame(m_display, m_window, wnb, use);
+     if (direct) {
+-        /* The completion is for the replacement, and retires the old frame. */
++        /* KMS reports which buffers are still held by scanout or a pending flip. */
+     } else if (m_haveDRIHybris) {
+         if (wnb->pixmap == 0)
+             wnb->pixmap_from_buffer(m_connection, m_window);
+@@ -574,9 +608,17 @@
+
+     lock();
+
+-    if (!direct)
++    if (!direct || !use.retained)
+         ++m_freeBufs;
+-    else if (previous && previous->busy == 3) {
++    if (use.kms) {
++        for (auto *released : use.retired) {
++            if (released) {
++                assert(released->busy == 3);
++                released->busy = 0;
++                ++m_freeBufs;
++            }
++        }
++    } else if (direct && previous && previous->busy == 3) {
+         previous->busy = 0;
+         ++m_freeBufs;
+     }
+@@ -588,7 +630,7 @@
+         (*it)->youngest = 0;
+     }
+     wnb->youngest = 1;
+-    wnb->busy = direct ? 3 : 0;
++    wnb->busy = direct && use.retained ? 3 : 0;
+
+     unlock();
+ }
+@@ -800,6 +842,9 @@
+
+     if (cnt == 0) cnt = 3;
+     if (cnt < 2 || cnt > 8) return -EINVAL;
++    /* A KMS session can hold scanout and one pending frame simultaneously. */
++    if (cnt == 2 && getenv("G955N_DIRECT_PANEL_TRIAL") && getenv("G955N_DRM_KMS"))
++        cnt = 3;
+     if ((int)m_bufList.size() == cnt)
+         return NO_ERROR;
+

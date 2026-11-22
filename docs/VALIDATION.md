@@ -2327,3 +2327,26 @@ available. A 32-second live recording saw a stable 338 lux at 6% brightness.
 The ramp code is fixture-tested and installed; a timed physical light change
 and optical transition are still open. This recording also does not qualify
 the display path across arbitrary DPMS and system sleep sequences.
+
+### DECON off-panel flip deferral on kernel55
+
+A prior locked session tied up Mutter's main thread in the synchronous DRM
+completion wait after X11 reported DPMS off. The new userspace presenter
+yields while the connector is blank, retaining the current and pending
+scanout buffers. Its X11 integration can use a third buffer to continue
+handling redraws, and releases retained buffers only when the corresponding
+replacement has reached the panel.
+
+The host KMS fixture passed blank-before-submit, blank-after-acceptance, real
+wake completion, timeout and DMA-BUF identity tests. A fixture running the
+actual X11 ownership code passed 150 swaps while blank, followed by wake
+with retirement of both replaced buffers. The AArch64 compositor module
+built from the pinned sources. The owner's ordinary GNOME X11 session loaded
+it via the built-in shell restart, with the same process and open session.
+
+On the physical handset, three X11 DPMS off/on cycles passed. During each off
+interval, both Mutter DisplayConfig and IdleMonitor calls completed. Each
+wake retained the same GNOME process, Mali library and DECON DRM file. The
+installed startup manifest and module digests matched after the test. A
+separate system suspend and long unattended wake soak remain unqualified
+for this module revision.

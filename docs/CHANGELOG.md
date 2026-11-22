@@ -1680,3 +1680,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add a version-matched service drop-in and opt-in offline image staging.
   The handset is running the modified power service. The original enabled
   setting was restored after the on/off check.
+
+## 2026-11-22 — Preserve GNOME responsiveness while DECON is blank
+
+- Return to the X11 GNOME event loop while an accepted KMS flip awaits panel
+  wake. Retain the real scanout and pending frame until the KMS event, and
+  keep a third buffer available for rendering.
+- Rebuilt and activated the SM-G955N output module with the existing
+  accelerated desktop session. Three real display off/on cycles passed.
