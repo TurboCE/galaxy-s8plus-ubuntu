@@ -1853,3 +1853,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   the early USB snapshot into the systemd trial journal.
 - Add namespace and virtual-network-device kernel options, and have the
   trial return to recovery after multi-user is active or its deadline expires.
+
+## 2026-11-23 — Linux 6.18 storage and namespace diagnostics
+
+- Enable file locking in the Ubuntu kernel fragment for systemd namespace setup.
+- Route valid Exynos8895 SCSI sense responses through the existing UFS OCS quirk.
+- Add opt-in authenticated USB console, network namespace and hardware checks.
+- Store separate Hibern8 and STMFTS bring-up proposals for on-device qualification.

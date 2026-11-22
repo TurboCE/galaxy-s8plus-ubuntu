@@ -1,0 +1,18 @@
+Subject: [PATCH] Exynos8895: preserve SCSI sense on misleading UFS OCS
+
+The SM-G955N records OCS 7 for commands with a valid CHECK CONDITION
+response, including an unsupported MODE SENSE subpage. Use the same
+UFS core workaround as the other affected Exynos hosts so that the
+SCSI midlayer sees the device sense and applies its normal fallback.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -2319,6 +2319,7 @@
+ 	.uic_attr = &exynos8895_uic_attr,
+ 	.quirks = UFSHCD_QUIRK_PRDT_BYTE_GRAN |
+ 		  UFSHCI_QUIRK_BROKEN_REQ_LIST_CLR |
++		  UFSHCD_QUIRK_BROKEN_OCS_FATAL_ERROR |
+ 		  UFSHCI_QUIRK_SKIP_RESET_INTR_AGGR,
+ 	.opts = EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL |
+ 		EXYNOS_UFS_OPT_SKIP_CONFIG_PHY_ATTR |

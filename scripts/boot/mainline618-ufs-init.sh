@@ -103,7 +103,46 @@ if [ -s /run/g955n-trial/usb-start.log ]; then
 fi
 if [ "$target" != active ]; then
     systemctl list-jobs --no-pager
+else
+    case " $(cat /proc/cmdline) " in
+        *" g955n.netns_diag=1 "*)
+            if timeout 20 systemd-run --quiet --wait --pipe --collect -p PrivateNetwork=yes \
+                /bin/sh -c 'test "$(readlink /proc/self/ns/net)" != "$(readlink /proc/1/ns/net)" && ip link show dev lo >/dev/null'; then
+                printf 'SM-G955N UBUNTU PRIVATE NETWORK OK\n'
+            else
+                printf 'SM-G955N UBUNTU PRIVATE NETWORK FAILED\n'
+            fi
+            ;;
+    esac
 fi
+
+case " $(cat /proc/cmdline) " in
+    *" g955n.hardware_diag=1 "*)
+        for dev in /sys/bus/i2c/drivers/stmfts/*-0049; do
+            [ -L "$dev" ] || continue
+            printf 'SM-G955N TOUCH STMFTS chip=%s\n' "$(cat "$dev/chip_id")"
+        done
+        for input in /sys/class/input/event*; do
+            [ -r "$input/device/name" ] || continue
+            printf 'SM-G955N INPUT %s %s\n' "${input##*/}" "$(cat "$input/device/name")"
+        done
+        for dev in /sys/class/drm/card[0-9] /sys/class/drm/renderD*; do
+            [ -L "$dev/device/driver" ] || continue
+            driver=$(readlink "$dev/device/driver")
+            printf 'SM-G955N DRM %s %s\n' "${dev##*/}" "${driver##*/}"
+        done
+        for dev in /sys/class/ieee80211/phy*; do
+            [ -d "$dev" ] && printf 'SM-G955N WLAN %s\n' "${dev##*/}"
+        done
+        if [ -r /proc/asound/cards ]; then
+            printf 'SM-G955N ALSA cards\n'
+            cat /proc/asound/cards
+        fi
+        if [ -r /sys/power/state ]; then
+            printf 'SM-G955N SLEEP %s\n' "$(cat /sys/power/state)"
+        fi
+        ;;
+esac
 exec systemctl reboot --reboot-argument=recovery
 EOF
     "$BB" cat > /run/systemd/system/g955n-trial-return.service <<'EOF' || return 1
@@ -125,7 +164,19 @@ OnActiveSec=10s
 OnUnitInactiveSec=10s
 AccuracySec=1s
 EOF
-    "$BB" ln -s ../g955n-trial-return.timer /run/systemd/system/timers.target.wants/
+    "$BB" ln -s ../g955n-trial-return.timer /run/systemd/system/timers.target.wants/ || return 1
+
+    case " $("$BB" cat /proc/cmdline) " in
+        *" g955n.usb_login=1 "*)
+            if [ -c /dev/ttyGS0 ] && [ -f /newroot/usr/lib/systemd/system/serial-getty@.service ]; then
+                "$BB" mkdir -p /run/systemd/system/getty.target.wants || return 1
+                "$BB" ln -s /usr/lib/systemd/system/serial-getty@.service \
+                    /run/systemd/system/getty.target.wants/serial-getty@ttyGS0.service || return 1
+            else
+                log 'USB serial login unavailable'
+            fi
+            ;;
+    esac
 }
 
 partdev() {

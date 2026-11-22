@@ -1,0 +1,126 @@
+Subject: [PATCH] Exynos8895: read the native UFS Hibern8 result
+
+The revision 4 Exynos8895 controller reports Hibern8 indications
+through vendor UniPro registers. Preserve the standard status path
+on other controllers and use the vendor AXI burst setting on this SoC.
+
+diff --git a/include/ufs/ufshcd.h b/include/ufs/ufshcd.h
+--- a/include/ufs/ufshcd.h
++++ b/include/ufs/ufshcd.h
+@@ -317,6 +317,8 @@
+  * @setup_task_mgmt: called before any task management request is issued
+  *                  to set some things
+  * @hibern8_notify: called around hibern8 enter/exit
++ * @pwr_ctrl_status: read a variant power indication, or return a negative
++ *		     value to use the standard controller status
+  * @apply_dev_quirks: called to apply device specific quirks
+  * @fixup_dev_quirks: called to modify device specific quirks
+  * @suspend: called during host controller PM callback
+@@ -361,6 +363,7 @@
+ 	void	(*setup_task_mgmt)(struct ufs_hba *, int, u8);
+ 	void    (*hibern8_notify)(struct ufs_hba *, enum uic_cmd_dme,
+ 					enum ufs_notify_change_status);
++	int	(*pwr_ctrl_status)(struct ufs_hba *hba, enum uic_cmd_dme cmd);
+ 	int	(*apply_dev_quirks)(struct ufs_hba *hba);
+ 	void	(*fixup_dev_quirks)(struct ufs_hba *hba);
+ 	int     (*suspend)(struct ufs_hba *, enum ufs_pm_op,
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -4382,7 +4382,10 @@
+ 	}
+ 
+ check_upmcrs:
+-	status = ufshcd_get_upmcrs(hba);
++	ret = hba->vops && hba->vops->pwr_ctrl_status ?
++		hba->vops->pwr_ctrl_status(hba, cmd->command) : -EOPNOTSUPP;
++	status = ret < 0 ? ufshcd_get_upmcrs(hba) : ret;
++	ret = 0;
+ 	if (status != PWR_LOCAL) {
+ 		dev_err(hba->dev,
+ 			"pwr ctrl cmd 0x%x failed, host upmcrs:0x%x\n",
+@@ -5533,8 +5536,8 @@
+ 	default:
+ 		result |= DID_ERROR << 16;
+ 		dev_err(hba->dev,
+-				"OCS error from controller = %x for tag %d\n",
+-				ocs, lrbp->task_tag);
++				"OCS error from controller = %x for tag %d, SCSI opcode %#x\n",
++				ocs, lrbp->task_tag, lrbp->cmd->cmnd[0]);
+ 		ufshcd_print_evt_hist(hba);
+ 		ufshcd_print_host_state(hba);
+ 		break;
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -1714,6 +1714,15 @@
+ 	return ret;
+ }
+ 
++static int exynos_ufs_pwr_ctrl_status(struct ufs_hba *hba, enum uic_cmd_dme cmd)
++{
++	struct exynos_ufs *ufs = ufshcd_get_variant(hba);
++
++	if (!ufs->drv_data->get_hibern8_status)
++		return -EOPNOTSUPP;
++	return ufs->drv_data->get_hibern8_status(ufs, cmd);
++}
++
+ static void exynos_ufs_hibern8_notify(struct ufs_hba *hba,
+ 				     enum uic_cmd_dme cmd,
+ 				     enum ufs_notify_change_status notify)
+@@ -2037,6 +2046,7 @@
+ 	.setup_xfer_req			= exynos_ufs_specify_nexus_t_xfer_req,
+ 	.setup_task_mgmt		= exynos_ufs_specify_nexus_t_tm_req,
+ 	.hibern8_notify			= exynos_ufs_hibern8_notify,
++	.pwr_ctrl_status		= exynos_ufs_pwr_ctrl_status,
+ 	.suspend			= exynos_ufs_suspend,
+ 	.resume				= exynos_ufs_resume,
+ 	.fill_crypto_prdt		= exynos_ufs_fmp_fill_prdt,
+@@ -2267,8 +2277,27 @@
+ 	return 0;
+ }
+ 
++#define EXYNOS8895_DME_HIBERN8_ENTER_IND	0x7868
++#define EXYNOS8895_DME_HIBERN8_EXIT_IND	0x7878
++
++static int exynos8895_ufs_get_hibern8_status(struct exynos_ufs *ufs,
++					  enum uic_cmd_dme cmd)
++{
++	switch (cmd) {
++	case UIC_CMD_DME_HIBER_ENTER:
++		return unipro_readl(ufs, EXYNOS8895_DME_HIBERN8_ENTER_IND) & 0x7;
++	case UIC_CMD_DME_HIBER_EXIT:
++		return unipro_readl(ufs, EXYNOS8895_DME_HIBERN8_EXIT_IND) & 0x7;
++	default:
++		return -EOPNOTSUPP;
++	}
++}
++
+ static int exynos8895_ufs_post_link(struct exynos_ufs *ufs)
+ {
++	/* Use the write-latency unit and AXI burst setting of rev 4. */
++	hci_writel(ufs, WLU_EN | WLU_BURST_LEN(3), HCI_AXIDMA_RWDATA_BURST_LEN);
++
+ 	return exynos8895_ufs_write_attrs(ufs, exynos8895_after_link,
+ 					ARRAY_SIZE(exynos8895_after_link));
+ }
+@@ -2302,6 +2331,7 @@
+ 	.pre_hce_enable = exynos8895_ufs_enable_clocks,
+ 	.init_link_phy = exynos8895_ufs_init_link_phy,
+ 	.post_link = exynos8895_ufs_post_link,
++	.get_hibern8_status = exynos8895_ufs_get_hibern8_status,
+ 	.pre_pwr_change = exynos8895_ufs_initial_power_mode,
+ };
+ 
+diff --git a/drivers/ufs/host/ufs-exynos.h b/drivers/ufs/host/ufs-exynos.h
+--- a/drivers/ufs/host/ufs-exynos.h
++++ b/drivers/ufs/host/ufs-exynos.h
+@@ -189,6 +189,7 @@
+ 	bool pclk_from_unipro;
+ 	bool skip_pwm_clk_div;
+ 	int (*post_link)(struct exynos_ufs *ufs);
++	int (*get_hibern8_status)(struct exynos_ufs *ufs, enum uic_cmd_dme cmd);
+ 	int (*pre_pwr_change)(struct exynos_ufs *ufs,
+ 				struct ufs_pa_layer_attr *pwr);
+ 	int (*post_pwr_change)(struct exynos_ufs *ufs,

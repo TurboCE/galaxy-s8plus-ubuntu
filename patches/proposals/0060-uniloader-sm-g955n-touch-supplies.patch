@@ -1,0 +1,67 @@
+Subject: [PATCH] uniLoader: prepare the SM-G955N touch supplies
+
+Enable the S2MPS17 touch rails at the voltages used by kernel58 and
+read them back before handing over to Linux. This is for the optional
+SM-G955N STMFTS qualification image.
+
+diff --git a/board/samsung/board-dream2lteks.c b/board/samsung/board-dream2lteks.c
+--- a/board/samsung/board-dream2lteks.c
++++ b/board/samsung/board-dream2lteks.c
+@@ -6,6 +6,8 @@
+ #include <board.h>
+ #include <util.h>
+ #include <drivers/framework.h>
++#include <drivers/samsung/exynos-speedy.h>
++#include <lib/debug.h>
+ #include <lib/simplefb.h>
+ #include <main/main.h>
+ 
+@@ -13,6 +15,32 @@
+ static int dream2lteks_early_init(void)
+ {
+ 	soc_init();
++	return 0;
++}
++
++static int dream2lteks_late_init(void)
++{
++	struct speedy_transaction rail = { .base = 0x15b50000, .slave = 1 };
++	const struct {
++		unsigned int offset;
++		unsigned int value;
++	} supplies[] = {
++		{ 0x5f, 0xc0 | 46 }, /* S2MPS17 LDO34, 1.85 V */
++		{ 0x60, 0xc0 | 60 }, /* S2MPS17 LDO35, 3.3 V */
++	};
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(supplies); i++) {
++		rail.offset = supplies[i].offset;
++		rail.val = supplies[i].value;
++
++		if (speedy_write(&rail) || speedy_read(&rail) ||
++		    rail.val != supplies[i].value) {
++			printk(KERN_ERR, "SM-G955N: touch supply did not configure\n");
++			break;
++		}
++	}
++
+ 	return 0;
+ }
+ 
+@@ -32,6 +60,7 @@
+ 	.name = "samsung-dream2lteks",
+ 	.ops = {
+ 		.early_init = dream2lteks_early_init,
++		.late_init = dream2lteks_late_init,
+ 	},
+ 	.devices = dream2lteks_devices,
+ 	.num_devices = ARRAY_SIZE(dream2lteks_devices),
+diff --git a/configs/dream2lteks_defconfig b/configs/dream2lteks_defconfig
+--- a/configs/dream2lteks_defconfig
++++ b/configs/dream2lteks_defconfig
+@@ -5,3 +5,4 @@
+ CONFIG_TEXT_BASE=0x87000000
+ CONFIG_PAYLOAD_ENTRY=0x90000000
+ CONFIG_RAMDISK_ENTRY=0x84000000
++CONFIG_EXYNOS_SPEEDY=y

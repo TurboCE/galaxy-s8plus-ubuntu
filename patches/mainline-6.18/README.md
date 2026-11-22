@@ -90,6 +90,27 @@ kernel release, `log` streams the kernel log, and `recovery` requests
 a recovery reboot. The interface is available during the read-only
 UFS test and exits before handing over to the installed system. The
 timed Ubuntu trial records the early USB diagnostics in its journal.
+For a timed trial, add `g955n.usb_login=1` to start an Ubuntu login prompt
+on ttyGS0 after initramfs exits. Authentication uses the installed
+Ubuntu accounts. Add `g955n.netns_diag=1` to exercise a systemd unit
+with `PrivateNetwork=yes` and check that the private network namespace
+has a loopback interface.
+
+## Storage command responses and touchscreen trial
+
+Apply patch 0014 for the Exynos8895 UFS controller's command response
+quirk. The controller has reported OCS 7 while supplying valid SCSI sense
+data for a MODE SENSE request. The SCSI layer can then handle the
+unsupported page with its normal fallback. The Ubuntu fragment enables
+file locking, which systemd uses while creating private namespaces.
+
+For a separate STMFTS trial, apply proposal 0059 to Linux, proposal 0060
+to uniLoader, and append `config/mainline618-touch.fragment`. The loader
+sets the two touchscreen rails to the levels observed on the working
+SM-G955N. The Linux patch uses the standard STMFTS input driver on HSI2C23.
+Boot with `g955n.hardware_diag=1` to record input, DRM, Wi-Fi, ALSA and
+sleep interfaces in the timed trial journal. Treat driver enumeration
+and actual input, scanout, audio and resume as separate checks.
 
 ## Reading the warm boot trace
 

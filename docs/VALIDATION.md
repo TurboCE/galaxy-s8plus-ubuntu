@@ -2936,3 +2936,27 @@ DTB. No rail was switched during this test.
   `multi-user=active` and a read-write UFS root. It also recorded the
   remaining namespace failures. The handset returned to TWRP
   automatically after a normal shutdown.
+
+## SM-G955N Linux 6.18 storage, namespaces and touchscreen — 2026-11-23
+
+- R21 disabled `CONFIG_FILE_LOCKING`. It logged file lock errors and failures
+  while entering private network namespaces. Ubuntu's systemd uses a POSIX
+  lock on the socket holding the namespace descriptor. R22 and R24 built
+  with file locking enabled.
+- R22 enumerated the Mac USB CDC ACM port and streamed the complete initial
+  kernel log. The trace captured OCS 7 for MODE SENSE(10) with a valid
+  SCSI CHECK CONDITION response, sense key 5 and ASC 0x24. The 0014 patch
+  uses the existing Exynos workaround to deliver that sense response to
+  the SCSI layer. R24 built with it.
+- R22 included the experimental UniPro Hibern8 result and AXI burst
+  configuration. The serial device stayed enumerated after the initial
+  log transfer. The handset screen showed filesystem unmount, then
+  reboot.target and OCS 7 on START STOP UNIT (opcode 0x1b), with a SCSI
+  CHECK CONDITION response. Its diagnostic console stopped responding
+  and TWRP did not return in the seven-minute recovery window. The
+  journal and kernel58 restoration could not be reached. R24 uses
+  the R21 Hibern8 and AXI configuration.
+- R24 also bundles the compile-checked STMFTS kernel and uniLoader
+  proposals. Touch input, Panfrost and DECON scanout, stock GNOME
+  Wayland login and rotation, suspend, audio and Wi-Fi on 6.18 remain
+  to be verified on the handset.
