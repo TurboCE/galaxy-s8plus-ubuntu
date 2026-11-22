@@ -2753,3 +2753,33 @@ provides neither a Panfrost GPU binding nor a native DECON pipeline.
 A successful simple-framebuffer boot would only verify the early boot
 handoff. GPU-to-DECON scanout, the stock Wayland session, touch login,
 rotation, resume, audio and Wi-Fi remain to be qualified on Linux 6.18.
+
+### First 6.18 handset trial and kernel58 restoration
+
+The host verified full BOOT and six other raw recovery backups before the
+trial. A BOOT-only write installed the 6.18 probe and passed payload
+readback. The reported screen showed the Samsung Galaxy splash; there
+was no observed initramfs success message. Without a second console,
+the display alone does not identify where execution stopped.
+
+Source inspection found that the 6.18 board profile had not registered
+the Exynos8895 splash initialization callback. The loader main path
+runs the board's early-init callback before initializing its framebuffer
+console. The revised profile supplies the existing SoC initialization
+routine. Its compiled object references that symbol and the new Samsung
+image passed the same package verification. This follow-up image has not
+been written to the phone.
+
+On return to TWRP, the restore guard found EFS and PARAM hashes had
+changed since the original baseline. A fresh verified recovery backup
+showed six changed bytes in one 4 KiB block in each partition. The
+EFS filesystem UUID and geometry matched. The trial receipt still
+matched live BOOT and the other protected partitions matched the old
+backup. The cause of the metadata differences was not established.
+
+Restoring the original full BOOT against the freshly captured protected
+baseline passed complete BOOT readback and protected hash rechecks.
+After reboot, kernel58 reported taint zero, its same-boot stock audio
+receipt existed, GDM was active and Wi-Fi reported carrier. No audio
+capture was run after this rollback. Direct Panfrost output, stock
+Wayland and the companion 6.18 hardware tests are still pending.

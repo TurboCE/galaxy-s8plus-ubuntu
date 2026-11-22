@@ -26,5 +26,5 @@ verified copy of the previous BOOT partition.
 A passing probe would establish early Linux and initramfs execution.
 Panfrost still needs the Exynos8895 G3D domain, clock and supply. The
 panel path also needs native DECON, DPP, DSI and display IOMMU support.
-The stock-fit touch, audio and WLAN drivers must be validated separately
+The touch, audio and WLAN paths must be validated separately
 once the normal Ubuntu boot and native Wayland path are available.

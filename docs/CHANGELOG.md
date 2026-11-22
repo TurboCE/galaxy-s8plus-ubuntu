@@ -1795,3 +1795,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Add an SM-G955N mainline device tree, uniLoader board profile, and
   initramfs-only boot probe. Build the probe with ARM64 Panfrost included.
+
+### Linux 6.18 first BOOT-only trial
+
+- Connect the Exynos8895 splash initialization to the uniLoader early-init
+  callback and record the verified kernel58 rollback from the first trial.
