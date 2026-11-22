@@ -2996,3 +2996,20 @@ DTB. No rail was switched during this test.
   records the inherited rail mode and voltage selectors. Native Panfrost,
   DECON PRIME scanout, physical touch login in GNOME Wayland, rotation,
   suspend, audio and Wi-Fi remain unqualified on 6.18.
+
+### R26 shutdown trace and R29 follow-up
+
+- Manual recovery of R26 confirmed that it reached multi-user.target and
+  passed the private network namespace test before reboot.target.
+  Retained RAM recorded a synchronous external abort and PID 1 panic.
+  The captured instruction words match the R26 BOOT image. A rebuild
+  matched 64 bytes around both the fault and return addresses, locating
+  the abort at the HCI_CLKSTOP_CTRL read in exynos_ufs_ctrl_clkstop,
+  called by exynos_ufs_setup_clocks during shutdown. This is the late
+  clock callback, after the core stops the link and the variant isolates
+  the PHY.
+- Proposal 0065 skips just the inaccessible vendor register writes and
+  reads when shutting down the Exynos8895 with the link already off.
+  R29 builds this guard alongside the native Hibern8 status and clock
+  changes. Its loader link was checked for an actual call to the G3D
+  snapshot routine before packing BOOT.

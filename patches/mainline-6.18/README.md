@@ -114,9 +114,10 @@ Boot with `g955n.hardware_diag=1` to record input, DRM, Wi-Fi, ALSA and
 sleep interfaces in the timed trial journal. Treat driver enumeration
 and actual input, scanout, audio and resume as separate checks.
 
-Proposals 0062 and 0064 test the Exynos8895 UniPro Hibern8 result and
-the host clock state when shutting down. Apply them in that order for
-the combined trial. Keep using the timed recovery return while testing.
+Proposals 0062, 0064 and 0065 test the Exynos8895 UniPro Hibern8 result
+and the host clock state when shutting down. Apply them in that order
+for the combined trial. Keep using the timed recovery return while
+testing.
 
 For the G3D power snapshot, also apply proposal 0063 to uniLoader and
 reserve five cells under `/chosen` in the embedded DTB. Use

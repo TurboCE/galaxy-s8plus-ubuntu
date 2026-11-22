@@ -1,0 +1,27 @@
+Subject: [PATCH] Exynos8895: avoid UFS MMIO after shutdown isolation
+
+The SM-G955N shutdown trace aborts when exynos_ufs_setup_clocks reads
+HCI_CLKSTOP_CTRL after link-off and PHY isolation. At this point the
+core has already disabled its clocks. Skip the late vendor register
+access on Exynos8895 while leaving the earlier PHY and host shutdown
+sequence in place. Keep the normal suspend/resume path unchanged.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -1054,6 +1054,15 @@
+ 			exynos_ufs_disable_auto_ctrl_hcc(ufs);
+ 		exynos_ufs_ungate_clks(ufs);
+ 	} else if (!on && status == POST_CHANGE) {
++		/*
++		 * On Exynos8895 the PHY has already been isolated when
++		 * shutdown drops the host clocks. HCI_CLKSTOP_CTRL and
++		 * HCI_MISC cannot be accessed here.
++		 */
++		if (ufs->drv_data->native_hibern8_status &&
++		    hba->shutting_down && ufshcd_is_link_off(hba))
++			return 0;
++
+ 		exynos_ufs_gate_clks(ufs);
+ 		if (ufs->opts & EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL)
+ 			exynos_ufs_enable_auto_ctrl_hcc(ufs);

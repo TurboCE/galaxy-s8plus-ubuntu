@@ -1866,3 +1866,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add FTS8CD56 reset, identification and FIFO handling to the STMFTS proposal.
 - Add the Exynos8895 UniPro Hibern8 completion check for the UFS host.
 - Add an opt-in read-only G3D supply snapshot for Panfrost bring-up.
+
+## 2026-11-23 — Exynos8895 UFS shutdown MMIO
+
+- Add a shutdown-only Exynos8895 guard against accessing the host's
+  clock-stop registers after link-off and PHY isolation.
