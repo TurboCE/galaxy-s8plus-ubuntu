@@ -1777,3 +1777,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add a DECON-card GBM check alongside the Panfrost render-node and panel
   presentation checks. The new mode requires Mali-G71 Panfrost to render to
   linear buffers allocated for scanout without changing the running session.
+
+### Kernel58 stock Ubuntu audio
+
+- Activate Ubuntu PipeWire and WirePlumber's ALSA plugin after verifying the
+  kernel endpoint guard on SM-G955N.
+- Keep the same-boot guard receipt in a root-managed systemd state directory
+  on installations where the top-level runtime directory is writable.

@@ -2670,3 +2670,39 @@ The current DECON wrapper reports `g955n-decon`; whether stock Mesa can
 automatically pair that DRM device name with Panfrost remains unverified.
 The handset did not enumerate on the host during this continuation, so the
 new mode and the #58 ALSA kernel were not tested on hardware.
+
+### Kernel58 stock Ubuntu audio and current GNOME regression checks
+
+Recovery ADB confirmed SM-G955N. The host verified fresh copies of BOOT,
+RECOVERY, EFS, CPEFS, RADIO, MISC and PARAM against the device hashes.
+The trial changed BOOT alone and verified its readback. Kernel58 then
+booted with taint zero and reported the native RDMA0/WDMA1 ALSA guard.
+
+The live guard denied opens on 38 built-in PCM, compressed and debug nodes.
+An isolated trial loaded Ubuntu's ALSA SPA module and passed a simultaneous
+speaker-playback and internal-mic capture test. The permanent launcher
+initially rejected the marker under the mode-1777 runtime directory and
+the deployment restored the previous audio stack. Moving the receipt to a
+root-managed systemd state directory allowed the stock module to run while
+preserving the strict path check and same-boot validation.
+
+The permanent stock audio setup passed the same duplex test both immediately
+and after a warm reboot. It detected both speaker tones in internal mic
+capture, with zero steady-state clipping, hardware error growth, xruns or new
+kernel fault signatures in the test. No recording was retained. The brief
+cold capture transient remained, with 217 saturated samples between 18.75 and
+26.92 ms after capture began on the post-reboot test. Subjective audibility
+and voice quality were not measured.
+
+The current GNOME X11 session passed GDM touch and OSK/PAM login after each
+boot. Temporary monitor rotations exercised 0, 90, 270, 180 and 0 degrees in
+Mutter and synthetic taps through the touchscreen evdev device reached the
+expected X11 targets. An RTC-alarmed s2idle trial recorded 23.46 seconds
+between kernel PM entry and exit, kept the same shell, KMS and boot, and
+recovered USB and Wi-Fi. The GNOME lock screen accepted the touchscreen OSK
+password and resumed the same session with zero new kernel fault signatures.
+
+Both Panfrost modes reached the DECON DSI and PRIME capability checks on
+kernel58 and returned status 3 because the kernel publishes no accessible
+Panfrost render node. These checks do not qualify Panfrost panel output or
+stock GNOME Wayland login, rotation or resume.

@@ -413,8 +413,10 @@ launcher continues to protect boots without the new kernel policy.
 
 The optional `g955n-native-alsa.service` records the active boot ID only
 after the board's device tree and the kernel startup message both confirm
-the scope. The launcher selects Ubuntu's SPA directory with that
-root-owned receipt. Standard UCM and WirePlumber policy hashes are still
-checked. Without the receipt, the existing private-plugin checks apply.
+the scope. The launcher selects Ubuntu's SPA directory with a root-owned
+receipt under `/var/lib/g955n-native-alsa` that matches the current boot ID.
+An old receipt cannot authorize a later boot. Standard UCM and WirePlumber
+policy hashes are still checked. Without a valid receipt, the existing
+private-plugin checks apply.
 Install and enable this unit only after the Ubuntu stock playback and
 capture trial has passed on the target kernel.
