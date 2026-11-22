@@ -1826,3 +1826,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   device. Their consumers now retain the existing IRQ paths without an
   invalid proxy link to the SoC parent.
 - Recorded the PMU, ALIVE, VTS and GPIO keys binding checks in the probe.
+
+## 2026-11-23 — Linux 6.18 Exynos8895 embedded UFS
+
+- Added the SM-G955N UFS host, embedded M-PHY and the board's storage
+  supply. The new host uses Samsung's firmware interfaces for the secure
+  storage controller and starts with a conservative PWM link mode.
+- Added a read-only USERDATA probe and an opt-in handoff to the installed
+  Ubuntu root. The warm trace reader recognizes each storage checkpoint.

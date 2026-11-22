@@ -33,8 +33,12 @@ def stages(data):
             results.append(name)
     if re.search(rb"\bLinux version 6\.18(?:\b|[-.])", data):
         results.append("Linux 6.18 console")
-    if b"SM-G955N INITRAMFS OK" in data:
+    if b"SM-G955N INITRAMFS OK" in data or b"SM-G955N UFS INIT" in data:
         results.append("Linux 6.18 initramfs")
+    if b"g955n-ufs: UFS USERDATA found" in data:
+        results.append("embedded UFS USERDATA detected")
+    if b"SM-G955N UFS UBUNTU ROOT OK (read-only)" in data:
+        results.append("installed Ubuntu root verified read-only")
     return results
 
 

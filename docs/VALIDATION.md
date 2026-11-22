@@ -2847,3 +2847,28 @@ DTB. No rail was switched during this test.
   internal storage requires SM-G955N UFS host and PHY support in Linux
   6.18. Panfrost-to-DECON scanout, stock GNOME Wayland touch login,
   rotation, suspend/resume, audio and Wi-Fi await normal Ubuntu boot.
+
+## SM-G955N Linux 6.18 UFS trials — 2026-11-23
+
+- The first image reached the UFS host and raised an SError during the
+  legacy SMU register sequence. The program counter resolves to the
+  write of the first protector range register in `exynos_ufs_config_smu`.
+- The firmware-managed SMU path progressed to the initramfs on the second
+  trial. UIC link startup timed out and no USERDATA block partition
+  appeared. The working #58 kernel reports the UFS interrupt as edge
+  triggered (GIC interrupt 366, SPI 334). The revised DT uses rising edge.
+- The revised host skips the pre-v4 PWM divider read, follows the vendor
+  clock-control setup, and propagates PHY preparation failures before
+  issuing a UIC link command.
+- The edge-triggered trial still timed out in UIC link startup. The next
+  trial ran the vendor PCS table before the PMA reset sequence and
+  reported two RX and two TX lanes. UIC command 0x16 still timed out.
+  The intact status sample was IS=0x0, IE=0x470, HCS=0x8 and result=0x0.
+  The initramfs recorded USERDATA unavailable.
+- The last trial requested a reboot to recovery. The kernel reported
+  that the restart failed. The candidate syscon software-reset handler
+  uses the Samsung PMU SWRESET offset and awaits a device test.
+- Recovered logs in TWRP and restored the hashed #58 BOOT backup.
+- The device probe mounts USERDATA with ext4 `ro,noload`. Normal Ubuntu
+  boot, Panfrost/DECON scanout, GNOME Wayland login, rotation, suspend,
+  audio and Wi-Fi require separate runtime qualification on Linux 6.18.

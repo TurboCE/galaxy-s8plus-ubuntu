@@ -23,8 +23,7 @@ Its configuration contains no internal-storage or USB peripheral driver.
 The probe mounts sysfs only. Rollback uses the preserved TWRP and a
 verified copy of the previous BOOT partition.
 
-The probe establishes early Linux and initramfs execution. Booting the
-installed Ubuntu root requires an Exynos8895 UFS host and PHY port.
+The probe establishes early Linux and initramfs execution.
 Panfrost still needs the Exynos8895 G3D domain, clock and supply. The
 panel path also needs native DECON, DPP, DSI and display IOMMU support.
 The touch, audio and WLAN paths must be validated separately
@@ -39,6 +38,30 @@ Apply patch 0006 to Linux for the pinctrl and firmware device-link fixes.
 The initramfs records whether the PMU, ALIVE and VTS pin controllers,
 and GPIO keys bind. The GPIO keys binding checks registration. Key events
 and wake from suspend require separate tests.
+
+## Embedded UFS trial
+
+Apply patch 0007 to Linux. Append `config/mainline618-ufs.fragment` to
+the bring-up fragment for this build. Pack the static ARM64 BusyBox at
+`/bin/busybox` and `scripts/boot/mainline618-ufs-init.sh` at `/init`.
+Include `/dev`, `/proc`, `/sys`, `/run`, and `/newroot` in the archive.
+The diagnostic uses the embedded controller's own GPT labels to
+identify USERDATA. It mounts USERDATA with ext4 `ro,noload` and checks the
+installed Ubuntu hostname and init program. The success marker is
+`SM-G955N UFS UBUNTU ROOT OK (read-only)`.
+
+The first port constrains the link to PWM gear 1. Use the diagnostic
+mode first and retain the matching working BOOT backup. An explicit
+`g955n.ufs_boot=1` boot argument lets the initramfs hand off to the
+verified Ubuntu systemd after mounting EFS read-only. That stage also
+requires a kernel configuration suitable for the installed userspace.
+
+To test an unattended diagnostic return, also pack the ARM64
+`scripts/boot/reboot-recovery.c` helper at `/sbin/reboot-recovery` and
+add `g955n.ufs_return=1` to the diagnostic boot arguments. The boot
+probe requests recovery when it finishes. The board's syscon restart
+sequence uses the Samsung PMU scratch and software-reset registers.
+This restart path awaits a device test.
 
 ## Reading the warm boot trace
 
