@@ -3,11 +3,13 @@
 import ctypes
 from contextlib import contextmanager
 import importlib.util
+import json
 from pathlib import Path
 import struct
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 import zlib
 
@@ -44,6 +46,52 @@ class TrialTests(unittest.TestCase):
         t=Transport()
         with self.assertRaisesRegex(OSError,'reset failed'):m.shutdown_trial(t,broken_log)
         self.assertEqual(t.calls,[0x21,0x20])
+
+    def test_close_failure_still_closes_other_endpoints_and_releases_wake_lock(self):
+        actions = []
+        progress = []
+
+        def close(fd):
+            actions.append(('close', fd))
+            if fd == 23:
+                raise OSError('RFS close failed')
+
+        def output(line, *, flush):
+            record = json.loads(line)
+            if 'step' in record:
+                progress.append(record['step'])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            inventory = tmp / 'inventory.json'
+            inventory.write_text('{}')
+
+            def device_path(name):
+                if name.startswith('/sys/power/'):
+                    return SimpleNamespace(write_text=lambda key: actions.append((name, key)))
+                return tmp / 'trial.lock'
+
+            transport = SimpleNamespace(powered=True, command=lambda command: actions.append(('ioctl', command)))
+            args = SimpleNamespace(private_inventory=inventory, boot_trial=True, observe_only=False, query_status=False)
+            with (patch.object(m, 'Path', side_effect=device_path),
+                  patch.object(m, 'NativeTransport', return_value=transport),
+                  patch.object(m, 'preflight', return_value=[]),
+                  patch.object(m, 'load_and_handshake'),
+                  patch.object(m, 'modem_state', return_value='ONLINE'),
+                  patch.object(m.signal, 'signal'), patch.object(m.fcntl, 'flock'),
+                  patch.object(m.os, 'umask'), patch.object(m.os, 'open', side_effect=[21, 22, 23]),
+                  patch.object(m.os, 'close', side_effect=close), patch.object(m.time, 'sleep'),
+                  patch('builtins.print', side_effect=output)):
+                with self.assertRaisesRegex(OSError, 'RFS close failed'):
+                    m.validated_trial(args)
+
+        self.assertEqual(actions, [
+            ('/sys/power/wake_lock', 'g955n-cp-boot-trial'), ('ioctl', 0x21), ('ioctl', 0x20),
+            ('close', 23), ('close', 22), ('close', 21), ('/sys/power/wake_unlock', 'g955n-cp-boot-trial'),
+        ])
+        self.assertIn('cleanup-close-rfs-start', progress)
+        self.assertNotIn('cleanup-close-rfs-completed', progress)
+        self.assertEqual(progress[-1], 'cleanup-wake-unlock-completed')
 
     def test_boot_inhibits_before_preflight_not_only_before_ioctl(self):
         order=[]

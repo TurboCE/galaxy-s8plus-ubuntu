@@ -2457,3 +2457,11 @@ shows that the CP reset IOCTL can panic when the PMU reset does not reach
 its expected state. The recovered record does not show that timeout.
 ModemManager still exposes no usable modem, and SIM registration and mobile
 data remain unverified.
+
+
+The bounded CP trial now records start and completion for reset, power-off,
+each endpoint close and wake-lock release. If an endpoint close raises,
+the remaining closes and wake-lock release are still attempted. The host
+regression test injects an RFS close failure and verifies the remaining
+cleanup order and incomplete marker. This is a diagnostic improvement.
+The modified trial has not been run on the handset.

@@ -13,7 +13,7 @@ boots the CP once, observes its read-only state, then powers it off. This is
 not a persistent RIL/RFS backend or evidence of LTE service.
 """
 import argparse
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import ctypes
 from dataclasses import dataclass
 import fcntl
@@ -210,22 +210,25 @@ def modem_state():
     return nodes[0].read_text().strip()
 
 
-def shutdown_trial(transport, progress):
-    def event(step):
+def cleanup_step(progress, step, action, *args):
+    def event(suffix):
         # Losing a diagnostic output stream must not prevent hardware cleanup.
         try:
-            progress(step)
+            progress(f'cleanup-{step}-{suffix}')
         except Exception:
             pass
-    if transport and transport.powered:
+
+    event('start')
+    action(*args)
+    event('completed')
+
+
+def shutdown_trial(transport, progress):
+    if transport.powered:
         try:
-            event('cleanup-reset-start')
-            transport.command(0x21)
-            event('cleanup-reset-completed')
+            cleanup_step(progress, 'reset', transport.command, 0x21)
         finally:
-            event('cleanup-power-off-start')
-            transport.command(0x20)
-            event('cleanup-power-off-completed')
+            cleanup_step(progress, 'power-off', transport.command, 0x20)
 
 
 @contextmanager
@@ -337,33 +340,29 @@ def validated_trial(args):
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     fds = []
-    transport = None
     os.umask(0o077)
-    with Path('/run/g955n-cp-boot.lock').open('a') as lock:
+    with Path('/run/g955n-cp-boot.lock').open('a') as lock, ExitStack() as cleanup:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            Path('/sys/power/wake_lock').write_text('g955n-cp-boot-trial')
-            for name in ('umts_boot0', 'umts_ipc0', 'umts_rfs0'):
-                fd = os.open('/dev/' + name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
-                fds.append(fd)
-            transport = NativeTransport(fds[0])
-            load_and_handshake(transport, stages, progress)
-            print(json.dumps({'cp_after_handshake': modem_state(), 'LTE_qualified': False}), flush=True)
-            if args.query_status or args.observe_only:
-                from sipc_status import observe
-                progress('status-observation-start')
-                status = observe(fds[1], fds[2], query=args.query_status, progress=progress)
-                print(json.dumps({'sipc_status': status}), flush=True)
-            else:
-                time.sleep(5)
-            print(json.dumps({'cp_after_observation': modem_state()}), flush=True)
-        finally:
-            try:
-                shutdown_trial(transport, progress)
-            finally:
-                for fd in reversed(fds):
-                    os.close(fd)
-                Path('/sys/power/wake_unlock').write_text('g955n-cp-boot-trial')
+        wake_lock = 'g955n-cp-boot-trial'
+        Path('/sys/power/wake_lock').write_text(wake_lock)
+        cleanup.callback(cleanup_step, progress, 'wake-unlock',
+                         Path('/sys/power/wake_unlock').write_text, wake_lock)
+        for kind, name in (('boot', 'umts_boot0'), ('fmt', 'umts_ipc0'), ('rfs', 'umts_rfs0')):
+            fd = os.open('/dev/' + name, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW)
+            fds.append(fd)
+            cleanup.callback(cleanup_step, progress, 'close-' + kind, os.close, fd)
+        transport = NativeTransport(fds[0])
+        cleanup.callback(shutdown_trial, transport, progress)
+        load_and_handshake(transport, stages, progress)
+        print(json.dumps({'cp_after_handshake': modem_state(), 'LTE_qualified': False}), flush=True)
+        if args.query_status or args.observe_only:
+            from sipc_status import observe
+            progress('status-observation-start')
+            status = observe(fds[1], fds[2], query=args.query_status, progress=progress)
+            print(json.dumps({'sipc_status': status}), flush=True)
+        else:
+            time.sleep(5)
+        print(json.dumps({'cp_after_observation': modem_state()}), flush=True)
 
 
 if __name__ == '__main__':
