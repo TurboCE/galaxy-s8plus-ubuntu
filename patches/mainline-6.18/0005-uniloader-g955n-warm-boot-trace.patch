@@ -1,0 +1,148 @@
+Subject: uniLoader: record SM-G955N milestones in the recovery pmsg ring
+
+--- a/arch/aarch64/reloc.S
++++ b/arch/aarch64/reloc.S
+@@ -26,6 +26,37 @@
+ 	.quad _reloc_size
+ 
+ ENTRY_ALIAS( _reloc_entry)
++#ifdef CONFIG_SAMSUNG_DREAM2LTEKS
++	/* Only use physical addresses on an MMU-off handoff. */
++	mrs	x9, CurrentEL
++	cmp	x9, #8
++	mrs	x10, sctlr_el1
++	b.ne	.Lg955n_loader_mmu
++	mrs	x10, sctlr_el2
++.Lg955n_loader_mmu:
++	tbnz	x10, #0, .Lg955n_loader_trace_done
++	/* The recovery pmsg buffer is the second 16 KiB of log_pstore. */
++	movz	x9, #0x4000
++	movk	x9, #0x9200, lsl #16
++	str	wzr, [x9]
++	ldr	w10, =0x35353947
++	ldr	w11, =0xa31364e
++	str	w10, [x9, #12]
++	str	w11, [x9, #16]
++	ldr	w10, =0x44414f4c
++	ldr	w11, =0xa315245
++	str	w10, [x9, #20]
++	str	w11, [x9, #24]
++	mov	w10, #16
++	stp	w10, w10, [x9, #4]
++	ldr	w10, =0x43474244
++	str	w10, [x9]
++	dc	cvac, x9
++	add	x10, x9, #24
++	dc	cvac, x10
++	dsb	sy
++.Lg955n_loader_trace_done:
++#endif
+ 	adr	x4, _start
+ 	ldr	x5, _rel_stack_base
+ 	cmp	x4, x5
+--- a/main/main.c
++++ b/main/main.c
+@@ -8,6 +8,7 @@
+ #include <lib/console.h>
+ #include <main/boot.h>
+ #include <main/main.h>
++#include <main/g955n-boot-trace.h>
+ #include <lib/debug.h>
+ 
+ extern struct board_data board_ops;
+@@ -27,7 +28,10 @@
+ 
+ void main(void* dt, void* kernel, void* ramdisk)
+ {
++	g955n_boot_trace("LOADER2\n");
+ 	early_console_init();
+ 	INITCALL(board_ops.ops.early_init);
++	g955n_boot_trace("SOC-OK!\n");
+ 
++	g955n_boot_trace("FB-NEXT\n");
+ 	driver_probe_all(board_ops.devices, board_ops.num_devices);
+--- a/main/boot-fdt.c
++++ b/main/boot-fdt.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <drivers/ramdisk-handler.h>
++#include <main/g955n-boot-trace.h>
+ #include <lib/debug.h>
+ 
+ #if CONFIG_FDT_BUF_ADDR
+@@ -19,6 +20,8 @@
+ 	ret = ramdisk_handler_patch_dtb(*dt, fdt_buf, CONFIG_FDT_BUF_SIZE);
+ 	if (ret != 0)
+ 		printk(KERN_ERR, "failed to patch dtb\n");
+-	else
++	else {
+ 		*dt = fdt_buf;
++		g955n_boot_trace("FDT-OK!\n");
++	}
+ }
+--- a/arch/aarch64/load-kernel.c
++++ b/arch/aarch64/load-kernel.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <main/boot.h>
++#include <main/g955n-boot-trace.h>
+ #include <string.h>
+ 
+ void arch_load_kernel(void* kernel, void* dt, void* ramdisk)
+@@ -13,5 +14,6 @@
+ #ifndef CONFIG_RAMDISK_NO_COPY
+ 	__optimized_memcpy((void*)CONFIG_RAMDISK_ENTRY, ramdisk, (unsigned long) &ramdisk_size);
+ #endif
++	g955n_boot_trace("HANDOFF\n");
+ 	load_kernel_and_jump(dt, 0, 0, 0, (void*)CONFIG_PAYLOAD_ENTRY);
+ }
+--- /dev/null
++++ b/include/main/g955n-boot-trace.h
+@@ -0,0 +1,45 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef G955N_BOOT_TRACE_H
++#define G955N_BOOT_TRACE_H
++
++#ifdef CONFIG_SAMSUNG_DREAM2LTEKS
++#include <stdint.h>
++
++static inline void g955n_boot_trace(const char *stage)
++{
++	volatile uint32_t *header = (volatile uint32_t *)0x92004000UL;
++	volatile char *data = (volatile char *)(header + 3);
++	uint64_t el, control;
++	unsigned int size;
++
++	asm volatile("mrs %0, CurrentEL" : "=r"(el));
++	if (el == 8)
++		asm volatile("mrs %0, sctlr_el2" : "=r"(control));
++	else
++		asm volatile("mrs %0, sctlr_el1" : "=r"(control));
++	if (control & 1)
++		return;
++
++	size = header[2];
++	if (header[0] != 0x43474244 || size < 16 || size > 56 ||
++	    header[1] != size)
++		return;
++	for (unsigned int i = 0; i < 8; i++)
++		if (data[i] != "G955N61\n"[i])
++			return;
++
++	for (unsigned int i = 0; i < 8; i++)
++		data[size + i] = stage[i];
++
++	/* Commit the payload before publishing its length to recovery. */
++	asm volatile("dc cvac, %0; dc cvac, %1; dsb sy"
++		     :: "r"(data + size), "r"(data + size + 7) : "memory");
++	header[1] = size + 8;
++	header[2] = size + 8;
++	asm volatile("dc cvac, %0; dsb sy" :: "r"(header) : "memory");
++}
++#else
++static inline void g955n_boot_trace(const char *stage) { }
++#endif
++
++#endif

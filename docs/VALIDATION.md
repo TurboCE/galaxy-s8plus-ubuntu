@@ -2810,3 +2810,18 @@ SM-G955N DTB compiled with the I2C, regulator and S2DOS03 options
 enabled. Every specified board voltage maps exactly to a supported
 selector. The PMIC and its parent I2C controller are disabled in this
 DTB. No rail was switched during this test.
+
+## SM-G955N Linux 6.18 initramfs checkpoint — 2026-11-23
+
+- Recovery retained a calibration marker across a warm reboot. The first
+  instrumented BOOT trial retained both uniLoader relocation markers.
+- With the board init callback corrected, the panel showed
+  `SM-G955N INITRAMFS OK - Linux 6.18.0`. TWRP recovered both the kernel
+  version and the initramfs marker after a warm reset.
+- The probe used a firmware framebuffer via simpledrm. Native Panfrost
+  rendering, DECON DMA-BUF scanout, normal Ubuntu root boot, stock GNOME
+  Wayland, touch, rotation, suspend, audio and Wi-Fi need validation on 6.18.
+- The tested kernel logged PMU error -524 and pinctrl warnings. The next
+  build enables the missing syscon implementation and awaits a device test.
+- Restored the backed-up #58 BOOT partition and verified its full readback
+  and the protected partition hashes through TWRP.

@@ -1806,3 +1806,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Record the second uniLoader boot observation and the recovery logs.
 - Add an ARM64 S2DOS03 regulator driver and the SM-G955N panel and touch
   rail definitions. Keep the PMIC node disabled in the early boot DT.
+
+## 2026-11-23 — first Linux 6.18 initramfs boot
+
+- Added a warm-reset RAM trace that TWRP can read when the display remains on
+  the Samsung logo. The first trace stopped after uniLoader relocation.
+- Fixed the board early-init callback to return an explicit success result
+  after initializing the SoC. The next SM-G955N trial reached Linux 6.18.0
+  initramfs, confirmed on the panel and in the RAM log recovered from TWRP.
+- Enabled syscon for the Exynos PMU after observing probe error -524. The
+  rebuilt kernel links the syscon implementation. A device test is pending.

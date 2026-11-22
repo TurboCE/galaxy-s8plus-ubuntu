@@ -33,3 +33,24 @@ Patch 0003 adds the S2DOS03 regulator at I2C address 0x60 and maps its
 Samsung panel and touch supplies. It builds with `CONFIG_I2C`,
 `CONFIG_REGULATOR` and `CONFIG_REGULATOR_S2DOS03`. Both the PMIC and the
 parent I2C controller remain disabled for the initramfs-only probe.
+
+## Reading the warm boot trace
+
+Apply patch 0004 to Linux and patch 0005 to uniLoader for the trace build.
+The fragment enables the board-specific ARM64 entry marker and the pstore
+console. The initramfs archive also needs a `/dev/kmsg` character device
+(1, 11) so the probe can record its result in the kernel log.
+
+The Samsung recovery kernel reserves 32 KiB at `0x92000000` with no ECC
+and exposes the second 16 KiB as pmsg. The loader writes fixed stage
+markers to that ring and the 6.18 kernel uses it for its persistent
+console. The first ARM64 marker runs only when the MMU is off. Once
+the persistent console attaches, kernel messages can replace the early
+markers. The reader therefore also recognizes the kernel and initramfs
+messages.
+
+After a warm return to TWRP, run `scripts/read_mainline_boot_trace.py`
+with the exact device serial. The reader reports matched stages and
+can save the raw pmsg record to a private file for diagnosis. A trace
+requires the RAM contents to survive the reset. A missing record
+does not establish that the bootloader rejected the image.

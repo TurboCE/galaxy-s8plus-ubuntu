@@ -21,14 +21,23 @@ static int check_model(void)
 int main(void)
 {
 	struct utsname version;
+	char checkpoint[160];
+	FILE *kmsg;
 
 	if (mount("sysfs", "/sys", "sysfs", MS_NOSUID | MS_NODEV | MS_NOEXEC, NULL) ||
 	    !check_model() || uname(&version) || strncmp(version.release, "6.18", 4)) {
-		puts("SM-G955N mainline boot probe could not verify the kernel and board.");
+		snprintf(checkpoint, sizeof(checkpoint),
+			 "SM-G955N INITRAMFS CHECK FAILED");
 	} else {
-		printf("SM-G955N INITRAMFS OK - Linux %s\n", version.release);
-		puts("The initramfs is running. No device partitions were mounted.");
+		snprintf(checkpoint, sizeof(checkpoint), "SM-G955N INITRAMFS OK - Linux %s",
+			 version.release);
 	}
+	kmsg = fopen("/dev/kmsg", "w");
+	if (kmsg) {
+		fprintf(kmsg, "<6>%s\n", checkpoint);
+		fclose(kmsg);
+	}
+	puts(checkpoint);
 	fflush(stdout);
 
 	/* Leave the result on the console until the device is restarted. */
