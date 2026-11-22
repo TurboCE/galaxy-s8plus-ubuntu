@@ -1661,3 +1661,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   package interface. Removed the local GNOME app-list, keyboard and GDM
   resource overrides. Verified baseline failures, six successful repeated
   taps, other app launches and two normal GDM touch logins on the handset.
+
+## 2026-11-22 — Ubuntu proximity sensor
+
+- Added the actual Samsung SSP proximity record to Ubuntu SensorProxy using
+  its standard claim and proximity properties. The backend uses the same
+  guarded FIFO lease and restores only its own sensor settings.
+- Installed the ARM64 daemon and matching rules/recovery helper on kernel55.
+  The owner covered and uncovered the sensor during a live recording. The
+  D-Bus client observed four near/far pairs and release restored the original
+  FIFO and polling attributes.

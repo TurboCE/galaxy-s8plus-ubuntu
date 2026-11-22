@@ -158,9 +158,13 @@ static gboolean sample(gpointer data){
    AccelReadings readings={.accel_x=vector.x,.accel_y=vector.y,.accel_z=vector.z};
    set_accel_scale(&readings.scale,9.81/4096.0);
    if(mapped)device->callback_func(device,&readings,device->user_data);
-  }else{
+  }else if(device->drv->type==DRIVER_TYPE_LIGHT){
    // CONFIG_SENSORS_SSP_LIGHT_REPORT_LUX: real MCU lux is the first u32.
    LightReadings readings={.level=little_u32(p),.uses_lux=TRUE};
+   device->callback_func(device,&readings,device->user_data);
+  }else if(p[0]<=1){
+   // The vendor report is a detect byte followed by a kernel timestamp.
+   ProximityReadings readings={.is_near=p[0]?PROXIMITY_NEAR_TRUE:PROXIMITY_NEAR_FALSE};
    device->callback_func(device,&readings,device->user_data);
   }
   g_byte_array_remove_range(s->pending,0,complete*s->record_size);
@@ -169,15 +173,25 @@ static gboolean sample(gpointer data){
 }
 static gboolean discover_accel(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-accel","Samsung SSP accel");}
 static gboolean discover_light(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-als","Samsung SSP lux");}
+static gboolean discover_proximity(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-proximity","Samsung SSP proximity");}
 static SensorDevice *open_device(GUdevDevice *d){
- const char *name=g_udev_device_get_sysfs_attr(d,"name");gboolean accel=g_strcmp0(name,"accelerometer_sensor")==0;
- if(!ready()||(!accel&&g_strcmp0(name,"light_sensor")))return NULL;
+ static const struct {const char *name,*format;guint bit,size;} sensors[]={
+  {"accelerometer_sensor","le:s112/112>>0",0,14},
+  {"light_sensor","le:s208/208>>0",9,26},
+  {"proximity_sensor","le:s72/72>>0",7,9},
+ };
+ const char *name=g_udev_device_get_sysfs_attr(d,"name");
+ guint i;
+ if(!ready())return NULL;
+ for(i=0;i<G_N_ELEMENTS(sensors);i++)if(!g_strcmp0(name,sensors[i].name))break;
+ if(i==G_N_ELEMENTS(sensors))return NULL;
  g_autofree char *format_path=g_build_filename(g_udev_device_get_sysfs_path(d),"scan_elements/in_timestamp_type",NULL);
  g_autofree char *format=read_text(format_path);
- if(g_strcmp0(format,accel?"le:s112/112>>0":"le:s208/208>>0"))return NULL;
+ if(g_strcmp0(format,sensors[i].format))return NULL;
+ gboolean accel=sensors[i].bit==0;
  AccelVec3 *matrix=accel?setup_mount_matrix(d):NULL;
  if(accel&&!matrix)return NULL;
- SensorDevice *device=g_new0(SensorDevice,1);SSP *s=g_new0(SSP,1);device->priv=s;device->name=g_strdup(name);s->dev=g_object_ref(d);s->path=g_strdup(g_udev_device_get_sysfs_path(d));s->fd=-1;s->bit=accel?0:9;s->record_size=accel?14:26;s->pending=g_byte_array_new();
+ SensorDevice *device=g_new0(SensorDevice,1);SSP *s=g_new0(SSP,1);device->priv=s;device->name=g_strdup(name);s->dev=g_object_ref(d);s->path=g_strdup(g_udev_device_get_sysfs_path(d));s->fd=-1;s->bit=sensors[i].bit;s->record_size=sensors[i].size;s->pending=g_byte_array_new();
  s->matrix=matrix;
  return device;
 }
@@ -193,3 +207,4 @@ static void polling(SensorDevice *device,gboolean state){
 static void close_device(SensorDevice *device){SSP *s=device->priv;g_clear_object(&s->dev);g_free(s->path);g_clear_pointer(&s->matrix,g_free);g_byte_array_unref(s->pending);g_free(s);g_free(device);}
 SensorDriver samsung_ssp_accel={.driver_name="samsung-ssp-accel",.type=DRIVER_TYPE_ACCEL,.discover=discover_accel,.open=open_device,.set_polling=polling,.close=close_device};
 SensorDriver samsung_ssp_light={.driver_name="samsung-ssp-als",.type=DRIVER_TYPE_LIGHT,.discover=discover_light,.open=open_device,.set_polling=polling,.close=close_device};
+SensorDriver samsung_ssp_proximity={.driver_name="samsung-ssp-proximity",.type=DRIVER_TYPE_PROXIMITY,.discover=discover_proximity,.open=open_device,.set_polling=polling,.close=close_device};

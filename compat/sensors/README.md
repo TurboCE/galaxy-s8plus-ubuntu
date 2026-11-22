@@ -2,8 +2,8 @@
 
 This directory contains the native Samsung SSP backend for Ubuntu's
 iio-sensor-proxy 3.5 API. Genuine accelerometer/light claims, response, measured
-mount matrix and process-death cleanup passed on32; the service remains active
-on55. It refuses empty settings without mutation. Display rotation, physical
+mount matrix and process-death cleanup passed on32. On55 the service also
+reports physical near/far transitions through the standard Proximity interface. It refuses empty settings without mutation. Display rotation, physical
 heading/step acceptance and long-term power behavior remain separate open work.
 See VALIDATION.md for current results; the early bring-up failures below are
 historical checkpoints.
@@ -11,14 +11,15 @@ historical checkpoints.
 The existing stock sensor proxy incorrectly identifies `hrm_sensor` input axes
 as an accelerometer. The actual Samsung SSP IIO devices contain packed records
 rather than the standard separate IIO axis attributes. The prototype udev rules
-remove that HRM classification and identify the actual accelerometer/light nodes.
+remove that HRM classification and identify the actual accelerometer, light and proximity nodes.
 Do not install them without the matching tested backend and recovery plan.
 
 Public protocol: pinned Samsung kernel commit
 54feaea9870dd0e90ceced5623e0544d965b400b,
 `drivers/sensorhub/brcm/{sensor_list.h,ssp.h,ssp_iio.c}` and the LSM6DSL factory
 range of 4096 counts/g. Accelerometer records are14bytes, light records26bytes;
-MCU-reported lux is the first u32 with LIGHT_REPORT_LUX enabled. No calibration
+MCU-reported lux is the first u32 with LIGHT_REPORT_LUX enabled. The proximity
+record is 9 bytes: a detect byte (0 or 1) and the kernel timestamp. No calibration
 constant or service-ready value is invented. Firmware revision must genuinely
 match before open/claim. The prototype retains upstream DBus/Polkit claims and
 uses an exclusive controller lock; only its own enable bits are changed, and

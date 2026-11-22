@@ -14,7 +14,7 @@ import stat
 
 DIRECTORY = Path('/run/g955n-ssp-leases')
 ATTRIBUTES = ('scan_elements/in_timestamp_en', 'buffer/length', 'buffer/enable', 'poll_delay')
-NAMES = {0: 'accelerometer_sensor', 9: 'light_sensor'}
+NAMES = {0: 'accelerometer_sensor', 7: 'proximity_sensor', 9: 'light_sensor'}
 
 
 def trusted(path, directory=False):
@@ -37,7 +37,7 @@ def read_record(path, boot, devices):
     data = record['sensor']
     if set(data) != {'boot', 'path', 'bit', 'saved0', 'saved1', 'saved2', 'saved3'}:
         raise RuntimeError('Unexpected journal fields')
-    if data['boot'] != boot or data['bit'] not in ('0', '9'):
+    if data['boot'] != boot or data['bit'] not in {str(bit) for bit in NAMES}:
         raise RuntimeError('Journal belongs to another boot or sensor')
     bit = int(data['bit'])
     if path.name != f'{bit}.ini':
@@ -82,7 +82,7 @@ def main():
         return
     trusted(DIRECTORY, directory=True)
     records = list(DIRECTORY.iterdir())
-    if any(p.name not in ('0.ini', '9.ini') for p in records):
+    if any(p.name not in {f'{bit}.ini' for bit in NAMES} for p in records):
         raise RuntimeError('Unexpected file in the native SSP journal directory')
     fd = os.open('/run/g955n-ssp.lock', os.O_RDWR | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
     try:

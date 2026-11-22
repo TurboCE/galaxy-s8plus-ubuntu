@@ -2282,3 +2282,24 @@ not performed for this change.
 The private receipts are under artifacts/x11-touch/ and include the stock
 combined input trace, full cancellation stack, final-apps, stock-shell-window
 and stock-gestures records.
+
+## 2026-11-22 — Native GNOME hardware integration on kernel55
+
+- The standard SensorProxy proximity interface advertises availability. A
+  live D-Bus claim started the proximity FIFO and reported four near/far pairs
+  while the owner covered and uncovered the handset sensor. The client released
+  the claim and confirmed the original scan, length, enable and polling
+  attributes. No synthetic sensor events were used.
+- SensorProxy exposes the accelerometer orientation and measured ambient light.
+  GNOME's automatic-brightness setting was enabled. The normal X11 session's
+  fixed `default` output exposes no runtime rotation, and Mutter reports
+  `PanelOrientationManaged=false`. GNOME's rotation lock still requires an
+  actual rotatable built-in output with correctly mapped touch coordinates.
+- GeoClue is installed and Ubuntu gpsd has no configured input. The vendor
+  location hub already owns `/dev/ttyBCM` and the Broadcom sensor/control
+  devices. The examined live vendor configuration provides no exposed NMEA
+  endpoint. GNSS location acceptance requires a vendor location producer and
+  a fresh fix delivered to GeoClue.
+- ModemManager is running and lists no modems. The exposed Samsung SIPC
+  channels do not supply a supported control interface to ModemManager. Mobile
+  Network settings and SIM registration are pending a functional backend.
