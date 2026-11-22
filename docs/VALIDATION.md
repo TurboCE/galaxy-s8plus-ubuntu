@@ -2224,3 +2224,61 @@ restore-session-preferences.private.log and final-integrity.private.log.
 The first historical System Monitor failure had no equivalent captured click
 trace; these results qualify the reproduced grid-cancellation defect rather
 than retroactively proving every earlier startup failure had the same cause.
+
+
+### X11 touch replay with stock GNOME Shell and GDM (2026-11-22)
+
+The live SM-G955N was running Xorg 21.1.12-1ubuntu1.9, libinput
+1.25.0-1ubuntu3.7 and Mutter 46.2-1ubuntu0.24.04.18. The touchscreen reported
+direct XI2 touch. The baseline loaded the original Ubuntu appDisplay resource
+and a passive trace extension. In four replay trials Software & Updates failed
+to activate. The independent evdev and libinput readers recorded both ends of
+the test contacts. The Shell saw emulated button presses from X11 at the proper
+icon coordinates. Logged failures cleared the pressed state before the contact
+ended, with no drag, menu or clicked signal. A bounded debugger capture
+identified the AppIcon call from clutter_stage_update_device under
+meta_cursor_tracker_set_pointer_visible. This places the defect at Mutter's
+Clutter repick, after the original input reached the compositor.
+
+The package already carried the upstream absolute-coordinate repick for
+incoming emulated touch. The cursor visibility change initiates a new pick
+without an input event and loses that decision during the press. This patch
+remembers the emulated button state for automatic repicks while its implicit
+grab is active, clearing it at cleanup. It keeps real bounds checks and event
+delivery. A fixture extracted the original and patched decision from the
+source and checked the lost focus case, ordinary pointer, native touch and
+post-release behavior.
+
+The patched shared library cross-built from the hash-checked Ubuntu source
+archives with the package patches applied. The candidate's initial build-tree
+RPATH was normalized before graphical activation. The final AArch64 ELF agreed
+with the matching Ubuntu binary for SONAME, installed RPATH, NEEDED entries
+and all 1,202 public exports. Its installed SHA256 was
+9ec9d72080a958fda83b22bc57911cd7205ed32e0aefe5aef8be964fdb13e83d. The stock
+library and previous GDM and GNOME resources were backed up. The local
+appDisplay, keyboard and GDM resource overrides were removed and the existing
+GPU startup hashes were verified. The passive diagnostic extension was disabled
+and the prior extension preferences restored.
+
+Using the actual SM-G955N evdev and X11 routes, the stock Ubuntu Shell app grid
+activated Software & Updates in 6/6 repetitions with 120, 300 and 450 ms
+presses. Three included a mouse-to-touch transition. Software & Updates,
+Language Support, Additional Drivers and Settings also activated in a separate
+group. The Software & Updates and Settings windows were confirmed viewable.
+Long hold, drag outside and leaving/re-entering a cancelled tap did not launch
+the app, and the next normal tap activated it. The same kernel55 and Mali/KMS
+output remained active and the kernel taint readback was 0. System Monitor
+retained its 100 ms refresh preference.
+
+Both normal GDM sessions loaded the replacement Clutter library, X11 and
+unmodified GDM resources. Real-device touchscreen event replay selected the
+account, brought up the password prompt and entered the password through the
+on-screen keyboard, completing ordinary PAM and starting the desktop twice.
+The counted repetition opened the password prompt on the first account tap.
+Verification used replay through sec_touchscreen on the physical handset.
+A separate manual finger acceptance run and suspend/resume qualification were
+not performed for this change.
+
+The private receipts are under artifacts/x11-touch/ and include the stock
+combined input trace, full cancellation stack, final-apps, stock-shell-window
+and stock-gestures records.

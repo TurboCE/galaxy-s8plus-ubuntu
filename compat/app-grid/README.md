@@ -1,5 +1,8 @@
 # GNOME 46 app-grid touch hit-area stability
 
+This Shell overlay is retained for historical comparison. The SM-G955N uses
+the [Mutter input fix](../mutter-x11-touch/README.md) with stock Shell resources.
+
 The upstream implementations are GNOME Shell's
 [appDisplay.js](https://gitlab.gnome.org/GNOME/gnome-shell/-/blob/46.0/js/ui/appDisplay.js)
 and [St.Button](https://gitlab.gnome.org/GNOME/gnome-shell/-/blob/46.0/src/st/st-button.c).

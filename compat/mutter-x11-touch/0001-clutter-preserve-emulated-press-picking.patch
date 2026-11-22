@@ -1,0 +1,54 @@
+Description: Keep the X11 touch-replay actor while the cursor hides mid-press
+ The automatic repick triggered by cursor visibility must preserve the
+ absolute-coordinate behaviour of an active pointer-emulated press.
+--- a/clutter/clutter/clutter-stage.c
++++ b/clutter/clutter/clutter-stage.c
+@@ -101,6 +101,7 @@
+   MtkRegion *clear_area;
+
+   unsigned int press_count;
++  gboolean pointer_emulated_press;
+   ClutterActor *implicit_grab_actor;
+   GArray *event_emission_chain;
+ } PointerDeviceEntry;
+@@ -3536,6 +3537,22 @@
+   has_absolute_motion = is_touch ||
+                         (flags & CLUTTER_DEVICE_UPDATE_POINTER_EMULATED);
+
++  /* The X11 touch replay marks the button press as absolute. Cursor
++   * visibility can trigger a second pick with no input event while that
++   * button is held. Keep using the actual coordinates until release so
++   * hiding the cursor cannot clear the active target.
++   */
++  if (!has_absolute_motion && !source_device &&
++      time_ms == CLUTTER_CURRENT_TIME)
++    {
++      ClutterStagePrivate *priv = clutter_stage_get_instance_private (stage);
++      PointerDeviceEntry *entry = g_hash_table_lookup (priv->pointer_devices,
++                                                      device);
++
++      has_absolute_motion = entry && entry->press_count &&
++                            entry->pointer_emulated_press;
++    }
++
+   if (has_absolute_motion ||
+       device != clutter_seat_get_pointer (seat) ||
+       clutter_seat_is_unfocus_inhibited (seat))
+@@ -3585,6 +3602,7 @@
+                         entry->event_emission_chain->len);
+
+   entry->press_count = 0;
++  entry->pointer_emulated_press = FALSE;
+ }
+
+ static void
+@@ -4387,6 +4405,9 @@
+     {
+       g_assert (entry->implicit_grab_actor == NULL);
+       entry->implicit_grab_actor = target_actor;
++      entry->pointer_emulated_press =
++        event_type == CLUTTER_BUTTON_PRESS &&
++        clutter_event_is_pointer_emulated (event);
+       clutter_actor_set_implicitly_grabbed (entry->implicit_grab_actor, TRUE);
+
+       create_event_emission_chain (self, entry->event_emission_chain, seat_grab_actor, target_actor);

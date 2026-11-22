@@ -1,5 +1,9 @@
 # GDM account-tile pointer re-entry repair
 
+This GDM overlay is retained for historical comparison. The
+[Mutter input fix](../mutter-x11-touch/README.md) has passed normal touch
+login with the stock GDM resources on the SM-G955N.
+
 The stock installed GNOME Shell 46 login resource is pinned by SHA256. Build
 `repair.py --source ORIGINAL_LOGIN_RESOURCE --output OUTPUT` on the host, then
 syntax-check the generated module with Node. No GNOME resource or vendor binary

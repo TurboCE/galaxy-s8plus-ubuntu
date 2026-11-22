@@ -1650,3 +1650,14 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   three press durations, plus four app launches and cancellation checks.
   Restored owner extension preferences and disabled diagnostics. Mali/KMS and
   the100ms System Monitor preference were preserved.
+
+
+### Preserve X11 touch presses in Mutter (2026-11-22)
+
+- Traced the lost app-grid click to the cursor-visibility repick in Clutter
+  after Xorg had already delivered a pointer-emulated press. Preserve its
+  absolute coordinates across automatic repicks until the implicit grab ends.
+- Built and installed the matching ARM64 Clutter library with the stock
+  package interface. Removed the local GNOME app-list, keyboard and GDM
+  resource overrides. Verified baseline failures, six successful repeated
+  taps, other app launches and two normal GDM touch logins on the handset.
