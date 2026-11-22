@@ -1790,3 +1790,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add an experimental SM-G955N DTB for the Bifrost driver and expose the
   existing CAL G3D clock rate through the Common Clock Framework in Hz.
   The experimental DTB reuses the vendor G3D power domain and BUCK6 supply.
+
+### Linux 6.18 early boot for SM-G955N
+
+- Add an SM-G955N mainline device tree, uniLoader board profile, and
+  initramfs-only boot probe. Build the probe with ARM64 Panfrost included.

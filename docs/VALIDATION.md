@@ -2730,3 +2730,26 @@ the modern I/O page-table interface, DMA reservations, DRM scheduler, GEM
 shmem helpers and sync objects used by this driver. The platform proposal
 therefore remains build-only. No Panfrost image was installed, and Panfrost
 scanout and stock Wayland touch login, rotation and suspend remain untested.
+
+### Linux 6.18 SM-G955N early boot probe
+
+On the installed kernel58, the live device tree confirmed the low RAM banks
+and the STM touchscreen at I2C address 0x49. WLAN reported carrier and PCI
+ID 14e4:441f. ALSA reported the Exynos8895-Madera card. These observations
+describe the working vendor kernel.
+
+ARM64 Linux 6.18, the SM-G955N DTB, the uniLoader board profile and the
+static initramfs probe built. The DTB has the SM-G955N model and the four
+board keys, with two RAM banks taken from the live device. It describes
+the inherited splash as simple-framebuffer. The Android image passed the
+existing Samsung header, payload and model verification. Its 5,595,152-byte
+size is below the 40 MiB BOOT limit. The loader contains the verified
+kernel, DTB and initramfs. The uniLoader linker reports an RWX segment in
+its bare-metal executable. The boot image has no internal-storage driver
+and the probe mounts sysfs only.
+
+The probe contains built-in Panfrost and simpledrm. The new board DT
+provides neither a Panfrost GPU binding nor a native DECON pipeline.
+A successful simple-framebuffer boot would only verify the early boot
+handoff. GPU-to-DECON scanout, the stock Wayland session, touch login,
+rotation, resume, audio and Wi-Fi remain to be qualified on Linux 6.18.

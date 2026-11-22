@@ -1,0 +1,68 @@
+Subject: uniLoader: add SM-G955N early splash handoff
+
+The board profile uses the shared Exynos8895 CPU and display handoff.
+It has no board-specific PMIC setup.
+
+--- a/board/Kconfig
++++ b/board/Kconfig
+@@ -267,6 +267,10 @@
+ 		depends on EXYNOS_8895
+ 		help
+ 		  Say Y if you want to include support for Samsung Galaxy S8
++
++	config SAMSUNG_DREAM2LTEKS
++		bool "Support for Samsung Galaxy S8+ SM-G955N"
++		depends on EXYNOS_8895
+ 
+ 	config SAMSUNG_G0S
+ 		bool "Support for Samsung Galaxy S22+"
+--- a/board/Makefile
++++ b/board/Makefile
+@@ -36,6 +36,7 @@
+ lib-$(CONFIG_SAMSUNG_BEYOND1LTE) += samsung/board-beyond1lte.o
+ lib-$(CONFIG_SAMSUNG_C1S) += samsung/board-c1s.o
+ lib-$(CONFIG_SAMSUNG_DREAMLTE) += samsung/board-dreamlte.o
++lib-$(CONFIG_SAMSUNG_DREAM2LTEKS) += samsung/board-dream2lteks.o
+ lib-$(CONFIG_SAMSUNG_G0S) += samsung/board-g0s.o
+ lib-$(CONFIG_SAMSUNG_GTA3XL) += samsung/board-gta3xl.o
+ lib-$(CONFIG_SAMSUNG_GTA4XL) += samsung/board-gta4xl.o
+--- /dev/null
++++ b/configs/dream2lteks_defconfig
+@@ -0,0 +1,7 @@
++CONFIG_POSITION_INDEPENDENT=y
++# CONFIG_COMPRESS_GZIP is not set
++CONFIG_EXYNOS_8895=y
++CONFIG_SAMSUNG_DREAM2LTEKS=y
++CONFIG_TEXT_BASE=0x87000000
++CONFIG_PAYLOAD_ENTRY=0x90000000
++CONFIG_RAMDISK_ENTRY=0x84000000
+--- /dev/null
++++ b/board/samsung/board-dream2lteks.c
+@@ -0,0 +1,27 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * SM-G955N early display setup.
++ * Based on the dreamlte splash handoff by Ivaylo Ivanov.
++ */
++#include <board.h>
++#include <util.h>
++#include <drivers/framework.h>
++#include <lib/simplefb.h>
++
++static struct video_info dream2lteks_fb = {
++	.format = FB_FORMAT_ARGB8888,
++	.width = 1440,
++	.height = 2960,
++	.stride = 4,
++	.address = (void *)0xcc000000,
++};
++
++static const struct device dream2lteks_devices[] = {
++	{ "simplefb", &dream2lteks_fb, "fb" },
++};
++
++struct board_data board_ops = {
++	.name = "samsung-dream2lteks",
++	.devices = dream2lteks_devices,
++	.num_devices = ARRAY_SIZE(dream2lteks_devices),
++};
