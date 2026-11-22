@@ -6,6 +6,7 @@
  */
 #include "drivers.h"
 #include "accel-mount-matrix.h"
+#include "ssp-heading.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -162,6 +163,12 @@ static gboolean sample(gpointer data){
    // CONFIG_SENSORS_SSP_LIGHT_REPORT_LUX: real MCU lux is the first u32.
    LightReadings readings={.level=little_u32(p),.uses_lux=TRUE};
    device->callback_func(device,&readings,device->user_data);
+  }else if(device->drv->type==DRIVER_TYPE_COMPASS){
+   const int32_t q[]={(int32_t)little_u32(p),(int32_t)little_u32(p+4),
+                     (int32_t)little_u32(p+8),(int32_t)little_u32(p+12)};
+   CompassReadings readings;
+   if(ssp_heading(q,&readings.heading))
+    device->callback_func(device,&readings,device->user_data);
   }else if(p[0]<=1){
    // The vendor report is a detect byte followed by a kernel timestamp.
    ProximityReadings readings={.is_near=p[0]?PROXIMITY_NEAR_TRUE:PROXIMITY_NEAR_FALSE};
@@ -174,11 +181,13 @@ static gboolean sample(gpointer data){
 static gboolean discover_accel(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-accel","Samsung SSP accel");}
 static gboolean discover_light(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-als","Samsung SSP lux");}
 static gboolean discover_proximity(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-proximity","Samsung SSP proximity");}
+static gboolean discover_compass(GUdevDevice *d){return drv_check_udev_sensor_type(d,"samsung-ssp-compass","Samsung SSP compass");}
 static SensorDevice *open_device(GUdevDevice *d){
  static const struct {const char *name,*format;guint bit,size;} sensors[]={
   {"accelerometer_sensor","le:s112/112>>0",0,14},
   {"light_sensor","le:s208/208>>0",9,26},
   {"proximity_sensor","le:s72/72>>0",7,9},
+  {"rotation_vector_sensor","le:s200/200>>0",17,25},
  };
  const char *name=g_udev_device_get_sysfs_attr(d,"name");
  guint i;
@@ -208,3 +217,4 @@ static void close_device(SensorDevice *device){SSP *s=device->priv;g_clear_objec
 SensorDriver samsung_ssp_accel={.driver_name="samsung-ssp-accel",.type=DRIVER_TYPE_ACCEL,.discover=discover_accel,.open=open_device,.set_polling=polling,.close=close_device};
 SensorDriver samsung_ssp_light={.driver_name="samsung-ssp-als",.type=DRIVER_TYPE_LIGHT,.discover=discover_light,.open=open_device,.set_polling=polling,.close=close_device};
 SensorDriver samsung_ssp_proximity={.driver_name="samsung-ssp-proximity",.type=DRIVER_TYPE_PROXIMITY,.discover=discover_proximity,.open=open_device,.set_polling=polling,.close=close_device};
+SensorDriver samsung_ssp_compass={.driver_name="samsung-ssp-compass",.type=DRIVER_TYPE_COMPASS,.discover=discover_compass,.open=open_device,.set_polling=polling,.close=close_device};

@@ -16,10 +16,11 @@ with tarfile.open(a.archive) as t:
   if Path(m.name).is_absolute() or '..' in Path(m.name).parts:raise SystemExit('Unsafe source archive')
  t.extractall(a.output,filter='data')
 root=a.output/'iio-sensor-proxy-3.5';scripts=Path(__file__).resolve().parent
-shutil.copy2(scripts/'drv-samsung-ssp.c',root/'src/drv-samsung-ssp.c')
+for name in ('drv-samsung-ssp.c', 'ssp-heading.h'):
+ shutil.copy2(scripts/name, root/'src'/name)
 p=root/'src/meson.build';s=p.read_text();assert s.count("  'drivers.c',")==1;s=s.replace("  'drivers.c',","  'drivers.c',\n  'drv-samsung-ssp.c',");p.write_text(s)
-p=root/'src/drivers.h';p.write_text(p.read_text()+'\nextern SensorDriver samsung_ssp_accel;\nextern SensorDriver samsung_ssp_light;\nextern SensorDriver samsung_ssp_proximity;\n')
-p=root/'src/iio-sensor-proxy.c';s=p.read_text();assert s.count('static const SensorDriver * const drivers[] = {')==1;p.write_text(s.replace('static const SensorDriver * const drivers[] = {','static const SensorDriver * const drivers[] = {\n\t&samsung_ssp_accel,\n\t&samsung_ssp_light,\n\t&samsung_ssp_proximity,'))
+p=root/'src/drivers.h';p.write_text(p.read_text()+'\nextern SensorDriver samsung_ssp_accel;\nextern SensorDriver samsung_ssp_light;\nextern SensorDriver samsung_ssp_proximity;\nextern SensorDriver samsung_ssp_compass;\n')
+p=root/'src/iio-sensor-proxy.c';s=p.read_text();assert s.count('static const SensorDriver * const drivers[] = {')==1;p.write_text(s.replace('static const SensorDriver * const drivers[] = {','static const SensorDriver * const drivers[] = {\n\t&samsung_ssp_accel,\n\t&samsung_ssp_light,\n\t&samsung_ssp_proximity,\n\t&samsung_ssp_compass,'))
 patch=scripts/'0001-release-owned-claims-after-session-inactivation.patch'
 subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=patch.read_bytes(),check=True)
 subprocess.run(['meson','setup',str(a.output/'build'),str(root),'--cross-file',str(scripts/'cross-arm64.ini'),'--prefix=/opt/g955n-sensors','--libexecdir=libexec','--wrap-mode=nodownload','-Dgtk-tests=false','-Dtests=false','-Dgtk_doc=false','-Dudevrulesdir=/lib/udev/rules.d','-Dsystemdsystemunitdir=/lib/systemd/system'],check=True)

@@ -4,3 +4,4 @@ SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="hrm_sensor", ENV{ID_INPUT_AC
 SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="accelerometer_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-accel", ENV{ACCEL_LOCATION}="display", ENV{ACCEL_MOUNT_MATRIX}="-1,0,0;0,-1,0;0,0,1", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"
 SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="light_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-als", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"
 SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="proximity_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-proximity", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"
+SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="rotation_vector_sensor", ENV{IIO_SENSOR_PROXY_TYPE}="samsung-ssp-compass", TAG+="systemd", ENV{SYSTEMD_WANTS}+="iio-sensor-proxy.service"

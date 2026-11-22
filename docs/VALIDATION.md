@@ -2465,3 +2465,16 @@ the remaining closes and wake-lock release are still attempted. The host
 regression test injects an RFS close failure and verifies the remaining
 cleanup order and incomplete marker. This is a diagnostic improvement.
 The modified trial has not been run on the handset.
+
+
+### Standard Compass delivery on kernel55
+
+The SM-G955N rotation-vector sensor advertises the pinned 25-byte packed
+layout. The new ARM64 SensorProxy backend published 37 finite heading updates
+to the standard Compass API during one five-second claim by the Geoclue
+account. Release cleared the rotation-vector enable bit and restored scan,
+buffer length, enable and polling. The same service still advertised
+accelerometer, ambient light and proximity. Cardinal, tilted, wraparound,
+zero and vertical-vector math fixtures passed. Absolute heading, movement
+tracking and physical calibration are open. No latitude or longitude was
+requested or recorded during this check.

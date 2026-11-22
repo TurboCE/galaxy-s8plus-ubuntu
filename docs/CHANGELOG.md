@@ -1715,3 +1715,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Prepare the vendor ABI at acquisition startup and wait for the shared FIFO.
 - Recover the earlier passive CP trial's durable trace and narrow its failure
   interval to the end of observation and the unconfirmed shutdown sequence.
+
+
+## 2026-11-22 — Ubuntu compass on SM-G955N
+
+- Publish SSP rotation-vector headings through the standard Compass interface.
+- Reuse checked sensor claims and restore the rotation-vector lease on release.

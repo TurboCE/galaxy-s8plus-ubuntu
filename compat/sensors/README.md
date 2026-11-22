@@ -120,3 +120,22 @@ native compiler, ASan/UBSan and native `gio-2.0` development files. The unpatche
 methods fail inactive release. The patched methods deny a new unauthorized
 claim, permit own release, retain foreign ownership and stop polling only after
 the last client releases. This fixture is distinct from runtime acceptance.
+
+
+### Ubuntu compass interface
+
+The SM-G955N compass backend uses the sensor hub's magnetic-north rotation
+vector and publishes its horizontal heading via the standard SensorProxy
+Compass interface. The packed sample is four signed 32-bit quaternion
+components, a vendor status byte and the kernel timestamp. A typical unit
+quaternion has a magnitude of about 1,000,000 raw units. The conversion checks
+the magnitude and suppresses readings when the phone's top edge has no
+meaningful horizontal projection. The app continues to use SensorProxy's
+existing D-Bus permissions and on-demand claims. Release restores the
+rotation-vector IIO settings and its own enable bit.
+
+The heading fixture covers all cardinal directions, tilt, wraparound and
+invalid samples. On kernel55 the authorized GeoClue account received 37 live
+heading updates and all original IIO settings were restored on release.
+Absolute heading and physical calibration still require a reference
+direction measurement.

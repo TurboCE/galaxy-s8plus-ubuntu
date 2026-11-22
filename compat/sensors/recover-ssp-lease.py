@@ -14,7 +14,7 @@ import stat
 
 DIRECTORY = Path('/run/g955n-ssp-leases')
 ATTRIBUTES = ('scan_elements/in_timestamp_en', 'buffer/length', 'buffer/enable', 'poll_delay')
-NAMES = {0: 'accelerometer_sensor', 7: 'proximity_sensor', 9: 'light_sensor'}
+NAMES = {0: 'accelerometer_sensor', 7: 'proximity_sensor', 9: 'light_sensor', 17: 'rotation_vector_sensor'}
 
 
 def trusted(path, directory=False):
