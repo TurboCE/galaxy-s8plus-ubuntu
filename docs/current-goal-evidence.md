@@ -1,19 +1,19 @@
 # Current seven-requirement evidence audit
 
-The SM-G955N is currently on kernel57. Earlier qualified GNOME trials used
-Mali → DRM/KMS/PRIME → DECON. The current rotation build is supervised,
-with restoration of the previous Xorg and EGL files at the end of a trial.
+The SM-G955N is currently on kernel57. Normal GNOME uses Mali → DRM/KMS/PRIME
+→ DECON with the rotation-capable Xorg driver after a verified warm boot.
+The startup controller retains the previous graphics files for recovery.
 The table tracks live and earlier results separately.
 
 | Owner requirement | Current evidence | Remaining acceptance |
 | --- | --- | --- |
-| Boot and touch login | Kernel57 used the normal touchscreen, OSK and PAM to reach the Mali/KMS desktop | Repeated cold starts and reliable touch unlock after suspend |
-| Accelerated, responsive GNOME | Kernel57 normal GNOME kept Mali/KMS and retired at least 60 frames across the rotation exercise | Default GNOME rotation output, physical latency and sustained app workload |
+| Boot and touch login | Kernel57 normal touchscreen/OSK/PAM login after warm reboot and touch-only PAM unlock after a 23.93-second RTC suspend passed | Repeated cold starts and a physical power-button wake sequence |
+| Accelerated, responsive GNOME | Kernel57 normal GNOME kept Mali/KMS and retired at least 60 frames across the rotation exercise | Physical drag latency and a sustained app workload |
 | Fix kernel/driver errors | Kernel57 remained untainted in the panel tests. A roughly 24-second RTC sleep recovered USB and Wi-Fi with the same owner GNOME session | Longer and repeated physical power tests including a logged-in desktop and all remaining driver paths |
 | Accelerometer, magnetic, steps and light | On 57 SensorProxy advertises accelerometer, ambient light and proximity. IIO exposes the magnetometer, gyroscope and step counter. Earlier captures recorded these device streams | Physical heading and gyro calibration, genuine step increase and longer-range light response |
 | Microphone and speaker | Kernel57 duplex captured both built-in speaker test tones on the internal mic, with zero hardware-error growth | Cold-capture startup transient, speech intelligibility and further physical audio routing |
 | LTE modem | Eight kernel57 trials returned the CP to OFFLINE. The latest captured two stock file-open requests, one carrying flags that can modify data. ModemManager still detects no modem | SIPC/RFS or a qualified vendor RIL adapter, then SIM registration, mobile-only traffic and reconnect |
-| Rotation, automatic brightness and standard toggles | Earlier lux/brightness response and standard toggle round trips passed. Kernel57 normal GNOME passed all four commanded orientations and updated the internal touch device coordinate transform | Ordinary authenticated GNOME automatic rotation, rotation lock and touch on the rotated screen |
+| Rotation, automatic brightness and standard toggles | Earlier lux/brightness response and standard toggle round trips passed. Kernel57 normal GNOME kept the built-in panel and the internal touchscreen targets correct in all four commanded directions, including after reboot | Physical sensor-triggered rotation and rotation-lock behavior |
 
 Recent55 USB trials passed20/45/180-second transport recovery, but two of those
 lost the GNOME process and are not desktop passes. A rebuilt deadline-aware

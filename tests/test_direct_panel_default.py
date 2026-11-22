@@ -137,6 +137,30 @@ class DirectPanelBootTests(unittest.TestCase):
             controller.prepare_boot()
         self.assert_recovered()
 
+    def test_persistent_rotation_verifies_xorg_driver_and_config(self):
+        xorg_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(xorg_dir.cleanup)
+        rotation = tuple(Path(xorg_dir.name) / name for name in
+                         ('fbdev_drv.so', '10-g955n-fbdev.conf'))
+        for path in rotation:
+            path.write_bytes(b'candidate')
+            (self.policy.parent / path.name).write_bytes(b'prior')
+        self.files[2].write_bytes(
+            b"env['G955N_DRM_KMS']='1'\nenv['G955N_DIRECT_PANEL_ROTATION']='1'")
+        controller.DRM_PROBE.write_bytes(b'reviewed probe')
+        with patch.multiple(controller, FBDEV=rotation[0], ROTATION_FILES=rotation):
+            self.enable_default()
+            self.assertTrue(all(str(path) in json.loads(self.policy.read_text())
+                                for path in rotation))
+            with patch.object(controller, 'qualified_kms', return_value=True):
+                controller.prepare_boot()
+                self.assertTrue(self.lease.exists())
+                self.lease.unlink()
+                rotation[1].write_bytes(b'changed')
+                controller.prepare_boot()
+            self.assert_recovered()
+        self.assertEqual([path.read_bytes() for path in rotation], [b'prior', b'prior'])
+
     def test_kms_probe_binary_is_part_of_persistent_hashes(self):
         self.select_kms()
         controller.DRM_PROBE.write_bytes(b'changed probe')

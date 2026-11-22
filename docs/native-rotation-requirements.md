@@ -99,10 +99,12 @@ rotation slot. The original GDM configuration was restored after the test.
 
 The root-owned trial supervisor accepts `--drm-kms --rotation-driver
 PATH --rotation-driver-sha256 SHA256` in addition to the bridge candidate and
-its digest. The rotation trial restores the original Xorg files, bridge,
-manifest and session launcher on timeout or reboot. Default activation is
-reserved until the real GNOME session passes automatic orientation, rotation
-lock, physical touch, screen power and performance testing.
+its digest. An unconfirmed trial restores the original Xorg files, bridge, manifest and
+session launcher on timeout or reboot. After on-device qualification, use
+`--confirm-rotation-default` to retain the running trial across boots.
+Boot verification checks the Xorg configuration and driver along with the
+EGL and session files and probed KMS capability. A mismatch restores the
+snapshotted desktop. `--restore` also restores it explicitly.
 
 
 In the normal GDM trial the actual Mutter greeter recognized the candidate
@@ -128,3 +130,18 @@ out just after resume and the separately attempted on-screen PIN unlock did
 not complete. This leaves post-suspend touch authentication open. Sensor-driven
 motion, physical touch latency, and permanent activation are still separate
 acceptance items.
+
+
+The first coordinate test revealed that a valid Mutter rotation matrix was
+still being scaled by the old portrait desktop bounds inside Xorg. The fbdev
+resize now refreshes the server-wide input dimensions. Touch events injected
+through the handset's actual evdev device reached their independently
+calculated X11 target in all four orientations. After default activation
+and a warm reboot, ordinary on-screen GDM/PAM login and the same five
+rotation/tap transitions passed again.
+
+The three scripted window-move runs per path reported mean whole-device
+CPU use of 16.74% through the original X11 copy route and 9.07% through
+direct KMS. All runs saw 179 of 180 requested movements, with a 17 ms median
+geometry-update gap on both routes. This measures a scripted workload and
+does not establish physical drag latency or panel FPS.

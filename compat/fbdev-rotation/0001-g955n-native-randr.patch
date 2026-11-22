@@ -38,7 +38,7 @@ Subject: fbdev: allow opt-in RandR rotation on the G955N panel
  	void				*shadow;
  	CloseScreenProcPtr		CloseScreen;
  	CreateScreenResourcesProcPtr	CreateScreenResources;
-@@ -697,6 +704,178 @@
+@@ -697,6 +704,182 @@
      shadowUpdatePacked(pScreen, pBuf);
  }
  
@@ -116,6 +116,10 @@ Subject: fbdev: allow opt-in RandR rotation on the G955N panel
 +            SetRootClip(screen, ROOT_CLIP_NONE);
 +        screen->width = width;
 +        screen->height = height;
++        /* Absolute XI2 devices normalize into the server desktop, so its
++         * input bounds must follow the resized root before RandR notifies
++         * Mutter and it applies the touchscreen transform. */
++        xf86UpdateDesktopDimensions();
 +        memset(state->shadow, 0, (size_t)width * height * 4);
 +        if (screen->root)
 +            SetRootClip(screen, ROOT_CLIP_FULL);
@@ -217,7 +221,7 @@ Subject: fbdev: allow opt-in RandR rotation on the G955N panel
  static Bool
  FBDevCreateScreenResources(ScreenPtr pScreen)
  {
-@@ -715,7 +894,9 @@
+@@ -715,7 +898,9 @@
  
      pPixmap = pScreen->GetScreenPixmap(pScreen);
  
@@ -228,7 +232,7 @@ Subject: fbdev: allow opt-in RandR rotation on the G955N panel
          update = fbdevUpdate32to24;
      else if (fPtr->rotate)
          update = fbdevUpdateRotatePacked;
-@@ -727,6 +908,8 @@
+@@ -727,6 +912,8 @@
  	return FALSE;
      }
  
@@ -237,7 +241,7 @@ Subject: fbdev: allow opt-in RandR rotation on the G955N panel
      return TRUE;
  }
  
-@@ -775,6 +958,17 @@
+@@ -775,6 +962,17 @@
  	int type;
  
  	TRACE_ENTER("FBDevScreenInit");
@@ -255,7 +259,7 @@ Subject: fbdev: allow opt-in RandR rotation on the G955N panel
  
  #if DEBUG
  	ErrorF("\tbitsPerPixel=%d, depth=%d, defaultVisual=%s\n"
-@@ -945,9 +1139,9 @@
+@@ -945,9 +1143,9 @@
  	    return FALSE;
  	}
  

@@ -1749,3 +1749,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Resolve the rotation shaders and draws through the active Mali EGL provider.
   The real GNOME session completed all four orientations and updated the
   physical touchscreen's X11 matrix.
+
+### Retain the qualified SM-G955N graphics path across boots
+
+- Refresh Xorg's absolute-input bounds after changing panel orientation.
+  Real evdev touches now hit the expected X11 targets in landscape.
+- Include the Xorg driver and configuration in the default graphics receipt.
+  Validate normal GDM touch login and rotated touch after warm reboot.
+- Let scripted window moves run without depending on mouse-grab
+  prerequisites. The same-boot CPU comparison is in VALIDATION.md.

@@ -2570,3 +2570,46 @@ In a separate logged-in kernel57 audio test, the internal microphone
 recorded both speaker tones. The playback and capture pointers advanced,
 with zero hardware-error growth and zero steady clipping. The initial
 capture transient showed 201 clipped samples during its first 250 ms.
+
+### Kernel57 rotated touchscreen and graphics default
+
+Before the resize fix, a landscape touch at panel coordinate (310,705)
+landed at X11 (1097,637) instead of near (2255,310). Those ratios match the
+old portrait dimensions still used in Xorg's absolute input normalization.
+The revised fbdev hook calls the exported Xorg desktop-dimensions update as
+part of the resize. The test then injected touch into the real device
+and an independent X11 client received it at the calculated target in
+normal, left, right, inverted and normal configurations.
+
+With the final binaries verified, default activation saved their hashes
+along with the Xorg configuration. A warm reboot recreated the lease
+and normal GDM touch/PAM login reached GNOME with Mali/KMS in use. All five
+touch/orientation transitions passed again without kernel taint.
+
+A same-boot X11 fixture measured mean CPU 16.74% through the legacy copy
+path and 9.07% through direct KMS for three scripted window-move runs per
+path. Each run observed 179 of 180 position changes. Both paths measured
+17 ms median window geometry gaps. This is not an optical latency or FPS
+measurement.
+
+Two further RTC suspend trials recorded 23.48 and 23.56 seconds and retained
+the same GNOME and KMS session. An injected swipe brought up the real PAM
+lock prompt and hardware-style key input completed unlock. Fixed-location
+OSK input was not reliable in that test. It requires a readiness-aware OSK
+test before claiming touch-only unlock after power transitions.
+
+After the warm reboot, nine samples over 93.47 seconds saw the same
+GNOME process and KMS ownership, with no new kernel fault signature.
+Three postboot DPMS off/on cycles retained Mali/KMS and a responsive
+Mutter bus. The standard GNOME rotation-lock and automatic-brightness
+settings accepted both values and were restored to their previous values.
+The real SensorProxy reported accelerometer, ambient light and proximity
+interfaces. These setting tests did not require external motion or shade.
+
+A postboot RTC cycle lasted 23.93 seconds and the same GNOME process
+retained KMS after wake. USB and Wi-Fi recovered. With the real
+screen-lock prompt visible and focused, the readiness-aware touchscreen
+test used the numeric OSK. It counted one inserted character per key,
+preserved the numeric page and completed normal PAM unlock. It checked
+that logind cleared LockedHint, the boot and Shell were unchanged,
+no failed-session screen appeared and no new kernel fault was observed.

@@ -64,13 +64,14 @@ int main(int argc, char **argv)
     Window unused_root, unused_child;
     bool pointer_known = XQueryPointer(display, root, &unused_root, &unused_child,
                                        &pointer_x, &pointer_y, &unused_x, &unused_y, &buttons);
-    bool context_ok = pointer_known && !(buttons & (Button1Mask | Button2Mask | Button3Mask)) &&
-                      position(display, window, &initial_x, &initial_y) &&
-                      initial_x > 0 && initial_y > 0;
     bool pressed = false;
     KeyCode super = XKeysymToKeycode(display, XK_Super_L);
     unsigned moved = 0;
-    if (!context_ok || !super || (buttons & (ShiftMask | ControlMask | Mod1Mask | Mod4Mask)))
+    if (!position(display, window, &initial_x, &initial_y))
+        goto cleanup;
+    if (!scripted_move && (!pointer_known || !super ||
+        (buttons & (Button1Mask | Button2Mask | Button3Mask |
+                    ShiftMask | ControlMask | Mod1Mask | Mod4Mask))))
         goto cleanup;
 
     /* GNOME modifier + primary drag on our own test window. */

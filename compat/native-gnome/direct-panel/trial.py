@@ -124,6 +124,10 @@ def kms_selected():
     return LAUNCHER.is_file() and b"env['G955N_DRM_KMS']='1'" in LAUNCHER.read_bytes()
 
 
+def rotation_selected():
+    return LAUNCHER.is_file() and b"env['G955N_DIRECT_PANEL_ROTATION']='1'" in LAUNCHER.read_bytes()
+
+
 def qualified_kms():
     # The interface is identified by its version and capabilities, not a kernel
     # build number. The probe never modesets or maps a pixel buffer.
@@ -144,8 +148,29 @@ def default_hashes():
     paths = (*FILES, *POLICY_FILES)
     if kms_selected():
         paths += (DRM_PROBE,)
-    return {str(path.relative_to(PREFIX)): digest(path.read_bytes())
-            for path in paths}
+    if rotation_selected():
+        paths += ROTATION_FILES
+    return {
+        str(path.relative_to(PREFIX) if path.is_relative_to(PREFIX) else path):
+        digest(path.read_bytes()) for path in paths
+    }
+
+
+def save_default():
+    if DEFAULT.exists():
+        raise RuntimeError('The active trial already has a default receipt')
+    replace(DEFAULT, json.dumps(default_hashes(), indent=2).encode(), 0o600)
+
+
+def confirm_rotation_default():
+    if (not LEASE.is_file() or not BACKUP.is_dir() or not kms_selected()
+            or not rotation_selected()
+            or not all((BACKUP / path.name).is_file() for path in ROTATION_FILES)):
+        raise RuntimeError('No current rotation trial to confirm')
+    ctl('is-active', 'gdm.service', 'g955n-fb-display.service', TIMER + '.timer')
+    if Path('/proc/sys/kernel/tainted').read_text().strip() != '0' or not qualified_kms():
+        raise RuntimeError('The active kernel no longer qualifies for direct output')
+    save_default()
 
 
 def prepare_shell_policy():
@@ -270,12 +295,7 @@ def run(candidate, expected, default, drm_kms=False, rotation=None, rotation_has
             replace(path, content)
         ctl('start', 'gdm.service')
         if default:
-            hashes = default_hashes()
-            with DEFAULT.open('x') as marker:
-                json.dump(hashes, marker)
-                marker.flush()
-                os.fsync(marker.fileno())
-            sync_directory(BACKUP)
+            save_default()
     except (subprocess.SubprocessError, OSError):
         restore()
         raise
@@ -286,6 +306,8 @@ def main():
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--candidate', type=Path)
     mode.add_argument('--restore', action='store_true')
+    mode.add_argument('--confirm-rotation-default', action='store_true',
+                      help='Keep an already validated active rotation trial across boots')
     mode.add_argument('--restore-trial', action='store_true')
     mode.add_argument('--boot-recover', action='store_true')
     parser.add_argument('--sha256')
@@ -310,6 +332,9 @@ def main():
         if args.restore or args.restore_trial:
             if args.restore or not DEFAULT.exists():
                 restore()
+            return
+        if args.confirm_rotation_default:
+            confirm_rotation_default()
             return
         if not args.sha256:
             parser.error('--candidate requires --sha256')
