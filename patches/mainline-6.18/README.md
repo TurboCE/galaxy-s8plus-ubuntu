@@ -9,8 +9,8 @@ and the ARM64 toolchain selected, pass the absolute fragment path as
 
 Cross-compile `scripts/boot/mainline618-probe-init.c` as a static ARM64
 executable. Put it at `/init` in a gzip-compressed newc archive with
-`/sys`, `/dev`, and the console character device (5, 1). Copy the
-kernel, DTB and archive into uniLoader's `blob/Image`, `blob/dtb` and
+`/sys`, `/dev`, the console character device (5, 1), and `/dev/kmsg`
+(1, 11). Copy the kernel, DTB and archive into uniLoader's `blob/Image`, `blob/dtb` and
 `blob/ramdisk`. Build uniLoader with `ARCH=aarch64`,
 `CROSS_COMPILE=aarch64-linux-gnu-` and `dream2lteks_defconfig`. For the
 outer Samsung boot image, use the original SM-G955N boot header and a
@@ -23,7 +23,8 @@ Its configuration contains no internal-storage or USB peripheral driver.
 The probe mounts sysfs only. Rollback uses the preserved TWRP and a
 verified copy of the previous BOOT partition.
 
-A passing probe would establish early Linux and initramfs execution.
+The probe establishes early Linux and initramfs execution. Booting the
+installed Ubuntu root requires an Exynos8895 UFS host and PHY port.
 Panfrost still needs the Exynos8895 G3D domain, clock and supply. The
 panel path also needs native DECON, DPP, DSI and display IOMMU support.
 The touch, audio and WLAN paths must be validated separately
@@ -34,12 +35,16 @@ Samsung panel and touch supplies. It builds with `CONFIG_I2C`,
 `CONFIG_REGULATOR` and `CONFIG_REGULATOR_S2DOS03`. Both the PMIC and the
 parent I2C controller remain disabled for the initramfs-only probe.
 
+Apply patch 0006 to Linux for the pinctrl and firmware device-link fixes.
+The initramfs records whether the PMU, ALIVE and VTS pin controllers,
+and GPIO keys bind. The GPIO keys binding checks registration. Key events
+and wake from suspend require separate tests.
+
 ## Reading the warm boot trace
 
 Apply patch 0004 to Linux and patch 0005 to uniLoader for the trace build.
 The fragment enables the board-specific ARM64 entry marker and the pstore
-console. The initramfs archive also needs a `/dev/kmsg` character device
-(1, 11) so the probe can record its result in the kernel log.
+console. The probe writes its driver checks and boot result to `/dev/kmsg`.
 
 The Samsung recovery kernel reserves 32 KiB at `0x92000000` with no ECC
 and exposes the second 16 KiB as pmsg. The loader writes fixed stage

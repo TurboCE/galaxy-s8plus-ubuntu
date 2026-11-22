@@ -1,0 +1,57 @@
+Subject: [PATCH] Exynos8895: use the routed pinctrl IRQs and skip links to early providers
+
+ALIVE uses the wakeup EINT domains. The separate GPIO EINT setup has no
+banks to serve there. VTS has GPIO and pinmux functions for its DMIC
+pins, but the vendor and mainline trees do not route a parent GPIO IRQ
+for it. Leave both sets of pins registered.
+
+An initialized irqchip without a platform device has already met its
+consumer dependency. Drop its dangling consumer links during parent binding
+instead of migrating them to the SoC parent. The resulting invalid
+pinctrl-to-SoC link was logged by the first device trial.
+
+diff --git a/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c b/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c
+--- a/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c
++++ b/drivers/pinctrl/samsung/pinctrl-exynos-arm64.c
+@@ -1557,8 +1557,7 @@
+ 		/* pin-controller instance 0 ALIVE data */
+ 		.pin_banks	= exynos8895_pin_banks0,
+ 		.nr_banks	= ARRAY_SIZE(exynos8895_pin_banks0),
+-		.eint_gpio_init = exynos_eint_gpio_init,
+ 		.eint_wkup_init = exynos_eint_wkup_init,
+ 		.suspend	= exynos_pinctrl_suspend,
+ 		.resume		= exynos_pinctrl_resume,
+ 	}, {
+@@ -1569,7 +1568,7 @@
+ 		/* pin-controller instance 2 VTS data */
+ 		.pin_banks	= exynos8895_pin_banks2,
+ 		.nr_banks	= ARRAY_SIZE(exynos8895_pin_banks2),
+-		.eint_gpio_init = exynos_eint_gpio_init,
++		/* The VTS DMIC pins have no GPIO parent IRQ in the DT. */
+ 	}, {
+ 		/* pin-controller instance 3 FSYS0 data */
+ 		.pin_banks	= exynos8895_pin_banks3,
+diff --git a/drivers/base/core.c b/drivers/base/core.c
+--- a/drivers/base/core.c
++++ b/drivers/base/core.c
+@@ -224,12 +224,19 @@
+ 						   struct fwnode_handle *new_sup)
+ {
+ 	struct fwnode_handle *child;
++	struct fwnode_link *link, *tmp;
+ 
+ 	if (fwnode->dev && fwnode->dev->bus)
+ 		return;
+ 
+ 	fwnode->flags |= FWNODE_FLAG_NOT_DEVICE;
+-	__fwnode_links_move_consumers(fwnode, new_sup);
++	if (fwnode->flags & FWNODE_FLAG_INITIALIZED) {
++		/* The early provider is ready without its own device. */
++		list_for_each_entry_safe(link, tmp, &fwnode->consumers, s_hook)
++			__fwnode_link_del(link);
++	} else {
++		__fwnode_links_move_consumers(fwnode, new_sup);
++	}
+ 
+ 	fwnode_for_each_available_child_node(fwnode, child)
+ 		__fw_devlink_pickup_dangling_consumers(child, new_sup);

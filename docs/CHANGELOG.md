@@ -1816,3 +1816,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   initramfs, confirmed on the panel and in the RAM log recovered from TWRP.
 - Enabled syscon for the Exynos PMU after observing probe error -524. The
   rebuilt kernel links the syscon implementation. A device test is pending.
+
+## 2026-11-23 — Exynos8895 PMU and pinctrl startup
+
+- Verified Exynos PMU binding on the handset with syscon enabled.
+- Kept the ALIVE wakeup IRQ path and skipped GPIO parent IRQ initialization
+  for ALIVE and VTS. The VTS pinmux remains available for digital audio.
+- Fixed firmware links for IRQ providers initialized without a platform
+  device. Their consumers now retain the existing IRQ paths without an
+  invalid proxy link to the SoC parent.
+- Recorded the PMU, ALIVE, VTS and GPIO keys binding checks in the probe.

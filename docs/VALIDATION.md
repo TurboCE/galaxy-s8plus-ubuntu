@@ -2825,3 +2825,25 @@ DTB. No rail was switched during this test.
   build enables the missing syscon implementation and awaits a device test.
 - Restored the backed-up #58 BOOT partition and verified its full readback
   and the protected partition hashes through TWRP.
+
+## Linux 6.18 PMU and pinctrl BOOT trials — 2026-11-23
+
+- The first PMU/pinctrl image reached the probe and recorded
+  `SM-G955N PROBE PMU: bound`. The recovered log contains no repeat of the
+  earlier syscon or missing GPIO parent IRQ errors. A wakeup EINT
+  device-link failure still appeared with the SoC bus as its supplier.
+  Driver core was reassigning the initialized IRQ provider's consumers
+  to its parent during binding, before the link creation check.
+
+- The revised BOOT trial reached initramfs with the corrected firmware
+  dependency handling. TWRP recovered intact PMU and ALIVE pinctrl binding
+  markers and the GPIO input registration line. The targeted GPIO IRQ and
+  device-link errors did not recur in the recovered log. Some RAM log bytes
+  are corrupt, including parts of the VTS binding marker. Key input events
+  and suspend wake remain separate tests.
+- Verified the full #58 BOOT readback and preserved partition hashes in TWRP.
+
+- The diagnostic image stops at initramfs. The installed Ubuntu root on
+  internal storage requires SM-G955N UFS host and PHY support in Linux
+  6.18. Panfrost-to-DECON scanout, stock GNOME Wayland touch login,
+  rotation, suspend/resume, audio and Wi-Fi await normal Ubuntu boot.
