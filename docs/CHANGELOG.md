@@ -1727,3 +1727,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Verify both 90-degree GLES transforms between native Samsung gralloc
   buffers at desktop and panel sizes on the real Mali-G71.
+
+
+## 2026-11-22 — Modem timer shutdown on kernel57
+
+- Avoid waiting for a SHMEM modem timer callback while holding its modem lock.
+- Verify BOOT-only kernel57 deployment and repeated passive and read-only
+  modem trials. Report generic replies, unsolicited state and RFS command
+  totals without dumping payloads.

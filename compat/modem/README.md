@@ -113,3 +113,21 @@ an older completion marker. Additional cleanup markers now distinguish reset
 from power-off, and even a failed log stream cannot prevent attempted power-off
 when reset fails. The later passive freeze's last durable stage still needs
 recovery. None of these diagnostics establishes a freeze root cause or LTE data.
+
+
+## Timer cancellation on kernel57
+
+Proposal0055 replaces synchronous cancellation under the modem callback lock
+with serialized nonblocking attempts. A running callback can take the lock and
+finish before the next attempt. The regression fixture tests inactive, queued,
+running and running/rearmed timers in the actual patched helper.
+
+Kernel57 takes the kernel55 display, USB and power profile plus
+`--modem-timer-cancel-locking`. The actual handset passed four passive starts
+and three read-only GET trials on the same boot. Each returned the CP to
+OFFLINE after reset, power-off, endpoint close and wake-lock release. The
+modem emitted generic command replies and asynchronous status notifications.
+These are recorded separately from a matching typed GET response. Two RFS
+requests per trial were observed, with no RFS or NV writes. ModemManager
+integration and real cellular service still require a supported control and
+data path.

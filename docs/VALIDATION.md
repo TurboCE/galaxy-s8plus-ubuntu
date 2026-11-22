@@ -2489,3 +2489,40 @@ Both native handles matched the direct presenter's linear layout and each
 turn's four pixel regions matched their expected colors. Diagnostic FBO
 readback verified the result; no CPU mapping was used in the transform.
 The test did not control the panel, acquire DRM master or replace GNOME.
+
+
+### Repeated modem shutdown on kernel57
+
+The timer cancellation patch applied to the pinned kernel and passed the
+actual-helper fixture. The kernel57 build plan adds only proposal0055 to
+kernel55. Kernel config, board DT and initramfs are byte-identical. A fresh
+TWRP capture verified all seven partition backups and the current kernel55
+rollback image. Only BOOT was written, and readback and protected partitions
+verified before reboot. Kernel57 booted with taint0 and the standard GDM,
+SensorProxy and GNSS socket active.
+
+The first modem preflight refused a changed PARAM hash before powering the
+CP. The current PARAM was archived independently and checked twice. Its
+three differences match the previous recovery-to-normal boot history pattern.
+The original raw backup is preserved. No firmware or NV writes were made.
+
+On the same kernel57 boot, four passive and three read-only GET trials sent
+the reviewed RAM image, received live SIPC frames and completed reset,
+power-off, endpoint close and wake-lock release. All seven ended OFFLINE with
+taint0. The control experiment changes the kernel timer code and uses enhanced
+userspace cleanup tracing, so it does not establish the exact historical
+hang site. The live dispatcher separately tracked the two correlated generic
+GET results and asynchronous status notifications. The firmware's SIM
+initialization/ready notifications do not verify a physical SIM or carrier
+registration. No typed GET state reply was accepted. The RFS endpoint received
+two command 0x11 frames in the passive capture, and no RFS reply was sent.
+ModemManager still lists no modem.
+
+
+An additional RTC-alarmed freeze test recorded a 25.49-second interval
+between the kernel suspend entry and exit messages. Both USB and Wi-Fi
+answered afterward with the pinned handset key and the same boot ID. GDM,
+SensorProxy and the GNSS socket were active, taint remained zero and the
+RTC alarm was clear. The first duration checker used the BOOTTIME/monotonic
+difference, which did not advance during this s2idle interval. Acceptance
+uses the kernel PM records and the independently checked transport recovery.

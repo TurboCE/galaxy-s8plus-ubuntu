@@ -13,13 +13,17 @@ class StatusTests(unittest.TestCase):
   fr,fw=os.pipe();rr,rw=os.pipe()
   steps=[]
   try:
-   os.write(fw,m.FMT.pack(8,0,0,1,1,3)+b'\x01')
+   os.write(fw,m.FMT.pack(8,0,0,1,1,3)+b'\x01'+m.FMT.pack(9,0,0,5,1,3)+b'\x80\x00')
+   os.write(rw,m.RFS.pack(m.RFS.size+1,1,1)+b'\x00')
    with patch.object(m.os,'write') as write:
     result=m.observe(fr,rr,seconds=.04,query=False,progress=steps.append)
     write.assert_not_called()
    self.assertTrue(result['power_up_notification'])
    self.assertFalse(result['queries_sent'])
-   self.assertEqual(result['fmt_frames'],1)
+   self.assertEqual(result['fmt_frames'],2)
+   self.assertEqual(result['status_notifications'],{'sim':{'not-present':1}})
+   self.assertEqual(result['rfs_commands'],{'01':1})
+   self.assertEqual(result['replies'],{})
    self.assertEqual(steps,['status-receiver-ready','status-first-fmt-frame','status-observation-completed'])
   finally:
    for fd in (fr,fw,rr,rw):os.close(fd)
@@ -36,6 +40,24 @@ class StatusTests(unittest.TestCase):
   f=(9,0,2,5,1,3)
   self.assertIsNone(m.reply_status(f,b'\x80\x00',{2:0x0501}))
   self.assertIsNone(m.reply_status((9,0,1,5,1,2),b'\x80\x00',{2:0x0501}))
+ def test_generic_ack_does_not_supply_sim_state(self):
+  pending={2:0x0501}
+  fields=(12,0,2,0x80,1,2)
+  payload=m.GEN_RESULT.pack(5,1,2,0x8000)
+  self.assertIsNone(m.reply_status(fields,payload,pending))
+  self.assertEqual(m.query_acknowledgement(fields,payload,pending),
+                   ('sim',0x8000))
+  self.assertEqual(m.query_acknowledgement(fields,m.GEN_RESULT.pack(5,1,2,4),pending),
+                   ('sim',4))
+
+ def test_generic_ack_requires_matching_sequence_command_and_get_type(self):
+  fields=(12,0,2,0x80,1,2)
+  payload=m.GEN_RESULT.pack(5,1,2,0x8000)
+  self.assertIsNone(m.query_acknowledgement(fields,payload,{1:0x0501}))
+  self.assertIsNone(m.query_acknowledgement(fields,payload,{2:0x0107}))
+  self.assertIsNone(m.query_acknowledgement(fields,m.GEN_RESULT.pack(5,1,3,0),{2:0x0501}))
+  self.assertIsNone(m.query_acknowledgement(fields,payload[:-1],{2:0x0501}))
+
  def test_bad_lengths(self):
   with self.assertRaises(ValueError):m.Frames(m.FMT).feed(b'\x01\x00'+b'\x00'*5)
   with self.assertRaises(ValueError):m.Frames(m.RFS).feed(m.RFS.pack(m.MAX_FRAME+1,1,2))

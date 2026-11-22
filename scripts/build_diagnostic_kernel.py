@@ -76,10 +76,14 @@ def main():
                         help='Build the opt-in SM-G955N DRM/KMS DMA-BUF display interface')
     parser.add_argument('--usb-gadget-sleep-quiesce', action='store_true',
                         help='Quiesce the Korean board USB peripheral before system power loss')
+    parser.add_argument('--modem-timer-cancel-locking', action='store_true',
+                        help='Avoid waiting on SHMEM modem timers while holding their callback lock')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
     if args.build_version is not None and not 1 <= args.build_version <= 9999:parser.error('build version must be 1..9999')
+    if args.modem_timer_cancel_locking and not args.build_version:
+        parser.error('--modem-timer-cancel-locking requires an explicit --build-version')
     if args.native_ondemand_safety and not args.native_panel_qos:parser.error('--native-ondemand-safety requires --native-panel-qos')
     if args.native_panel_qos and not args.native_panel_safety:parser.error('--native-panel-qos requires --native-panel-safety')
     if args.native_panel_safety and (not args.native_fb_owner or args.wfi_only):parser.error('--native-panel-safety requires the normal-idle native-fb-owner baseline')
@@ -193,6 +197,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0052-g955n-decon-drm-scanout.patch')
     if args.usb_gadget_sleep_quiesce:
         patchfiles.append(ROOT/'patches/proposals/0053-g955n-quiesce-usb-gadget-before-system-sleep.patch')
+    if args.modem_timer_cancel_locking:
+        patchfiles.append(ROOT/'patches/proposals/0055-modem-timer-cancel-locking.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -203,6 +209,7 @@ def main():
             'patches':{str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in patchfiles},
             'build_version':version,'builder_image_id':image_id,'compiler_version':compiler,
             'ssp_sysfs_counts':args.ssp_sysfs_counts,
+            'modem_timer_cancel_locking':args.modem_timer_cancel_locking,
             'audio_safety':args.audio_safety,
             'abox_suspend_irq_order':args.abox_suspend_irq_order,
             'dpp_shared_dma':args.dpp_shared_dma,

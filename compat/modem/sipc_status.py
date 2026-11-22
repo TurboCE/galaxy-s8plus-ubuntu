@@ -4,7 +4,7 @@
 
 Wire-format/command reference (not a supported G955N backend): LineageOS
 libsamsung-ipc6d244414f7c66b0d0f93ef4b34f5276023408016 include/protocol.h,
-pwr.h and sec.h. That reference's device list does not support this handset.
+gen.h, pwr.h and sec.h. That reference's device list does not support this handset.
 This implementation is independent; it reads fragmented kernel IPC streams,
 validates lengths and correlates replies before exposing a known status.
 """
@@ -15,6 +15,7 @@ import time
 
 FMT = struct.Struct('<HBBBBB')
 RFS = struct.Struct('<IBB')
+GEN_RESULT = struct.Struct('<BBBH')
 MAX_FRAME = 1024 * 1024 + 16
 
 
@@ -46,18 +47,33 @@ def request(command, sequence):
     return FMT.pack(FMT.size, sequence, 0xff, command >> 8, command & 255, 2)
 
 
-def reply_status(fields, payload, pending):
-    _, mseq, aseq, group, index, kind = fields
-    command = group << 8 | index
-    # A notification is not an answer to a submitted query.
-    if kind != 2 or pending.get(aseq) != command:
-        return None
+def status_payload(command, payload):
     if command == 0x0107 and len(payload) == 1:
         return {'power': {1: 'low-power', 2: 'normal'}.get(payload[0], 'unknown')}
     if command == 0x0501 and len(payload) == 2:
         return {'sim': {0: 'ready', 0x80: 'not-present', 0x81: 'card-error',
                         0x82: 'initialization-complete', 1: 'locked'}.get(payload[0], 'unknown')}
     return None
+
+
+def reply_status(fields, payload, pending):
+    _, _, sequence, group, index, kind = fields
+    command = group << 8 | index
+    if kind == 2 and pending.get(sequence) == command:
+        return status_payload(command, payload)
+    return None
+
+
+def query_acknowledgement(fields, payload, pending):
+    _, _, sequence, group, index, kind = fields
+    if (group, index, kind) != (0x80, 0x01, 2) or len(payload) != GEN_RESULT.size:
+        return None
+    request_group, request_index, request_kind, code = GEN_RESULT.unpack(payload)
+    command = request_group << 8 | request_index
+    name = {0x0107: 'power', 0x0501: 'sim'}.get(command)
+    if not name or request_kind != 2 or pending.get(sequence) != command:
+        return None
+    return name, code
 
 
 def observe(fmt_fd, rfs_fd, seconds=5, query=False, progress=lambda step: None):
@@ -67,6 +83,7 @@ def observe(fmt_fd, rfs_fd, seconds=5, query=False, progress=lambda step: None):
         poll.register(fd, select.POLLIN | select.POLLHUP | select.POLLERR)
     result = {'fmt_frames': 0, 'rfs_frames': 0, 'power_up_notification': False,
               'queries_sent': False, 'replies': {}, 'commands': {},
+              'query_acknowledgements': {}, 'status_notifications': {}, 'rfs_commands': {},
               'rfs_requests_answered': False}
     pending = {}
     progress('status-receiver-ready')
@@ -105,8 +122,21 @@ def observe(fmt_fd, rfs_fd, seconds=5, query=False, progress=lambda step: None):
                     if status:
                         result['replies'].update(status)
                         del pending[fields[2]]
+                    ack = query_acknowledgement(fields, payload, pending)
+                    if ack:
+                        name, code = ack
+                        result['query_acknowledgements'][name] = code
+                    if fields[-1] == 3:
+                        notification = status_payload(command, payload)
+                        if notification:
+                            for key, value in notification.items():
+                                counts = result['status_notifications'].setdefault(key, {})
+                                counts[value] = counts.get(value, 0) + 1
                 else:
                     result['rfs_frames'] += 1
+                    command = f'{fields[1]:02x}'
+                    counts = result['rfs_commands']
+                    counts[command] = counts.get(command, 0) + 1
     result['incomplete_bytes'] = sum(len(r.pending) for r in readers.values())
     progress('status-observation-completed')
     return result

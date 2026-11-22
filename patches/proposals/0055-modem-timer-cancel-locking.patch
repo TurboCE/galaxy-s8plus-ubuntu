@@ -1,0 +1,150 @@
+Subject: modem_v1: release modem lock while waiting for timer callbacks
+
+TX and zero-copy allocation callbacks take mc->lock. A synchronous timer
+cancel under that same lock can wait indefinitely for the running callback.
+Try cancellation under the lock and release it before retrying. The normal
+timer start and queue serialization are retained.
+
+--- a/drivers/misc/modem_v1/link_device_memory.h
++++ b/drivers/misc/modem_v1/link_device_memory.h
+@@ -39,6 +39,25 @@
+ #include "include/circ_queue.h"
+ #include "include/sbd.h"
+ #include "include/sipc5.h"
++
++/* Called from boot/reset process context. Timer callbacks take mc->lock,
++ * so retry with that lock released if the callback is already running.
++ * Keep each cancellation attempt serialized with the normal timer starters.
++ */
++static inline void cancel_modem_timer(struct modem_ctl *mc,
++				      struct hrtimer *timer)
++{
++	unsigned long flags;
++	int ret;
++
++	do {
++		spin_lock_irqsave(&mc->lock, flags);
++		ret = hrtimer_try_to_cancel(timer);
++		spin_unlock_irqrestore(&mc->lock, flags);
++		if (ret < 0)
++			cpu_relax();
++	} while (ret < 0);
++}
+ 
+ #ifdef GROUP_MEM_TYPE
+ 
+--- a/drivers/misc/modem_v1/link_device_memory_sbd.c
++++ b/drivers/misc/modem_v1/link_device_memory_sbd.c
+@@ -407,21 +407,6 @@
+ 	*out = circ_new_ptr(qlen, *out, 1);
+ }
+ 
+-static inline void cancel_datalloc_timer(struct mem_link_device *mld,
+-				   struct hrtimer *timer)
+-{
+-	struct link_device *ld = &mld->link_dev;
+-	struct modem_ctl *mc = ld->mc;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&mc->lock, flags);
+-
+-	if (hrtimer_active(timer))
+-		hrtimer_cancel(timer);
+-
+-	spin_unlock_irqrestore(&mc->lock, flags);
+-}
+-
+ void __reset_zerocopy(struct mem_link_device *mld, struct sbd_ring_buffer *rb)
+ {
+ 	struct zerocopy_adaptor *zdptr = rb->zdptr;
+@@ -430,7 +415,7 @@
+ 
+ 	mif_err("__reset_zerocopy [ch : %d]\n", rb->ch);
+ 
+-	cancel_datalloc_timer(mld, &zdptr->datalloc_timer);
++	cancel_modem_timer(mld->link_dev.mc, &zdptr->datalloc_timer);
+ 
+ 	spin_lock_irqsave(&zdptr->lock, flags);
+ 	while (*zdptr->wp != out) {
+--- a/drivers/misc/modem_v1/link_device_shmem.c
++++ b/drivers/misc/modem_v1/link_device_shmem.c
+@@ -806,8 +806,8 @@
+ 	spin_unlock_irqrestore(&mc->lock, flags);
+ }
+ 
+-static inline void cancel_tx_timer(struct mem_link_device *mld,
+-				   struct hrtimer *timer)
++static inline void start_datalloc_timer(struct mem_link_device *mld,
++				  struct hrtimer *timer)
+ {
+ 	struct link_device *ld = &mld->link_dev;
+ 	struct modem_ctl *mc = ld->mc;
+@@ -815,21 +815,6 @@
+ 
+ 	spin_lock_irqsave(&mc->lock, flags);
+ 
+-	if (hrtimer_active(timer))
+-		hrtimer_cancel(timer);
+-
+-	spin_unlock_irqrestore(&mc->lock, flags);
+-}
+-
+-static inline void start_datalloc_timer(struct mem_link_device *mld,
+-				  struct hrtimer *timer)
+-{
+-	struct link_device *ld = &mld->link_dev;
+-	struct modem_ctl *mc = ld->mc;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&mc->lock, flags);
+-
+ 	if (unlikely(cp_offline(mc)))
+ 		goto exit;
+ 
+@@ -839,21 +824,6 @@
+ 	}
+ 
+ exit:
+-	spin_unlock_irqrestore(&mc->lock, flags);
+-}
+-
+-static inline void __cancel_datalloc_timer(struct mem_link_device *mld,
+-				   struct hrtimer *timer)
+-{
+-	struct link_device *ld = &mld->link_dev;
+-	struct modem_ctl *mc = ld->mc;
+-	unsigned long flags;
+-
+-	spin_lock_irqsave(&mc->lock, flags);
+-
+-	if (hrtimer_active(timer))
+-		hrtimer_cancel(timer);
+-
+ 	spin_unlock_irqrestore(&mc->lock, flags);
+ }
+ 
+@@ -867,7 +837,7 @@
+ 		struct sbd_ring_buffer *rb = &ipc_dev[i].rb[DL];
+ 		if (rb->zerocopy) {
+ 			struct zerocopy_adaptor *zdptr = rb->zdptr;
+-			__cancel_datalloc_timer(mld, &zdptr->datalloc_timer);
++			cancel_modem_timer(mld->link_dev.mc, &zdptr->datalloc_timer);
+ 		}
+ 	}
+ 
+@@ -2024,13 +1994,13 @@
+ 	mld->state = LINK_STATE_OFFLINE;
+ 	spin_unlock_irqrestore(&mld->state_lock, flags);
+ 
+-	cancel_tx_timer(mld, &mld->tx_timer);
++	cancel_modem_timer(ld->mc, &mld->tx_timer);
+ 
+ 	if (ld->sbd_ipc) {
+ #ifdef CONFIG_LTE_MODEM_XMM7260
+ 		sbd_deactivate(&mld->sbd_link_dev);
+ #endif
+-		cancel_tx_timer(mld, &mld->sbd_tx_timer);
++		cancel_modem_timer(ld->mc, &mld->sbd_tx_timer);
+ 		cancel_datalloc_timer(mld);
+ 
+ 		if (mld->iosm) {
