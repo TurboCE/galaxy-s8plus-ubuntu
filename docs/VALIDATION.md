@@ -2872,3 +2872,31 @@ DTB. No rail was switched during this test.
 - The device probe mounts USERDATA with ext4 `ro,noload`. Normal Ubuntu
   boot, Panfrost/DECON scanout, GNOME Wayland login, rotation, suspend,
   audio and Wi-Fi require separate runtime qualification on Linux 6.18.
+
+## SM-G955N Linux 6.18 UFS clock fix and USB diagnostic trial — 2026-11-23
+
+- The initial USB build reproduced the UIC timeout and recorded a zero
+  UniPro frequency. The 6.18 UFS platform parser skipped the clock list
+  when `freq-table-hz` was absent. The Samsung DT supplies two pairs
+  even when it leaves rate scaling disabled.
+- With the clock table and vendor parent/rate, the next trial recorded
+  177666667 Hz, enumerated the embedded UFS LUN and its partitions, and
+  mounted the installed Ubuntu USERDATA as ext4 with `ro,noload`.
+  The expected hostname and init executable were both present.
+- The PMU software-reset handler returned trial images to TWRP
+  automatically. The first USB trial registered the ACM gadget in
+  the kernel and failed to enable control endpoint ep0out. macOS
+  did not enumerate the USB console during that trial.
+- Booted the installed Ubuntu from the UFS USERDATA root read-write
+  and verified systemd reached sysinit and basic.target. The runtime
+  journal records the trial with `state=starting` and
+  `multi-user=inactive` when its recovery timer fired. The same boot
+  recorded network namespace service failures and UFS shutdown
+  power-management errors. The timer requested a normal shutdown
+  and the handset returned to TWRP.
+- Follow-up USB trials applied the Samsung link clock request and
+  orientation GPIO, then moved the ACM bind into initramfs configfs.
+  The gadget bound to DWC3, but ep0out still timed out with DSTS
+  0x520004 and USB2PHYCFG 0x40102400. The UDC reported not attached
+  and the host received no native CDC ACM device. The same trial
+  again mounted and identified USERDATA read-only and returned to TWRP.

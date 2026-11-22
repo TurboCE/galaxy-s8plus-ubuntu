@@ -1,0 +1,341 @@
+Subject: [PATCH] SM-G955N: bring up a high-speed USB peripheral for recovery diagnostics
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -212,3 +212,47 @@
+ 		mode-recovery = <0x12345674>;
+ 	};
+ };
++
++&{/soc@0} {
++	usb2_phy: phy@10e00000 {
++		compatible = "samsung,exynos8895-usb2-device-phy";
++		reg = <0x10e00000 0x100>, <0x10e10000 0x100>, <0x10e5007c 0x4>;
++		reg-names = "phy", "secondary", "ref-select";
++		orientation-gpios = <&gpi1 7 GPIO_ACTIVE_LOW>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&usb_orientation>;
++		clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_USBTV_I_USB30DRD_ACLK>;
++		clock-names = "phy";
++		samsung,pmu-syscon = <&pmu_system_controller>;
++		#phy-cells = <0>;
++	};
++
++	usb@10c00000 {
++		compatible = "snps,dwc3";
++		reg = <0x10c00000 0x10000>;
++		interrupts = <GIC_SPI 337 IRQ_TYPE_EDGE_RISING>;
++		dr_mode = "peripheral";
++		maximum-speed = "high-speed";
++		snps,dis_u2_susphy_quirk;
++		snps,dis_enblslpm_quirk;
++		phys = <&usb2_phy>;
++		phy-names = "usb2-phy";
++		clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_USBTV_I_USB30DRD_ACLK>,
++			 <&cmu_fsys0 CLK_GOUT_FSYS0_USBTV_I_USB30DRD_REF_CLK>,
++			 <&cmu_fsys0 CLK_GOUT_FSYS0_USBTV_I_USB30DRD_SUSPEND_CLK>;
++		clock-names = "bus_early", "ref", "suspend";
++		assigned-clocks = <&cmu_top CLK_MOUT_CMU_FSYS0_USBDRD30>,
++				  <&cmu_top CLK_DOUT_CMU_FSYS0_USBDRD30>,
++				  <&cmu_fsys0 CLK_MOUT_FSYS0_USBDRD30_USER>;
++		assigned-clock-parents = <&cmu_top CLK_DOUT_CMU_SHARED0_DIV4>,
++					 <0>, <&cmu_top CLK_DOUT_CMU_FSYS0_USBDRD30>;
++		assigned-clock-rates = <0>, <66625000>, <0>;
++	};
++};
++&pinctrl_fsys0 {
++	usb_orientation: usb-orientation-pins {
++		samsung,pins = "gpi1-7";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
++	};
++};
+diff --git a/drivers/phy/samsung/Kconfig b/drivers/phy/samsung/Kconfig
+--- a/drivers/phy/samsung/Kconfig
++++ b/drivers/phy/samsung/Kconfig
+@@ -105,3 +105,11 @@
+ 	  Exynos5250 based SoCs.This SerDes/Phy supports SATA 1.5 Gb/s,
+ 	  SATA 3.0 Gb/s, SATA 6.0 Gb/s speeds. It supports one SATA host
+ 	  port to accept one SATA device.
++
++config PHY_EXYNOS8895_USB2
++	tristate "Exynos8895 USB2 device PHY"
++	depends on ARCH_EXYNOS || COMPILE_TEST
++	depends on OF && MFD_SYSCON
++	select GENERIC_PHY
++	help
++	  Enable the Exynos8895 USB2 PHY for fixed peripheral mode.
+diff --git a/drivers/phy/samsung/Makefile b/drivers/phy/samsung/Makefile
+--- a/drivers/phy/samsung/Makefile
++++ b/drivers/phy/samsung/Makefile
+@@ -18,3 +18,4 @@
+ phy-exynos-usb2-$(CONFIG_PHY_S5PV210_USB2)	+= phy-s5pv210-usb2.o
+ obj-$(CONFIG_PHY_EXYNOS5_USBDRD)	+= phy-exynos5-usbdrd.o
+ obj-$(CONFIG_PHY_EXYNOS5250_SATA)	+= phy-exynos5250-sata.o
++obj-$(CONFIG_PHY_EXYNOS8895_USB2)	+= phy-exynos8895-usb2.o
+diff --git a/drivers/phy/samsung/phy-exynos8895-usb2.c b/drivers/phy/samsung/phy-exynos8895-usb2.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/phy/samsung/phy-exynos8895-usb2.c
+@@ -0,0 +1,208 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Exynos8895 USB2 device PHY.
++ * Register sequence adapted from Samsung's GPL-2.0 USB3 calibration driver.
++ */
++#include <linux/bitfield.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/io.h>
++#include <linux/gpio/consumer.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/phy/phy.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++#define HS_LINKSYSTEM		0x04
++#define LINK_SOFT_RESET		BIT(28)
++#define LINK_VBUS_VALID		(BIT(7) | BIT(8))
++#define HS_PHYUTMI		0x08
++#define UTMI_DEVICE		(BIT(10) | BIT(9) | BIT(6))
++#define UTMI_HOST_SLEEP		(BIT(4) | BIT(3) | BIT(2) | BIT(1) | BIT(0))
++#define HS_PHYPIPE		0x0c
++#define PIPE_FREE_UTMI_CLK	BIT(4)
++#define HS_PHYCLKRST		0x10
++#define CLK_PORT_RESET		BIT(1)
++#define CLK_REFSEL		GENMASK(3, 2)
++#define CLK_FSEL		GENMASK(10, 5)
++#define CLK_MPLL_MULT		GENMASK(17, 11)
++#define CLK_REF_DIV2		BIT(18)
++#define CLK_REF_ENABLE		BIT(19)
++#define CLK_SSC_REFSEL		GENMASK(30, 23)
++#define CLK_COMMON_OFF		(BIT(31) | BIT(0))
++#define CLK_RETENTION		BIT(4)
++#define HS_PHYPARAM0		0x1c
++#define PARAM_REF_USE_PAD	BIT(31)
++#define HS_PHYTEST		0x28
++#define TEST_POWERDOWN_HS	BIT(2)
++#define HS_PHYRESUME		0x34
++#define RESUME_DISABLE_QACT	GENMASK(13, 10)
++#define RESUME_FORCE_QACT	BIT(9)
++#define PHY_SELECTION		0x6c
++#define PIPE_SELECT		(BIT(1) | BIT(3))
++
++struct exynos8895_usb2 {
++	void __iomem *base;
++	void __iomem *secondary;
++	void __iomem *active;
++	void __iomem *regs;
++	void __iomem *refsel;
++	struct regmap *pmu;
++	struct clk *clock;
++	struct gpio_desc *orientation;
++};
++
++static void hs_update(void __iomem *base, u32 reg, u32 mask, u32 val)
++{
++	u32 old = readl(base + reg);
++
++	writel((old & ~mask) | val, base + reg);
++}
++
++static void hs_reset_port(void __iomem *base)
++{
++	hs_update(base, HS_PHYCLKRST,
++		  CLK_PORT_RESET | CLK_REFSEL | CLK_FSEL | CLK_COMMON_OFF | CLK_RETENTION |
++		  CLK_MPLL_MULT | CLK_REF_DIV2 | CLK_REF_ENABLE | CLK_SSC_REFSEL,
++		  CLK_PORT_RESET | CLK_RETENTION | CLK_REF_ENABLE |
++		  FIELD_PREP(CLK_REFSEL, 2) | FIELD_PREP(CLK_FSEL, 2) |
++		  FIELD_PREP(CLK_MPLL_MULT, 0x60) | FIELD_PREP(CLK_SSC_REFSEL, 0x08));
++	udelay(10);
++	hs_update(base, HS_PHYCLKRST, CLK_PORT_RESET, 0);
++	hs_update(base, HS_PHYTEST, TEST_POWERDOWN_HS, 0);
++}
++
++static int exynos8895_usb2_on(struct phy *phy)
++{
++	struct exynos8895_usb2 *usb = phy_get_drvdata(phy);
++	unsigned int bank_offset;
++	int orientation, ret;
++
++	orientation = gpiod_get_value_cansleep(usb->orientation);
++	if (orientation < 0)
++		return orientation;
++
++	ret = clk_prepare_enable(usb->clock);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(usb->pmu, 0x704, BIT(0), BIT(0));
++	if (ret)
++		goto disable_clock;
++
++	/* Newer PHYCON blocks prefix the register bank with a version word. */
++	bank_offset = readl(usb->base) ? sizeof(u32) : 0;
++	usb->regs = usb->base + bank_offset;
++	usb->active = orientation ? usb->secondary + bank_offset : usb->regs;
++
++	dev_info(&phy->dev, "USB2 peripheral, PHY bank %d\n", orientation);
++
++	/* USBPHY refclk mux, matching the vendor PHY setup. */
++	writel(readl(usb->refsel) | BIT(24), usb->refsel);
++	hs_update(usb->active, HS_PHYRESUME, RESUME_DISABLE_QACT | RESUME_FORCE_QACT,
++		  RESUME_DISABLE_QACT);
++	usleep_range(500, 600);
++	hs_update(usb->active, HS_PHYRESUME, RESUME_FORCE_QACT, RESUME_FORCE_QACT);
++
++	hs_update(usb->active, HS_LINKSYSTEM, LINK_SOFT_RESET, LINK_SOFT_RESET);
++	udelay(10);
++	hs_update(usb->active, HS_LINKSYSTEM, LINK_SOFT_RESET, 0);
++	hs_update(usb->regs, PHY_SELECTION, PIPE_SELECT, orientation ? PIPE_SELECT : 0);
++
++	/* The primary UTMI port uses the board's 26 MHz clock core path. */
++	hs_update(usb->regs, HS_PHYPARAM0, PARAM_REF_USE_PAD, 0);
++	hs_update(usb->active, HS_PHYPIPE, PIPE_FREE_UTMI_CLK, PIPE_FREE_UTMI_CLK);
++	if (usb->active != usb->regs)
++		hs_reset_port(usb->active);
++	hs_reset_port(usb->regs);
++	usleep_range(1500, 1600);
++
++	/* This board leaves the PHY VBUS input pad unused. */
++	hs_update(usb->regs, HS_LINKSYSTEM, LINK_VBUS_VALID, LINK_VBUS_VALID);
++	hs_update(usb->regs, HS_PHYUTMI, UTMI_DEVICE | UTMI_HOST_SLEEP, UTMI_DEVICE);
++	return 0;
++
++disable_clock:
++	clk_disable_unprepare(usb->clock);
++	return ret;
++}
++
++static int exynos8895_usb2_off(struct phy *phy)
++{
++	struct exynos8895_usb2 *usb = phy_get_drvdata(phy);
++	int ret;
++
++	hs_update(usb->regs, HS_LINKSYSTEM, LINK_VBUS_VALID, 0);
++	hs_update(usb->active, HS_PHYRESUME, RESUME_FORCE_QACT, 0);
++	hs_update(usb->regs, HS_PHYTEST, TEST_POWERDOWN_HS, TEST_POWERDOWN_HS);
++	if (usb->active != usb->regs)
++		hs_update(usb->active, HS_PHYTEST, TEST_POWERDOWN_HS, TEST_POWERDOWN_HS);
++	ret = regmap_update_bits(usb->pmu, 0x704, BIT(0), 0);
++	clk_disable_unprepare(usb->clock);
++	return ret;
++}
++
++static const struct phy_ops exynos8895_usb2_ops = {
++	.power_on = exynos8895_usb2_on,
++	.power_off = exynos8895_usb2_off,
++	.owner = THIS_MODULE,
++};
++
++static int exynos8895_usb2_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct exynos8895_usb2 *usb;
++	struct phy_provider *provider;
++	struct phy *phy;
++
++	usb = devm_kzalloc(dev, sizeof(*usb), GFP_KERNEL);
++	if (!usb)
++		return -ENOMEM;
++
++	usb->base = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(usb->base))
++		return PTR_ERR(usb->base);
++	usb->secondary = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(usb->secondary))
++		return PTR_ERR(usb->secondary);
++	usb->refsel = devm_platform_ioremap_resource(pdev, 2);
++	if (IS_ERR(usb->refsel))
++		return PTR_ERR(usb->refsel);
++	usb->orientation = devm_gpiod_get(dev, "orientation", GPIOD_IN);
++	if (IS_ERR(usb->orientation))
++		return dev_err_probe(dev, PTR_ERR(usb->orientation), "Missing USB PHY orientation GPIO\n");
++	usb->clock = devm_clk_get(dev, "phy");
++	if (IS_ERR(usb->clock))
++		return dev_err_probe(dev, PTR_ERR(usb->clock), "Missing USB PHY clock\n");
++	usb->pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu-syscon");
++	if (IS_ERR(usb->pmu))
++		return dev_err_probe(dev, PTR_ERR(usb->pmu), "Missing USB PHY isolation control\n");
++
++	phy = devm_phy_create(dev, NULL, &exynos8895_usb2_ops);
++	if (IS_ERR(phy))
++		return PTR_ERR(phy);
++
++	phy_set_drvdata(phy, usb);
++	provider = devm_of_phy_provider_register(dev, of_phy_simple_xlate);
++	return PTR_ERR_OR_ZERO(provider);
++}
++
++static const struct of_device_id exynos8895_usb2_of_match[] = {
++	{ .compatible = "samsung,exynos8895-usb2-device-phy" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, exynos8895_usb2_of_match);
++
++static struct platform_driver exynos8895_usb2_driver = {
++	.probe = exynos8895_usb2_probe,
++	.driver = {
++		.name = "exynos8895-usb2",
++		.of_match_table = exynos8895_usb2_of_match,
++	},
++};
++module_platform_driver(exynos8895_usb2_driver);
++
++MODULE_DESCRIPTION("Exynos8895 USB2 peripheral PHY");
++MODULE_LICENSE("GPL");
+diff --git a/Documentation/devicetree/bindings/phy/samsung,exynos8895-usb2-device-phy.yaml b/Documentation/devicetree/bindings/phy/samsung,exynos8895-usb2-device-phy.yaml
+new file mode 100644
+--- /dev/null
++++ b/Documentation/devicetree/bindings/phy/samsung,exynos8895-usb2-device-phy.yaml
+@@ -0,0 +1,47 @@
++# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/phy/samsung,exynos8895-usb2-device-phy.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Samsung Exynos8895 USB2 Device PHY
++
++maintainers:
++  - Alim Akhtar <alim.akhtar@samsung.com>
++
++properties:
++  compatible:
++    const: samsung,exynos8895-usb2-device-phy
++  reg:
++    items:
++      - description: Primary UTMI PHY register bank
++      - description: Secondary PHY register bank
++      - description: USB reference clock selection register
++  reg-names:
++    items:
++      - const: phy
++      - const: secondary
++      - const: ref-select
++  orientation-gpios:
++    maxItems: 1
++  clocks:
++    maxItems: 1
++  clock-names:
++    const: phy
++  samsung,pmu-syscon:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: PMU controller containing the USB PHY isolation bit
++  "#phy-cells":
++    const: 0
++
++required:
++  - compatible
++  - reg
++  - reg-names
++  - orientation-gpios
++  - clocks
++  - clock-names
++  - samsung,pmu-syscon
++  - "#phy-cells"
++
++additionalProperties: false

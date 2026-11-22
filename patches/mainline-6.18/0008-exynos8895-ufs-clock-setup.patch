@@ -1,0 +1,88 @@
+Subject: [PATCH] Exynos8895: select the vendor UFS clock path and EVT 1.1 TCXO setup
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895.dtsi b/arch/arm64/boot/dts/exynos/exynos8895.dtsi
+--- a/arch/arm64/boot/dts/exynos/exynos8895.dtsi
++++ b/arch/arm64/boot/dts/exynos/exynos8895.dtsi
+@@ -1279,7 +1279,17 @@
+ 			phy-names = "ufs-phy";
+ 			pinctrl-names = "default";
+ 			pinctrl-0 = <&ufs_rst_n &ufs_refclk_out>;
++			/* Keep the embedded UFS clock path on the vendor CAL parent. */
++			assigned-clocks = <&cmu_top CLK_MOUT_CMU_FSYS0_UFS_EMBD>,
++					  <&cmu_top CLK_DOUT_CMU_FSYS0_UFS_EMBD>,
++					  <&cmu_fsys0 CLK_MOUT_FSYS0_UFS_EMBD_USER>;
++			assigned-clock-parents = <&cmu_top CLK_DOUT_CMU_SHARED0_DIV4>,
++						 <0>, <&cmu_top CLK_DOUT_CMU_FSYS0_UFS_EMBD>;
++			assigned-clock-rates = <0>, <177667000>, <0>;
++			/* UFS core enumerates its clock list from these pairs. */
++			freq-table-hz = <0 0>, <0 0>;
+ 			samsung,sysreg = <&syscon_fsys0 0x700>;
++			samsung,pmu-syscon = <&pmu_system_controller>;
+ 			dma-coherent;
+ 			status = "disabled";
+ 		};
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -11,6 +11,7 @@
+ #include <linux/unaligned.h>
+ #include <crypto/aes.h>
+ #include <linux/arm-smccc.h>
++#include <linux/sys_soc.h>
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/module.h>
+@@ -459,8 +460,11 @@
+ 	u8 div = 0;
+ 	int ret = 0;
+ 
+-	if (list_empty(head))
++	if (list_empty(head)) {
++		if (ufs->drv_data->pclk_from_unipro)
++			return dev_err_probe(hba->dev, -EINVAL, "UFS clock table is empty\n");
+ 		goto out;
++	}
+ 
+ 	list_for_each_entry(clki, head, list) {
+ 		if (!IS_ERR(clki->clk)) {
+@@ -2190,9 +2194,26 @@
+ 	return 0;
+ }
+ 
++static const struct soc_device_attribute exynos8895_ufs_tcxo_revisions[] = {
++	{ .soc_id = "EXYNOS8895", .revision = "11" },
++	{ }
++};
++
+ static int exynos8895_ufs_init(struct exynos_ufs *ufs)
+ {
++	struct regmap *pmu;
+ 	int ret;
++
++	if (soc_device_match(exynos8895_ufs_tcxo_revisions)) {
++		pmu = syscon_regmap_lookup_by_phandle(ufs->hba->dev->of_node,
++						     "samsung,pmu-syscon");
++		if (IS_ERR(pmu))
++			return PTR_ERR(pmu);
++		/* Samsung applies this TCXO setting starting with EVT 1.1. */
++		ret = regmap_update_bits(pmu, 0x620, BIT(0), BIT(0));
++		if (ret)
++			return ret;
++	}
+ 
+ 	if (!ufs->sysreg)
+ 		return -ENODEV;
+diff --git a/Documentation/devicetree/bindings/ufs/samsung,exynos-ufs.yaml b/Documentation/devicetree/bindings/ufs/samsung,exynos-ufs.yaml
+--- a/Documentation/devicetree/bindings/ufs/samsung,exynos-ufs.yaml
++++ b/Documentation/devicetree/bindings/ufs/samsung,exynos-ufs.yaml
+@@ -71,6 +71,10 @@
+     description:
+       Phandle and offset to the FSYSx sysreg for UFS io coherency setting.
+ 
++  samsung,pmu-syscon:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: PMU phandle for the Exynos8895 EVT 1.1 TCXO setup.
++
+   dma-coherent: true
+ 
+ required:

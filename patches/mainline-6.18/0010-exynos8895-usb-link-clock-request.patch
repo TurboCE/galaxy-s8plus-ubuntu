@@ -1,0 +1,46 @@
+Subject: [PATCH] Exynos8895: request the USB link Q-channel clock
+
+The Samsung Exynos8895 CAL supplies both the USB bus clock and the
+USB link Q-channel clock request. Keep the latter asserted while
+the DWC3 bus clock is enabled, preserving the existing gate.
+
+diff --git a/drivers/clk/samsung/clk-exynos8895.c b/drivers/clk/samsung/clk-exynos8895.c
+--- a/drivers/clk/samsung/clk-exynos8895.c
++++ b/drivers/clk/samsung/clk-exynos8895.c
+@@ -1595,7 +1595,10 @@
+ #define CLK_CON_GAT_GOUT_BLK_FSYS0_UID_XIU_D_FSYS0_USB_IPCLKPORT_ACLK		0x2098
+ #define CLK_CON_GAT_GOUT_BLK_FSYS0_UID_XIU_P_FSYS0_IPCLKPORT_ACLK		0x209c
+ 
++#define QCH_CON_USBTV_USB30DRD_LINK 0x3044
++
+ static const unsigned long fsys0_clk_regs[] __initconst = {
++	QCH_CON_USBTV_USB30DRD_LINK,
+ 	PLL_CON0_MUX_CLKCMU_FSYS0_BUS_USER,
+ 	PLL_CON2_MUX_CLKCMU_FSYS0_BUS_USER,
+ 	PLL_CON0_MUX_CLKCMU_FSYS0_DPGTC_USER,
+@@ -1772,8 +1775,10 @@
+ 	     "gout_fsys0_ufs_embd_i_fmp_clk", "mout_fsys0_bus_user",
+ 	     CLK_CON_GAT_GOUT_BLK_FSYS0_UID_UFS_EMBD_IPCLKPORT_I_FMP_CLK,
+ 	     21, 0, 0),
++	GATE(0, "gout_fsys0_usbdrd_link_req", "mout_fsys0_bus_user",
++	     QCH_CON_USBTV_USB30DRD_LINK, 1, 0, 0),
+ 	GATE(CLK_GOUT_FSYS0_USBTV_I_USB30DRD_ACLK,
+-	     "gout_fsys0_usbtv_i_usb30drd_aclk", "mout_fsys0_bus_user",
++	     "gout_fsys0_usbtv_i_usb30drd_aclk", "gout_fsys0_usbdrd_link_req",
+ 	     CLK_CON_GAT_GOUT_BLK_FSYS0_UID_USBTV_IPCLKPORT_I_USB30DRD_ACLK,
+ 	     21, 0, 0),
+ 	GATE(CLK_GOUT_FSYS0_USBTV_I_USB30DRD_REF_CLK,
+diff --git a/drivers/usb/dwc3/gadget.c b/drivers/usb/dwc3/gadget.c
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -2975,7 +2975,9 @@
+ 	dep->flags = 0;
+ 	ret = __dwc3_gadget_ep_enable(dep, DWC3_DEPCFG_ACTION_INIT);
+ 	if (ret) {
+-		dev_err(dwc->dev, "failed to enable %s\n", dep->name);
++		dev_err(dwc->dev, "failed to enable %s: %d (DSTS=%#x USB2PHYCFG=%#x)\n",
++			dep->name, ret, dwc3_readl(dwc->regs, DWC3_DSTS),
++			dwc3_readl(dwc->regs, DWC3_GUSB2PHYCFG(0)));
+ 		goto err0;
+ 	}
+ 

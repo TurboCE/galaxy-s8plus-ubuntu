@@ -1834,3 +1834,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   storage controller and starts with a conservative PWM link mode.
 - Added a read-only USERDATA probe and an opt-in handoff to the installed
   Ubuntu root. The warm trace reader recognizes each storage checkpoint.
+
+## 2026-11-23 — UFS clocks and USB device diagnostics on Linux 6.18
+
+- Add the UFS clock-frequency pairs consumed by the 6.18 UFS core and
+  select the vendor UniPro rate and EVT 1.1 clock setup.
+- Add SM-G955N USB2 PHY, cable orientation and DWC3 link clocks, plus a
+  configfs CDC ACM diagnostic interface in the initramfs.
+- Add a multi-user Ubuntu trial and an optional runtime recovery timer.

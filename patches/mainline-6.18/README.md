@@ -41,7 +41,7 @@ and wake from suspend require separate tests.
 
 ## Embedded UFS trial
 
-Apply patch 0007 to Linux. Append `config/mainline618-ufs.fragment` to
+Apply patches 0007 and 0008 to Linux. Append `config/mainline618-ufs.fragment` to
 the bring-up fragment for this build. Pack the static ARM64 BusyBox at
 `/bin/busybox` and `scripts/boot/mainline618-ufs-init.sh` at `/init`.
 Include `/dev`, `/proc`, `/sys`, `/run`, and `/newroot` in the archive.
@@ -54,14 +54,28 @@ The first port constrains the link to PWM gear 1. Use the diagnostic
 mode first and retain the matching working BOOT backup. An explicit
 `g955n.ufs_boot=1` boot argument lets the initramfs hand off to the
 verified Ubuntu systemd after mounting EFS read-only. That stage also
-requires a kernel configuration suitable for the installed userspace.
+uses `config/mainline618-ubuntu.fragment`. For a timed trial, also pass
+`systemd.unit=multi-user.target g955n.ubuntu_return=1`. A timer in
+`/run` records the systemd state and root mount, then requests a
+normal shutdown and recovery reboot.
 
 To test an unattended diagnostic return, also pack the ARM64
 `scripts/boot/reboot-recovery.c` helper at `/sbin/reboot-recovery` and
 add `g955n.ufs_return=1` to the diagnostic boot arguments. The boot
 probe requests recovery when it finishes. The board's syscon restart
 sequence uses the Samsung PMU scratch and software-reset registers.
-This restart path awaits a device test.
+The storage probe has used this path to return to TWRP on the handset.
+
+## USB diagnostic access
+
+Apply patches 0009 and 0010 and append `config/mainline618-usb.fragment` for the
+high-speed USB device build. The initramfs binds one CDC ACM serial
+interface through configfs. Add `g955n.usb_diag=1` to the
+boot arguments to enable the diagnostic commands. With the serial port
+open from the host, send one command per line. `status` returns the
+kernel release, `log` streams the kernel log, and `recovery` requests
+a recovery reboot. The interface is available during the read-only
+UFS test and exits before handing over to the installed system.
 
 ## Reading the warm boot trace
 
