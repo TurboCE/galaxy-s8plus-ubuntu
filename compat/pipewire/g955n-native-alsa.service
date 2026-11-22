@@ -1,0 +1,13 @@
+[Unit]
+Description=Verify SM-G955N kernel audio endpoint restrictions
+Before=systemd-user-sessions.service display-manager.service
+ConditionPathExists=/proc/device-tree/samsung,g955n-desktop-audio-scope
+
+[Service]
+Type=oneshot
+RuntimeDirectory=g955n-native-alsa
+RuntimeDirectoryPreserve=yes
+ExecStart=/bin/sh -ec 'rm -f /run/g955n-native-alsa/boot-id; grep -aq SM-G955N /proc/device-tree/model; dmesg | grep -Fq "SM-G955N ALSA: native RDMA0/WDMA1 audio scope active"; cat /proc/sys/kernel/random/boot_id > /run/g955n-native-alsa/boot-id'
+
+[Install]
+WantedBy=multi-user.target

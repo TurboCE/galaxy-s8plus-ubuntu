@@ -1,9 +1,12 @@
 """Do not mistake startup junk or missing counters for usable desktop audio."""
 import array
+import importlib.machinery
 import importlib.util
 import math
 from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 path = Path(__file__).resolve().parents[1] / 'compat/pipewire/check-desktop-audio.py'
 spec = importlib.util.spec_from_file_location('desktop_audio', path)
@@ -19,6 +22,30 @@ def stereo(values):
 
 
 class DesktopAudioTests(unittest.TestCase):
+    def test_stock_audio_requires_attestation_for_this_boot(self):
+        loader = importlib.machinery.SourceFileLoader(
+            'audio_launcher', str(path.with_name('g955n-wireplumber')))
+        launcher_spec = importlib.util.spec_from_loader(loader.name, loader)
+        launcher = importlib.util.module_from_spec(launcher_spec)
+        loader.exec_module(launcher)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker, prop, boot = (root / name for name in ('marker', 'property', 'boot'))
+            boot.write_text('current')
+            with patch.multiple(launcher, KERNEL_SCOPE=marker, SCOPE_PROPERTY=prop, BOOT_ID=boot), \
+                 patch.object(launcher, 'trusted_regular') as trusted:
+                self.assertFalse(launcher.kernel_scope_active())
+                marker.write_text('old')
+                self.assertFalse(launcher.kernel_scope_active())
+                prop.touch()
+                self.assertFalse(launcher.kernel_scope_active())
+                marker.write_text('current')
+                self.assertTrue(launcher.kernel_scope_active())
+                trusted.assert_called_with(marker)
+                trusted.side_effect = ValueError('untrusted')
+                with self.assertRaises(ValueError):
+                    launcher.kernel_scope_active()
+
     def test_startup_clipping_does_not_become_a_live_microphone(self):
         raw = stereo([32767] * 12000 + [0] * 48000)
         result = audio.statistics(raw)

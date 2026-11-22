@@ -1,0 +1,85 @@
+Subject: ALSA: guard built-in SM-G955N audio endpoints at open
+
+--- a/sound/core/sound.c
++++ b/sound/core/sound.c
+@@ -31,6 +31,7 @@
+ #include <sound/initval.h>
+ #include <linux/kmod.h>
+ #include <linux/mutex.h>
++#include <linux/of.h>
+ 
+ static int major = CONFIG_SND_MAJOR;
+ int snd_major;
+@@ -149,6 +150,34 @@
+ #define autoload_device(minor)	NULL
+ #endif /* CONFIG_MODULES */
+ 
++/* Restrict the built-in DSP paths before a PCM open powers the ABOX.
++ * Card IDs are used because ALSA can allocate different card numbers.
++ * External audio cards are outside this board's ABOX restriction. */
++static bool g955n_audio_scope;
++
++static bool g955n_audio_open_allowed(const struct snd_minor *minor)
++{
++	const struct snd_card *card = minor->card_ptr;
++
++	if (!g955n_audio_scope || !card)
++		return true;
++	if (!strcmp(card->id, "aboxdump"))
++		return false;
++	if (strcmp(card->id, "Exynos8895Mader"))
++		return true;
++
++	switch (minor->type) {
++	case SNDRV_DEVICE_TYPE_PCM_PLAYBACK:
++		return minor->device == 0; /* RDMA0 */
++	case SNDRV_DEVICE_TYPE_PCM_CAPTURE:
++		return minor->device == 9; /* WDMA1 */
++	case SNDRV_DEVICE_TYPE_COMPRESS:
++		return false;
++	default:
++		return true; /* Includes the standard mixer/control node. */
++	}
++}
++
+ static int snd_open(struct inode *inode, struct file *file)
+ {
+ 	unsigned int minor = iminor(inode);
+@@ -166,6 +195,10 @@
+ 			mutex_unlock(&sound_mutex);
+ 			return -ENODEV;
+ 		}
++	}
++	if (!g955n_audio_open_allowed(mptr)) {
++		mutex_unlock(&sound_mutex);
++		return -ENODEV;
+ 	}
+ 	new_fops = fops_get(mptr->f_ops);
+ 	mutex_unlock(&sound_mutex);
+@@ -399,6 +432,16 @@
+ 
+ static int __init alsa_sound_init(void)
+ {
++	struct device_node *root;
++
++	if (of_machine_is_compatible("samsung, SM-G955N rev05")) {
++		root = of_find_node_by_path("/");
++		g955n_audio_scope = of_property_read_bool(root, "samsung,g955n-desktop-audio-scope");
++		of_node_put(root);
++		if (g955n_audio_scope)
++			pr_info("SM-G955N ALSA: native RDMA0/WDMA1 audio scope active\n");
++	}
++
+ 	snd_major = major;
+ 	snd_ecards_limit = cards_limit;
+ 	if (register_chrdev(major, "alsa", &snd_fops)) {
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10.dts
+@@ -22,6 +22,7 @@
+ 
+ / {
+ 	model = "Samsung SM-G955N rev05 board based on EXYNOS8895";
++	samsung,g955n-desktop-audio-scope;
+ 	model_info-chip = <8895>;
+ 	model_info-platform = "android";
+ 	model_info-subtype = "samsung";

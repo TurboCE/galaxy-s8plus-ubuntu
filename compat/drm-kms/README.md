@@ -132,3 +132,36 @@ Actual device results and remaining limits are in
 [`docs/VALIDATION.md`](../../docs/VALIDATION.md). Kernel build success, CPU
 measurements and flip events do not establish optical frame rate or physical
 finger-to-panel latency.
+
+## Mesa/Panfrost buffer test
+
+Build the ARM64 fixture against Ubuntu libdrm, GBM, EGL and GLESv2. From
+the repository root on ARM64 Ubuntu:
+
+```sh
+panel=compat/native-gnome/direct-panel
+cc -std=c11 -O2 -Wall -Wextra -Werror -I"$panel" \
+  compat/drm-kms/panfrost-scanout-test.c "$panel/drm-output.c" \
+  $(pkg-config --cflags --libs libdrm gbm egl glesv2) -o panfrost-scanout-test
+```
+
+Start with `./panfrost-scanout-test --check` on the actual SM-G955N.
+The check opens the DECON display device, then selects a DRM render node
+whose driver is Panfrost. It establishes a Mesa GBM/EGL context, checks
+that the renderer is Mali-G71 Panfrost and renders to linear single-plane
+GBM allocations through imported EGLImages. The check keeps the current
+display session running and does not take DRM master or issue a modeset.
+The existing kernel57 reached the DECON PRIME/DSI checks but has no
+accessible Panfrost render device. The fixture exits with status 3 in this
+case before allocating any render targets.
+
+When those prerequisites pass, stop the current display session and vacate
+the panel before using `--present-reviewed-sm-g955n`. This strict mode
+submits the actual GBM DMA-BUFs to DECON using the existing KMS presenter.
+It retains each allocation and moves to its next slot only after successful
+presentation. GPU draws complete before DECON takes the buffer. The test
+never maps the pixels on the CPU.
+
+GNOME Wayland needs the DRM/logind seat ownership and Mesa GBM renderer
+integration in addition to this direct buffer test. A successful test of
+vendor gralloc or software rendering does not qualify Panfrost.

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Fail closed unless the reviewed G955N ALSA plugin and card rules are present.
+"""Select the reviewed G955N audio paths and fail closed on mismatched inputs.
 
 Candidate installer target: /usr/local/libexec/g955n-wireplumber, root-owned 0755.
 This launcher never installs files, opens ALSA, changes controls or reboots.
@@ -20,6 +20,9 @@ STOCK_ROOT = Path('/usr/lib/aarch64-linux-gnu/spa-0.2')
 PLUGIN = PRIVATE_ROOT / 'alsa/libspa-alsa.so'
 STOCK_ALSA = STOCK_ROOT / 'alsa/libspa-alsa.so'
 MANIFEST = Path('/usr/local/share/g955n/pipewire-plugin.json')
+KERNEL_SCOPE = Path('/run/g955n-native-alsa/boot-id')
+SCOPE_PROPERTY = Path('/proc/device-tree/samsung,g955n-desktop-audio-scope')
+BOOT_ID = Path('/proc/sys/kernel/random/boot_id')
 UCM = Path('/usr/share/alsa/ucm2/Samsung/SM-G955N')
 MASTER = UCM / 'SM-G955N.conf'
 LINK = Path('/usr/share/alsa/ucm2/conf.d/Exynos8895-Made/Exynos8895-Madera.conf')
@@ -81,6 +84,13 @@ def check_plugin_tree():
             raise ValueError('Unexpected stock SPA family link: ' + str(link))
 
 
+def kernel_scope_active():
+    if not KERNEL_SCOPE.is_file():
+        return False
+    trusted_regular(KERNEL_SCOPE)
+    return (SCOPE_PROPERTY.is_file() and KERNEL_SCOPE.read_text() == BOOT_ID.read_text())
+
+
 def check():
     if (platform.machine() != 'aarch64' or 'g955n-ubuntu' not in platform.release()
             or 'SM-G955N' not in Path('/proc/device-tree/model').read_text()):
@@ -95,21 +105,26 @@ def check():
         raise ValueError('Missing reviewed scope patch hash')
     if manifest.get('plugin_search_mode') != 'private-only':
         raise ValueError('Manifest does not attest to a private-only SPA search root')
-    version = subprocess.check_output(
-        ['dpkg-query', '-W', '-f=${Version}', 'libspa-0.2-modules'], text=True).strip()
-    if version != manifest.get('ubuntu_source_version'):
-        raise ValueError('Ubuntu plugin version changed; rebuild and review the private backport')
+    kernel_scope = kernel_scope_active()
+    if not kernel_scope:
+        version = subprocess.check_output(
+            ['dpkg-query', '-W', '-f=${Version}', 'libspa-0.2-modules'], text=True).strip()
+        if version != manifest.get('ubuntu_source_version'):
+            raise ValueError('Ubuntu plugin version changed; rebuild and review the private backport')
     files = manifest.get('files', {})
     if set(files) != {str(path) for path in REQUIRED}:
         raise ValueError('Manifest does not cover the exact plugin, scope rules and UCM files')
     for path in REQUIRED:
+        if kernel_scope and path == PLUGIN:
+            continue
         trusted_regular(path)
         if digest(path) != files[str(path)]:
             raise ValueError('Guarded file checksum mismatch: ' + str(path))
     trusted_regular(STOCK_ALSA)
-    if digest(STOCK_ALSA) != manifest.get('original_plugin_sha256'):
-        raise ValueError('Original Ubuntu ALSA plugin changed; review the matching source/build')
-    check_plugin_tree()
+    if not kernel_scope:
+        if digest(STOCK_ALSA) != manifest.get('original_plugin_sha256'):
+            raise ValueError('Original Ubuntu ALSA plugin changed; review the matching source/build')
+        check_plugin_tree()
     if not LINK.is_symlink() or LINK.lstat().st_uid != 0 or LINK.resolve(strict=True) != MASTER:
         raise ValueError('Unexpected UCM card lookup link')
     # The root-owned target parents must not allow replacing the lookup link.
@@ -117,17 +132,19 @@ def check():
         metadata = directory.stat()
         if metadata.st_uid != 0 or metadata.st_mode & 0o022:
             raise ValueError('UCM lookup directory is not exclusively root-managed')
-    with PLUGIN.open('rb') as source:
-        header = source.read(64)
-    if (header[:6] != b'\x7fELF\x02\x01'
-            or int.from_bytes(header[18:20], 'little') != 183):
-        raise ValueError('Reviewed private plugin is not an AArch64 ELF64 library')
+    if not kernel_scope:
+        with PLUGIN.open('rb') as source:
+            header = source.read(64)
+        if (header[:6] != b'\x7fELF\x02\x01'
+                or int.from_bytes(header[18:20], 'little') != 183):
+            raise ValueError('Reviewed private plugin is not an AArch64 ELF64 library')
     trusted_regular(Path('/usr/bin/wireplumber'))
     trusted_regular(Path("/usr/share/alsa/alsa.conf"))
     home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     for path in (home / ".asoundrc", home / ".config/alsa/asoundrc"):
         if path.exists() or path.is_symlink():
             raise ValueError("Unreviewed per-user ALSA override: " + str(path))
+    return STOCK_ROOT if kernel_scope else PRIVATE_ROOT
 
 
 def main():
@@ -137,13 +154,16 @@ def main():
         program = '/usr/bin/pipewire'
         arguments = arguments[1:]
     try:
-        check()
+        plugin_root = check()
         trusted_regular(Path(program))
     except Exception as error:
         print('G955N audio guard refused startup: ' + str(error), file=sys.stderr)
         return 78
     if arguments == ['--check']:
-        print('Reviewed G955N plugin and card scope verified; audio engine not started')
+        if plugin_root == STOCK_ROOT:
+            print('Ubuntu ALSA plugin with the active SM-G955N kernel scope')
+        else:
+            print('Reviewed G955N plugin and card scope verified; audio engine not started')
         return 0
     environment = dict(os.environ)
     # UCM/mixer setup also uses ALSA: remove inherited configuration/plugin
@@ -158,7 +178,7 @@ def main():
     # Deliberately no colon-separated stock fallback: if the reviewed ALSA
     # module cannot load, fail rather than retrying the unsafe stock module.
     # Other plugin families use the individually checked stock directory links.
-    environment['SPA_PLUGIN_DIR'] = str(PRIVATE_ROOT)
+    environment['SPA_PLUGIN_DIR'] = str(plugin_root)
     os.execve(program, [program, *arguments], environment)
 
 

@@ -2641,3 +2641,18 @@ numeric OSK accepted each injected touch exactly once and completed PAM
 unlock. The timing probe put the microphone clipping between 18.31 and
 26.46 ms after the beginning of capture, with no steady clipping or new
 kernel fault signature.
+
+### Standard graphics and audio prerequisites on SM-G955N
+
+On kernel57 the new AArch64 fixture reached the native DECON DSI/PRIME
+preflight and exited with a missing Panfrost render node. The only DRM
+device was the DECON display card. The GPU render and present stages and
+normal GNOME Wayland login, rotation and suspend are open.
+
+The actual PCM policy passed the extracted-method fixture. Kernel58 built
+with the exact kernel57 configuration and feature patch set plus the new
+ALSA scope patch. Its packaged image reused the verified kernel57 external
+ramdisk and boot parameters. Initial TWRP access succeeded, but the USB
+connection disappeared during BOOT backup. The incomplete backup cannot
+be used. No BOOT write was performed and the kernel58 and stock ALSA
+hardware trials are pending.

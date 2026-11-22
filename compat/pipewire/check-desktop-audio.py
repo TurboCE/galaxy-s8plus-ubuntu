@@ -101,16 +101,41 @@ def hardware_error_samples(text):
     return result
 
 
+def check_kernel_scoped_audio():
+    scope = Path('/proc/device-tree/samsung,g955n-desktop-audio-scope')
+    boot_log = subprocess.check_output(['dmesg'], text=True)
+    if not scope.is_file() or 'SM-G955N ALSA: native RDMA0/WDMA1 audio scope active' not in boot_log:
+        raise RuntimeError('Kernel ALSA endpoint scope is not active')
+    stock = '/usr/lib/aarch64-linux-gnu/spa-0.2/alsa/libspa-alsa.so'
+    private = '/usr/local/lib/g955n/spa-0.2'
+    stock_loaded = False
+    for audio_service in ('pipewire.service', 'wireplumber.service'):
+        pid = int(command('systemctl', '--user', 'show', '-p', 'MainPID', '--value', audio_service))
+        if not pid:
+            raise RuntimeError(f'{audio_service} is not running')
+        mappings = Path(f'/proc/{pid}/maps').read_text()
+        if private in mappings:
+            raise RuntimeError(f'{audio_service} loaded the private SPA libraries')
+        stock_loaded |= stock in mappings
+    if not stock_loaded:
+        raise RuntimeError('The stock ALSA plugin is not mapped in the active audio graph')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--test-speaker-microphone', action='store_true')
+    parser.add_argument('--kernel-alsa-scope', action='store_true',
+                        help='Require the kernel endpoint guard and Ubuntu stock ALSA SPA')
     args = parser.parse_args()
     if not args.test_speaker_microphone:
         parser.error('Requires explicit --test-speaker-microphone')
     if os.geteuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise RuntimeError('Run as root only on SM-G955N')
-    subprocess.run(['/usr/local/libexec/g955n-wireplumber', '--check'], check=True,
-                   stdout=subprocess.DEVNULL, timeout=10)
+    if args.kernel_alsa_scope:
+        check_kernel_scoped_audio()
+    else:
+        subprocess.run(['/usr/local/libexec/g955n-wireplumber', '--check'], check=True,
+                       stdout=subprocess.DEVNULL, timeout=10)
     for selector, device, media in [('@DEFAULT_AUDIO_SINK@', '0', 'Audio/Sink'),
                                     ('@DEFAULT_AUDIO_SOURCE@', '9', 'Audio/Source')]:
         info = command('wpctl', 'inspect', selector)

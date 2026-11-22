@@ -1764,3 +1764,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Move the rotation-capable Xorg module into the private GPU prefix. Preserve
   the distro driver and check the exact Xorg server at boot.
 - Add first and last clipping timestamps to the audio startup diagnostic.
+
+### Mesa buffer scanout and kernel ALSA endpoint scope
+
+- Add an ARM64 Mesa/Panfrost GBM and DECON PRIME test fixture.
+- Add a kernel58 candidate that checks the built-in audio endpoint before
+  native ALSA dispatches its open callback. Add an optional, boot-scoped
+  selector for Ubuntu's standard audio packages.

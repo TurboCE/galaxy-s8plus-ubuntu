@@ -393,3 +393,28 @@ checks actual hardware error counters, PCM progress and new kernel faults.
 Missing counters fail qualification. Client completion and a nonconstant signal
 are not acoustic-quality acceptance. The first quarter-second is reported
 separately: cold microphone activation still has a measured startup transient.
+
+### Kernel endpoint scope with stock Ubuntu audio
+
+The diagnostic kernel's `--native-alsa-scope` option adds a board-only
+check before native ALSA dispatches a device open. On the built-in Madera
+card it accepts RDMA0 playback, WDMA1 capture and ordinary mixer control.
+It rejects other built-in PCM opens, compressed playback and the ABOX
+debug card before their handlers can open or power those endpoints.
+Other audio cards are outside this restriction.
+
+The standard UCM speaker/microphone routes and WirePlumber settings remain
+the userspace routing policy. On a boot with the verified kernel scope,
+`check-desktop-audio.py --test-speaker-microphone --kernel-alsa-scope`
+requires the Ubuntu ALSA SPA plugin to be mapped and the private SPA tree
+to be absent from the actual audio processes. It then tests playback and
+capture on the same published hardware endpoints. The existing private
+launcher continues to protect boots without the new kernel policy.
+
+The optional `g955n-native-alsa.service` records the active boot ID only
+after the board's device tree and the kernel startup message both confirm
+the scope. The launcher selects Ubuntu's SPA directory with that
+root-owned receipt. Standard UCM and WirePlumber policy hashes are still
+checked. Without the receipt, the existing private-plugin checks apply.
+Install and enable this unit only after the Ubuntu stock playback and
+capture trial has passed on the target kernel.

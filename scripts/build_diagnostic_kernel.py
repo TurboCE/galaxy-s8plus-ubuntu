@@ -78,6 +78,8 @@ def main():
                         help='Quiesce the Korean board USB peripheral before system power loss')
     parser.add_argument('--modem-timer-cancel-locking', action='store_true',
                         help='Avoid waiting on SHMEM modem timers while holding their callback lock')
+    parser.add_argument('--native-alsa-scope', action='store_true',
+                        help='Restrict built-in SM-G955N PCM opens to RDMA0 and WDMA1')
     parser.add_argument('--audio-safety',action='store_true',help='Include reviewed ABOX SRAM, DMA bounds and request-table fixes 17..20')
     parser.add_argument('--build-version',type=int,help='Explicit positive build number for a controlled compiler comparison')
     args = parser.parse_args()
@@ -130,6 +132,8 @@ def main():
         parser.error('--drm-native-scanout requires --dpu0-system-sleep-retention')
     if args.usb_gadget_sleep_quiesce and not args.bt_uart_sleep_pinctrl:
         parser.error('--usb-gadget-sleep-quiesce requires --bt-uart-sleep-pinctrl')
+    if args.native_alsa_scope and (not args.audio_safety or not args.build_version):
+        parser.error('--native-alsa-scope requires --audio-safety and an explicit --build-version')
     if not args.build:
         parser.print_help();return
     expected = json.loads((ROOT/'sources.json').read_text())['sources']['kernel']['commit']
@@ -199,6 +203,8 @@ def main():
         patchfiles.append(ROOT/'patches/proposals/0053-g955n-quiesce-usb-gadget-before-system-sleep.patch')
     if args.modem_timer_cancel_locking:
         patchfiles.append(ROOT/'patches/proposals/0055-modem-timer-cancel-locking.patch')
+    if args.native_alsa_scope:
+        patchfiles.append(ROOT/'patches/proposals/0056-g955n-scope-native-alsa.patch')
     version=args.build_version or (28 if args.native_ondemand_safety else 27 if args.native_panel_qos else 26 if args.native_panel_safety else 25 if args.wfi_only else 24 if args.native_fb_owner else 23)
     image_id=subprocess.check_output(['docker','image','inspect','--format','{{.Id}}',args.builder],text=True).strip()
     baseline=(ROOT/'artifacts/kernel-audio-proc/kernel.config').read_text()
@@ -211,6 +217,7 @@ def main():
             'ssp_sysfs_counts':args.ssp_sysfs_counts,
             'modem_timer_cancel_locking':args.modem_timer_cancel_locking,
             'audio_safety':args.audio_safety,
+            'native_alsa_scope':args.native_alsa_scope,
             'abox_suspend_irq_order':args.abox_suspend_irq_order,
             'dpp_shared_dma':args.dpp_shared_dma,
             'desktop_charger_touch':args.desktop_charger_touch,
