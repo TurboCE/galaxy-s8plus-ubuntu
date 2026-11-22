@@ -1,0 +1,58 @@
+Subject: [PATCH] Exynos8895: initialize USB PHY before the DWC3 device reset
+
+Samsung initializes and de-isolates both PHY interfaces before asserting
+DCTL.CSFTRST. The 6.18 DWC3 core invokes the PHY init hook before reset
+and the power-on hook afterward. Move the Exynos8895 setup to the init
+hook and capture hardware state when a control endpoint command stalls.
+
+diff --git a/drivers/phy/samsung/phy-exynos8895-usb2.c b/drivers/phy/samsung/phy-exynos8895-usb2.c
+--- a/drivers/phy/samsung/phy-exynos8895-usb2.c
++++ b/drivers/phy/samsung/phy-exynos8895-usb2.c
+@@ -74,7 +74,7 @@
+ 	hs_update(base, HS_PHYTEST, TEST_POWERDOWN_HS, 0);
+ }
+ 
+-static int exynos8895_usb2_on(struct phy *phy)
++static int exynos8895_usb2_init(struct phy *phy)
+ {
+ 	struct exynos8895_usb2 *usb = phy_get_drvdata(phy);
+ 	unsigned int bank_offset;
+@@ -129,7 +129,7 @@
+ 	return ret;
+ }
+ 
+-static int exynos8895_usb2_off(struct phy *phy)
++static int exynos8895_usb2_exit(struct phy *phy)
+ {
+ 	struct exynos8895_usb2 *usb = phy_get_drvdata(phy);
+ 	int ret;
+@@ -145,8 +145,9 @@
+ }
+ 
+ static const struct phy_ops exynos8895_usb2_ops = {
+-	.power_on = exynos8895_usb2_on,
+-	.power_off = exynos8895_usb2_off,
++	/* Initialize the PHY before DWC3 issues DCTL.CSFTRST. */
++	.init = exynos8895_usb2_init,
++	.exit = exynos8895_usb2_exit,
+ 	.owner = THIS_MODULE,
+ };
+ 
+diff --git a/drivers/usb/dwc3/gadget.c b/drivers/usb/dwc3/gadget.c
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -429,6 +429,14 @@
+ 	if (timeout == 0) {
+ 		ret = -ETIMEDOUT;
+ 		cmd_status = -ETIMEDOUT;
++		if (dep->number < 2) {
++			dev_err(dwc->dev,
++				"%s command %#x: DEPCMD=%#x GSTS=%#x GCTL=%#x PIPE=%#x\n",
++				dep->name, DWC3_DEPCMD_CMD(cmd), reg,
++				dwc3_readl(dwc->regs, DWC3_GSTS),
++				dwc3_readl(dwc->regs, DWC3_GCTL),
++				dwc3_readl(dwc->regs, DWC3_GUSB3PIPECTL(0)));
++		}
+ 	}
+ 
+ skip_status:

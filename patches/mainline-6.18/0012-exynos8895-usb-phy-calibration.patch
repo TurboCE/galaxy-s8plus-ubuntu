@@ -1,0 +1,179 @@
+Subject: [PATCH] Exynos8895: restore Samsung USB PHY clock and lane setup
+
+Maintain the primary UTMI clock and initialize the active PIPE lane using
+the Samsung calibration sequence. Keep the board's USB reference period
+and P3 receiver detection setting. Configure EP0 for the programmed
+device speed and propagate gadget startup errors to configfs.
+
+diff --git a/drivers/phy/samsung/phy-exynos8895-usb2.c b/drivers/phy/samsung/phy-exynos8895-usb2.c
+--- a/drivers/phy/samsung/phy-exynos8895-usb2.c
++++ b/drivers/phy/samsung/phy-exynos8895-usb2.c
+@@ -30,16 +30,22 @@
+ #define CLK_MPLL_MULT		GENMASK(17, 11)
+ #define CLK_REF_DIV2		BIT(18)
+ #define CLK_REF_ENABLE		BIT(19)
+-#define CLK_SSC_REFSEL		GENMASK(30, 23)
++#define CLK_SSC_REFSEL		GENMASK(31, 23)
++#define CLK_SSC_RANGE		GENMASK(22, 21)
++#define CLK_SSC_ENABLE		BIT(20)
+ #define CLK_COMMON_OFF		(BIT(31) | BIT(0))
+ #define CLK_RETENTION		BIT(4)
+ #define HS_PHYPARAM0		0x1c
+ #define PARAM_REF_USE_PAD	BIT(31)
+ #define HS_PHYTEST		0x28
+ #define TEST_POWERDOWN_HS	BIT(2)
++#define TEST_POWERDOWN_SS	BIT(3)
+ #define HS_PHYRESUME		0x34
+ #define RESUME_DISABLE_QACT	GENMASK(13, 10)
+ #define RESUME_FORCE_QACT	BIT(9)
++#define HS_LINKPORT		0x44
++#define LINKPORT_OVERCURRENT	(BIT(3) | BIT(2))
++#define LINKPORT_DISABLE_SS	BIT(8)
+ #define PHY_SELECTION		0x6c
+ #define PIPE_SELECT		(BIT(1) | BIT(3))
+ 
+@@ -65,13 +71,13 @@
+ {
+ 	hs_update(base, HS_PHYCLKRST,
+ 		  CLK_PORT_RESET | CLK_REFSEL | CLK_FSEL | CLK_COMMON_OFF | CLK_RETENTION |
+-		  CLK_MPLL_MULT | CLK_REF_DIV2 | CLK_REF_ENABLE | CLK_SSC_REFSEL,
+-		  CLK_PORT_RESET | CLK_RETENTION | CLK_REF_ENABLE |
++		  CLK_MPLL_MULT | CLK_REF_DIV2 | CLK_REF_ENABLE | CLK_SSC_REFSEL |
++		  CLK_SSC_RANGE | CLK_SSC_ENABLE,
++		  CLK_PORT_RESET | CLK_RETENTION | CLK_REF_ENABLE | CLK_SSC_ENABLE |
+ 		  FIELD_PREP(CLK_REFSEL, 2) | FIELD_PREP(CLK_FSEL, 2) |
+-		  FIELD_PREP(CLK_MPLL_MULT, 0x60) | FIELD_PREP(CLK_SSC_REFSEL, 0x08));
++		  FIELD_PREP(CLK_MPLL_MULT, 0x60) | FIELD_PREP(CLK_SSC_REFSEL, 0x108));
+ 	udelay(10);
+ 	hs_update(base, HS_PHYCLKRST, CLK_PORT_RESET, 0);
+-	hs_update(base, HS_PHYTEST, TEST_POWERDOWN_HS, 0);
+ }
+ 
+ static int exynos8895_usb2_init(struct phy *phy)
+@@ -113,15 +119,37 @@
+ 
+ 	/* The primary UTMI port uses the board's 26 MHz clock core path. */
+ 	hs_update(usb->regs, HS_PHYPARAM0, PARAM_REF_USE_PAD, 0);
+-	hs_update(usb->active, HS_PHYPIPE, PIPE_FREE_UTMI_CLK, PIPE_FREE_UTMI_CLK);
+-	if (usb->active != usb->regs)
++	/* Cable orientation selects the PIPE bank, not the USB2 UTMI port. */
++	hs_update(usb->regs, HS_PHYPIPE, PIPE_FREE_UTMI_CLK, PIPE_FREE_UTMI_CLK);
++	if (usb->active != usb->regs) {
++		hs_update(usb->active, HS_PHYPARAM0, PARAM_REF_USE_PAD, 0);
++		hs_update(usb->active, HS_PHYPIPE, PIPE_FREE_UTMI_CLK, PIPE_FREE_UTMI_CLK);
+ 		hs_reset_port(usb->active);
++	}
+ 	hs_reset_port(usb->regs);
+-	usleep_range(1500, 1600);
++	/* Wake the PHYs before shutting down the unused lane. */
++	hs_update(usb->regs, HS_PHYTEST, TEST_POWERDOWN_HS | TEST_POWERDOWN_SS, 0);
++	if (bank_offset) {
++		void __iomem *secondary = usb->secondary + bank_offset;
++
++		hs_update(secondary, HS_PHYTEST, TEST_POWERDOWN_HS | TEST_POWERDOWN_SS, 0);
++		usleep_range(1000, 1100);
++		if (usb->active != usb->regs) {
++			hs_update(usb->regs, HS_PHYTEST, TEST_POWERDOWN_SS, TEST_POWERDOWN_SS);
++			hs_update(secondary, HS_PHYTEST, TEST_POWERDOWN_HS, TEST_POWERDOWN_HS);
++		} else {
++			hs_update(secondary, HS_PHYTEST, TEST_POWERDOWN_HS | TEST_POWERDOWN_SS,
++				  TEST_POWERDOWN_HS | TEST_POWERDOWN_SS);
++		}
++		hs_update(secondary, HS_PHYUTMI, BIT(0) | BIT(1), BIT(0) | BIT(1));
++	}
++	usleep_range(500, 600);
+ 
+ 	/* This board leaves the PHY VBUS input pad unused. */
+ 	hs_update(usb->regs, HS_LINKSYSTEM, LINK_VBUS_VALID, LINK_VBUS_VALID);
+ 	hs_update(usb->regs, HS_PHYUTMI, UTMI_DEVICE | UTMI_HOST_SLEEP, UTMI_DEVICE);
++	hs_update(usb->regs, HS_LINKPORT, LINKPORT_OVERCURRENT | LINKPORT_DISABLE_SS,
++		  LINKPORT_OVERCURRENT);
+ 	return 0;
+ 
+ disable_clock:
+@@ -136,9 +164,11 @@
+ 
+ 	hs_update(usb->regs, HS_LINKSYSTEM, LINK_VBUS_VALID, 0);
+ 	hs_update(usb->active, HS_PHYRESUME, RESUME_FORCE_QACT, 0);
+-	hs_update(usb->regs, HS_PHYTEST, TEST_POWERDOWN_HS, TEST_POWERDOWN_HS);
++	hs_update(usb->regs, HS_PHYTEST, TEST_POWERDOWN_HS | TEST_POWERDOWN_SS,
++		  TEST_POWERDOWN_HS | TEST_POWERDOWN_SS);
+ 	if (usb->active != usb->regs)
+-		hs_update(usb->active, HS_PHYTEST, TEST_POWERDOWN_HS, TEST_POWERDOWN_HS);
++		hs_update(usb->active, HS_PHYTEST, TEST_POWERDOWN_HS | TEST_POWERDOWN_SS,
++			  TEST_POWERDOWN_HS | TEST_POWERDOWN_SS);
+ 	ret = regmap_update_bits(usb->pmu, 0x704, BIT(0), 0);
+ 	clk_disable_unprepare(usb->clock);
+ 	return ret;
+diff --git a/drivers/usb/dwc3/core.c b/drivers/usb/dwc3/core.c
+--- a/drivers/usb/dwc3/core.c
++++ b/drivers/usb/dwc3/core.c
+@@ -411,14 +411,14 @@
+ 	unsigned long rate;
+ 	u32 reg;
+ 
+-	if (dwc->ref_clk) {
++	if (dwc->ref_clk_per) {
++		period = dwc->ref_clk_per;
++		rate = NSEC_PER_SEC / period;
++	} else if (dwc->ref_clk) {
+ 		rate = clk_get_rate(dwc->ref_clk);
+ 		if (!rate)
+ 			return;
+ 		period = NSEC_PER_SEC / rate;
+-	} else if (dwc->ref_clk_per) {
+-		period = dwc->ref_clk_per;
+-		rate = NSEC_PER_SEC / period;
+ 	} else {
+ 		return;
+ 	}
+diff --git a/drivers/usb/dwc3/gadget.c b/drivers/usb/dwc3/gadget.c
+--- a/drivers/usb/dwc3/gadget.c
++++ b/drivers/usb/dwc3/gadget.c
+@@ -2669,7 +2669,6 @@
+ 			reg &= ~DWC3_DCTL_KEEP_CONNECT;
+ 		reg |= DWC3_DCTL_RUN_STOP;
+ 
+-		__dwc3_gadget_set_speed(dwc);
+ 		dwc->pullups_connected = true;
+ 	} else {
+ 		reg &= ~DWC3_DCTL_RUN_STOP;
+@@ -2791,7 +2790,11 @@
+ 		return ret;
+ 
+ 	dwc3_event_buffers_setup(dwc);
+-	__dwc3_gadget_start(dwc);
++	/* Select the operating speed before issuing endpoint commands. */
++	__dwc3_gadget_set_speed(dwc);
++	ret = __dwc3_gadget_start(dwc);
++	if (ret)
++		return ret;
+ 	return dwc3_gadget_run_stop(dwc, true);
+ }
+ 
+@@ -2970,8 +2973,11 @@
+ 		dwc3_writel(dwc->regs, DWC3_DCFG1, reg);
+ 	}
+ 
+-	/* Start with SuperSpeed Default */
+-	dwc3_gadget_ep0_desc.wMaxPacketSize = cpu_to_le16(512);
++	/* Match the DCFG speed programmed before endpoint configuration. */
++	reg = dwc3_readl(dwc->regs, DWC3_DCFG) & DWC3_DCFG_SPEED_MASK;
++	dwc3_gadget_ep0_desc.wMaxPacketSize =
++		cpu_to_le16(reg == DWC3_DCFG_HIGHSPEED ||
++			    reg == DWC3_DCFG_FULLSPEED ? 64 : 512);
+ 
+ 	ret = dwc3_gadget_start_config(dwc, 0);
+ 	if (ret) {
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -233,6 +233,8 @@
+ 		interrupts = <GIC_SPI 337 IRQ_TYPE_EDGE_RISING>;
+ 		dr_mode = "peripheral";
+ 		maximum-speed = "high-speed";
++		snps,ref-clock-period-ns = <8>;
++		snps,dis_rxdet_inp3_quirk;
+ 		snps,dis_u2_susphy_quirk;
+ 		snps,dis_enblslpm_quirk;
+ 		phys = <&usb2_phy>;

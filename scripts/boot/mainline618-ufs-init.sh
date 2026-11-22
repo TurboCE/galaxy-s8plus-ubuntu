@@ -19,6 +19,7 @@ stop() {
                 if [ -n "$diag_pid" ]; then
                     log 'USB diagnostic window open for 40 seconds'
                     "$BB" sleep 40
+                    usb_gadget_state | while IFS= read -r line; do log "USB: $line"; done
                 fi
                 log 'Returning to recovery'
                 "$BB" sync
@@ -54,6 +55,15 @@ usb_diagnostics() {
     done
 }
 
+usb_gadget_state() {
+    local state_file
+    for state_file in /sys/class/udc/*/state; do
+        [ -r "$state_file" ] || continue
+        printf 'gadget state: %s\n' "$("$BB" cat "$state_file")"
+    done
+    "$BB" grep -E 'dwc3|10c00000\.usb' /proc/interrupts || true
+}
+
 start_usb_gadget() {
     local udc='10c00000.usb' gadget='/sys/kernel/config/usb_gadget/g955n618'
     local attempt=0
@@ -83,7 +93,17 @@ prepare_ubuntu_trial_return() {
 state=$(systemctl is-system-running 2>/dev/null)
 target=$(systemctl is-active multi-user.target 2>/dev/null)
 root=$(findmnt -n -o SOURCE,OPTIONS /)
+read -r uptime _ < /proc/uptime
+if [ "$target" != active ] && [ "${uptime%%.*}" -lt 300 ]; then
+    exit 0
+fi
 printf 'SM-G955N UBUNTU SYSTEMD state=%s multi-user=%s root=%s\n' "$state" "$target" "$root"
+if [ -s /run/g955n-trial/usb-start.log ]; then
+    cat /run/g955n-trial/usb-start.log
+fi
+if [ "$target" != active ]; then
+    systemctl list-jobs --no-pager
+fi
 exec systemctl reboot --reboot-argument=recovery
 EOF
     "$BB" cat > /run/systemd/system/g955n-trial-return.service <<'EOF' || return 1
@@ -101,7 +121,9 @@ EOF
 Description=Allow Ubuntu to reach multi-user before recovery
 
 [Timer]
-OnActiveSec=75s
+OnActiveSec=10s
+OnUnitInactiveSec=10s
+AccuracySec=1s
 EOF
     "$BB" ln -s ../g955n-trial-return.timer /run/systemd/system/timers.target.wants/
 }
@@ -137,12 +159,12 @@ case " $("$BB" cat /proc/cmdline) " in
         else
             log 'USB ACM gadget bind failed'
         fi
-        "$BB" dmesg | "$BB" grep -E 'dwc3|configfs|10e00000|ttyGS0' | "$BB" tail -n 8 |
-            while IFS= read -r line; do log "USB: $line"; done
-        for state_file in /sys/class/udc/*/state; do
-            [ -r "$state_file" ] || continue
-            log "USB gadget state: $("$BB" cat "$state_file")"
-        done
+        "$BB" mkdir -p /run/g955n-trial
+        {
+            "$BB" dmesg | "$BB" grep -E 'dwc3|configfs|10e00000|ttyGS0' | "$BB" tail -n 12
+            usb_gadget_state
+        } > /run/g955n-trial/usb-start.log
+        while IFS= read -r line; do log "USB: $line"; done < /run/g955n-trial/usb-start.log
         ;;
 esac
 
@@ -171,7 +193,7 @@ case " $("$BB" cat /proc/cmdline) " in
     *) stop 'Read-only check complete' ;;
 esac
 if [ -n "$diag_pid" ]; then
-    "$BB" sleep 5
+    "$BB" sleep 12
     kill "$diag_pid" 2>/dev/null || true
 fi
 

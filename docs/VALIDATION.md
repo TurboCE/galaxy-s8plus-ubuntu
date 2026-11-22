@@ -2900,3 +2900,39 @@ DTB. No rail was switched during this test.
   0x520004 and USB2PHYCFG 0x40102400. The UDC reported not attached
   and the host received no native CDC ACM device. The same trial
   again mounted and identified USERDATA read-only and returned to TWRP.
+
+## SM-G955N Linux 6.18 multi-user and DWC3 trials — 2026-11-23
+
+- R12 and R13 booted the installed Ubuntu from the internal UFS USERDATA
+  filesystem mounted read-write. The systemd journal recorded
+  `multi-user.target` active at 212.008 and 184.055 seconds respectively.
+  The trial scripts both recorded `state=degraded multi-user=active`
+  and requested a graceful recovery restart. Both returned to TWRP
+  without an on-device action.
+- The namespace errors from e2scrub_reap and systemd-hostnamed persisted
+  after enabling the kernel namespace and VETH options. The recovery
+  log also captured UFS shutdown errors. Reaching multi-user proves the
+  boot path and leaves those errors open.
+- The working Samsung #58 and the trial had the same USB2 PHY
+  controller configuration word, `0x40102400`. Moving PHY
+  initialization before reset and preparing the primary free-running
+  UTMI clock did not yield a Mac serial port. R14 captured
+  `SETEPCONFIG` (command `0x1`) with `DEPCMD=0x401`, indicating that
+  the command remained active. R15 used 64-byte USB2 EP0 packets and
+  reproduced the same timeout. R16 confirmed the PHY was attached and
+  matched the working reference period and PIPE register without
+  completing the command.
+- Matching Samsung's PHY clock and lane initialization stopped the EP0
+  timeout in R17. The gadget bound, but macOS still saw no device. Samsung
+  #58 recovery evidence showed the MAX77865 MUIC opening D+ and D- on
+  shutdown and reconnecting them to the application processor on boot.
+  With that USB2 route initialized in R20, macOS enumerated the serial
+  port, the device reached the configured state, and the host read live
+  kernel messages through the serial interface.
+- R21 was built from patches 0001–0013. macOS enumerated the CDC ACM
+  serial port and read 107763 bytes through the boot diagnostic protocol,
+  including its end marker. In the same boot the installed Ubuntu
+  reached multi-user.target at 196.165 seconds. The journal recorded
+  `multi-user=active` and a read-write UFS root. It also recorded the
+  remaining namespace failures. The handset returned to TWRP
+  automatically after a normal shutdown.

@@ -1,0 +1,160 @@
+Subject: [PATCH] SM-G955N: route USB2 through the MAX77865 switch
+
+Samsung opens the MUIC switch at reboot and restores the AP USB path
+when it handles cable detection. Initialize the fixed peripheral path
+on the SM-G955N and restore the inherited switch value on shutdown.
+Leave the charger and unrelated MUIC registers untouched.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -9,6 +9,7 @@
+ #include "exynos8895.dtsi"
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
++#include <dt-bindings/soc/samsung,exynos-usi.h>
+ 
+ / {
+ 	model = "Samsung Galaxy S8+ (SM-G955N)";
+@@ -258,3 +259,21 @@
+ 		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+ 	};
+ };
++
++/* The MAX77865 MUIC opens D+/D- across a downstream-kernel reboot. */
++&usi13 {
++	samsung,mode = <USI_MODE_I2C1>;
++	status = "okay";
++};
++
++&hsi2c_32 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	clock-frequency = <400000>;
++	status = "okay";
++
++	usb-switch@25 {
++		compatible = "maxim,max77865-usb2-switch";
++		reg = <0x25>;
++	};
++};
+diff --git a/drivers/usb/misc/Kconfig b/drivers/usb/misc/Kconfig
+--- a/drivers/usb/misc/Kconfig
++++ b/drivers/usb/misc/Kconfig
+@@ -359,3 +359,10 @@
+ 	  during hub start-up configuration stage. It is must to enable this
+ 	  option on AMD Kria KR260 Robotics Starter Kit as this hub is
+ 	  connected to USB-SD converter which mounts the root filesystem.
++
++config USB_MAX77865_USB2
++	tristate "MAX77865 fixed peripheral USB2 switch"
++	depends on I2C && OF
++	help
++	  Route USB2 to the application processor on boards that declare a
++	  fixed peripheral port behind the MAX77865 MUIC.
+diff --git a/drivers/usb/misc/Makefile b/drivers/usb/misc/Makefile
+--- a/drivers/usb/misc/Makefile
++++ b/drivers/usb/misc/Makefile
+@@ -35,3 +35,4 @@
+ obj-$(CONFIG_USB_LINK_LAYER_TEST)	+= lvstest.o
+ obj-$(CONFIG_BRCM_USB_PINMAP)		+= brcmstb-usb-pinmap.o
+ obj-$(CONFIG_USB_ONBOARD_DEV)		+= onboard_usb_dev.o
++obj-$(CONFIG_USB_MAX77865_USB2)		+= max77865-usb2.o
+diff --git a/drivers/usb/misc/max77865-usb2.c b/drivers/usb/misc/max77865-usb2.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/usb/misc/max77865-usb2.c
+@@ -0,0 +1,93 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * MAX77865 MUIC USB2 routing for the fixed peripheral port.
++ * Register layout follows Samsung's MAX77865 MUIC driver.
++ */
++#include <linux/bits.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/slab.h>
++
++#define MAX77865_MUIC_ID                 0x00
++#define MAX77865_MUIC_VENDOR_MASK        GENMASK(2, 0)
++#define MAX77865_MUIC_VENDOR             0x5
++#define MAX77865_MUIC_CONTROL1           0x19
++#define MAX77865_MUIC_MANUAL             BIT(7)
++#define MAX77865_MUIC_SWITCH_MASK        GENMASK(5, 0)
++#define MAX77865_MUIC_USB_AP             (BIT(3) | BIT(0))
++
++struct max77865_usb2 {
++	u8 original_control;
++};
++
++static void max77865_usb2_restore(struct i2c_client *client)
++{
++	struct max77865_usb2 *mux = i2c_get_clientdata(client);
++	int ret;
++
++	ret = i2c_smbus_write_byte_data(client, MAX77865_MUIC_CONTROL1,
++					mux->original_control);
++	if (ret < 0)
++		dev_warn(&client->dev, "Cannot restore USB2 switch: %d\n", ret);
++}
++
++static int max77865_usb2_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct max77865_usb2 *mux;
++	int id, ctrl, route, ret;
++
++	id = i2c_smbus_read_byte_data(client, MAX77865_MUIC_ID);
++	if (id < 0)
++		return dev_err_probe(dev, id, "Cannot read MUIC ID\n");
++	if ((id & MAX77865_MUIC_VENDOR_MASK) != MAX77865_MUIC_VENDOR)
++		return dev_err_probe(dev, -ENODEV, "Unexpected MUIC ID %#x\n", id);
++	ctrl = i2c_smbus_read_byte_data(client, MAX77865_MUIC_CONTROL1);
++	if (ctrl < 0)
++		return dev_err_probe(dev, ctrl, "Cannot read USB2 switch\n");
++
++	mux = devm_kzalloc(dev, sizeof(*mux), GFP_KERNEL);
++	if (!mux)
++		return -ENOMEM;
++	mux->original_control = ctrl;
++	i2c_set_clientdata(client, mux);
++
++	/* Preserve the unrelated ID bypass bit and route only D+ and D-. */
++	route = (ctrl & ~MAX77865_MUIC_SWITCH_MASK) |
++		MAX77865_MUIC_MANUAL | MAX77865_MUIC_USB_AP;
++	if (route != ctrl) {
++		ret = i2c_smbus_write_byte_data(client, MAX77865_MUIC_CONTROL1, route);
++		if (ret < 0)
++			return dev_err_probe(dev, ret, "Cannot route USB2 to AP\n");
++	}
++	ret = i2c_smbus_read_byte_data(client, MAX77865_MUIC_CONTROL1);
++	if (ret != route) {
++		max77865_usb2_restore(client);
++		return dev_err_probe(dev, ret < 0 ? ret : -EIO,
++				     "USB2 AP route did not read back\n");
++	}
++
++	dev_info(dev, "MUIC ID %#x USB2 AP route %#x -> %#x\n", id, ctrl, route);
++	return 0;
++}
++
++static const struct of_device_id max77865_usb2_of_match[] = {
++	{ .compatible = "maxim,max77865-usb2-switch" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, max77865_usb2_of_match);
++
++static struct i2c_driver max77865_usb2_driver = {
++	.probe = max77865_usb2_probe,
++	.remove = max77865_usb2_restore,
++	.shutdown = max77865_usb2_restore,
++	.driver = {
++		.name = "max77865-usb2-switch",
++		.of_match_table = max77865_usb2_of_match,
++	},
++};
++module_i2c_driver(max77865_usb2_driver);
++
++MODULE_DESCRIPTION("MAX77865 fixed peripheral USB2 path");
++MODULE_LICENSE("GPL");

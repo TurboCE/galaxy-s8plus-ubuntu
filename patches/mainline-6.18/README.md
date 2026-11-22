@@ -56,8 +56,14 @@ mode first and retain the matching working BOOT backup. An explicit
 verified Ubuntu systemd after mounting EFS read-only. That stage also
 uses `config/mainline618-ubuntu.fragment`. For a timed trial, also pass
 `systemd.unit=multi-user.target g955n.ubuntu_return=1`. A timer in
-`/run` records the systemd state and root mount, then requests a
-normal shutdown and recovery reboot.
+`/run` checks for the target every 10 seconds. When it becomes active
+or the boot reaches five minutes, the timer records the systemd state
+and root mount, then requests a normal shutdown and recovery reboot.
+On timeout it also records the pending systemd jobs. When testing an
+installation that uses the downstream GNOME direct-output service, add
+`systemd.mask=g955n-direct-panel-recover.service` to this trial's boot
+arguments. This keeps the service from changing the working graphical
+configuration for the older kernel.
 
 To test an unattended diagnostic return, also pack the ARM64
 `scripts/boot/reboot-recovery.c` helper at `/sbin/reboot-recovery` and
@@ -68,14 +74,22 @@ The storage probe has used this path to return to TWRP on the handset.
 
 ## USB diagnostic access
 
-Apply patches 0009 and 0010 and append `config/mainline618-usb.fragment` for the
-high-speed USB device build. The initramfs binds one CDC ACM serial
+Apply patches 0009 through 0013 and append `config/mainline618-usb.fragment`
+for the high-speed USB device build. Patch 0011 initializes the PHY before
+the DWC3 device reset, matching the order in the Samsung kernel. If a control
+endpoint command times out, the driver records its register state.
+Patch 0012 matches the Samsung PHY calibration and initial EP0 speed.
+Patch 0013 enables the MAX77865 MUIC on the board's I2C bus and routes
+its USB2 data pins to the application processor. The switch driver
+restores the inherited route when it shuts down.
+The initramfs binds one CDC ACM serial
 interface through configfs. Add `g955n.usb_diag=1` to the
 boot arguments to enable the diagnostic commands. With the serial port
 open from the host, send one command per line. `status` returns the
 kernel release, `log` streams the kernel log, and `recovery` requests
 a recovery reboot. The interface is available during the read-only
-UFS test and exits before handing over to the installed system.
+UFS test and exits before handing over to the installed system. The
+timed Ubuntu trial records the early USB diagnostics in its journal.
 
 ## Reading the warm boot trace
 

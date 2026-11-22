@@ -1842,3 +1842,14 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add SM-G955N USB2 PHY, cable orientation and DWC3 link clocks, plus a
   configfs CDC ACM diagnostic interface in the initramfs.
 - Add a multi-user Ubuntu trial and an optional runtime recovery timer.
+
+## 2026-11-23 — Linux 6.18 multi-user boot and DWC3 endpoint diagnostics
+
+- Prepare the USB PHY before resetting DWC3 and match the Samsung
+  clock and lane state used for initial EP0 configuration.
+- Route the SM-G955N MAX77865 USB2 switch to the application processor
+  in the fixed peripheral configuration.
+- Capture the control endpoint register state on command timeout and carry
+  the early USB snapshot into the systemd trial journal.
+- Add namespace and virtual-network-device kernel options, and have the
+  trial return to recovery after multi-user is active or its deadline expires.
