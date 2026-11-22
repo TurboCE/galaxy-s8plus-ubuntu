@@ -1800,3 +1800,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Connect the Exynos8895 splash initialization to the uniLoader early-init
   callback and record the verified kernel58 rollback from the first trial.
+
+### Linux 6.18 second boot trial and display regulators
+
+- Record the second uniLoader boot observation and the recovery logs.
+- Add an ARM64 S2DOS03 regulator driver and the SM-G955N panel and touch
+  rail definitions. Keep the PMIC node disabled in the early boot DT.

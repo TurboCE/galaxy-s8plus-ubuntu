@@ -2783,3 +2783,30 @@ After reboot, kernel58 reported taint zero, its same-boot stock audio
 receipt existed, GDM was active and Wi-Fi reported carrier. No audio
 capture was run after this rollback. Direct Panfrost output, stock
 Wayland and the companion 6.18 hardware tests are still pending.
+
+### Second Linux 6.18 handset trial and S2DOS03 preparation
+
+TWRP verified fresh BOOT and protected backups. The image with the
+corrected splash callback was written to BOOT and passed the payload
+readback. The screen again stayed at the Samsung logo with no reported
+uniLoader or initramfs text. After the owner returned to TWRP, a
+read-only capture of /proc/last_kmsg identified the previous logging
+kernel as 4.4.111-g955n-ubuntu-experimental. Neither the prior log nor
+the recovery log contained the 6.18 version or probe marker. Recovery
+reported MPON after manual reset and exposed no ramoops kernel-console
+or dmesg record for the 6.18 attempt. These observations leave the
+precise halt point undetermined.
+
+The recovery recheck found four changed bytes each in one EFS and one
+PARAM block relative to the pre-trial baseline. The EFS ext4 signature
+and UUID matched. TWRP backups of both versions were retained.
+Restoration used the verified current protected baseline and restored
+the complete previous #58 BOOT image, with full readback and protected
+partition hash checks.
+
+Samsung's S2DOS03 register layout and board voltage constraints were
+mapped to Linux 6.18 regmap regulator helpers. The ARM64 driver and
+SM-G955N DTB compiled with the I2C, regulator and S2DOS03 options
+enabled. Every specified board voltage maps exactly to a supported
+selector. The PMIC and its parent I2C controller are disabled in this
+DTB. No rail was switched during this test.

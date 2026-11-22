@@ -1,0 +1,199 @@
+Subject: regulator: add S2DOS03 support for SM-G955N display and touch
+
+Use the Samsung selector map with standard regmap regulator helpers.
+Keep the DT node disabled in the early boot probe.
+
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -1407,6 +1407,14 @@
+ 	help
+ 	 This driver controls Samsung S2MPA01 voltage output regulator
+ 	 via I2C bus. S2MPA01 has 10 Bucks and 26 LDO outputs.
++
++config REGULATOR_S2DOS03
++	tristate "Samsung S2DOS03 display and touchscreen supplies"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  Enable the four LDOs and one buck regulator of the Samsung
++	  S2DOS03 I2C power management IC.
+ 
+ config REGULATOR_S2MPS11
+ 	tristate "Samsung S2MPS11/13/14/15/S2MPU02/05 voltage regulator"
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -163,6 +163,7 @@
+ obj-$(CONFIG_REGULATOR_RTQ2208) += rtq2208-regulator.o
+ obj-$(CONFIG_REGULATOR_S2DOS05) += s2dos05-regulator.o
+ obj-$(CONFIG_REGULATOR_S2MPA01) += s2mpa01.o
++obj-$(CONFIG_REGULATOR_S2DOS03) += s2dos03.o
+ obj-$(CONFIG_REGULATOR_S2MPS11) += s2mps11.o
+ obj-$(CONFIG_REGULATOR_S5M8767) += s5m8767.o
+ obj-$(CONFIG_REGULATOR_SC2731) += sc2731-regulator.o
+--- /dev/null
++++ b/drivers/regulator/s2dos03.c
+@@ -0,0 +1,111 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Samsung S2DOS03 regulators.
++ * Register layout and voltage selectors are from Samsung's Exynos8895
++ * s2dos03 regulator driver and linux/mfd/samsung/s2dos03.h.
++ * Copyright (c) 2016 Samsung Electronics Co., Ltd.
++ */
++#include <linux/bits.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/regmap.h>
++#include <linux/regulator/driver.h>
++
++#define S2DOS03_ENABLE		0x03
++#define S2DOS03_LDO_FIRST	0x10
++#define S2DOS03_BUCK_VOUT	0x21
++
++static const struct regulator_ops s2dos03_ops = {
++	.enable = regulator_enable_regmap,
++	.disable = regulator_disable_regmap,
++	.is_enabled = regulator_is_enabled_regmap,
++	.list_voltage = regulator_list_voltage_linear,
++	.map_voltage = regulator_map_voltage_linear,
++	.get_voltage_sel = regulator_get_voltage_sel_regmap,
++	.set_voltage_sel = regulator_set_voltage_sel_regmap,
++};
++
++#define S2DOS03_LDO(num) { \
++	.name = "s2dos03-ldo" #num, \
++	.of_match = of_match_ptr("ldo" #num), \
++	.regulators_node = of_match_ptr("regulators"), \
++	.ops = &s2dos03_ops, \
++	.type = REGULATOR_VOLTAGE, \
++	.owner = THIS_MODULE, \
++	.n_voltages = 128, \
++	.min_uV = 600000, \
++	.uV_step = 25000, \
++	.vsel_reg = S2DOS03_LDO_FIRST + (num) - 1, \
++	.vsel_mask = GENMASK(6, 0), \
++	.enable_reg = S2DOS03_ENABLE, \
++	.enable_mask = BIT((num) - 1), \
++	.enable_time = 50, \
++}
++
++static const struct regulator_desc s2dos03_desc[] = {
++	S2DOS03_LDO(1),
++	S2DOS03_LDO(2),
++	S2DOS03_LDO(3),
++	S2DOS03_LDO(4),
++	{
++		.name = "s2dos03-buck1",
++		.of_match = of_match_ptr("buck1"),
++		.regulators_node = of_match_ptr("regulators"),
++		.ops = &s2dos03_ops,
++		.type = REGULATOR_VOLTAGE,
++		.owner = THIS_MODULE,
++		.n_voltages = 256,
++		.min_uV = 500000,
++		.uV_step = 6250,
++		.vsel_reg = S2DOS03_BUCK_VOUT,
++		.vsel_mask = GENMASK(7, 0),
++		.enable_reg = S2DOS03_ENABLE,
++		.enable_mask = BIT(4),
++		.enable_time = 350,
++	},
++};
++
++static const struct regmap_config s2dos03_regmap = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = S2DOS03_BUCK_VOUT,
++};
++
++static int s2dos03_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct regulator_config config = { .dev = dev };
++	struct regulator_dev *rdev;
++	unsigned int i;
++
++	config.regmap = devm_regmap_init_i2c(client, &s2dos03_regmap);
++	if (IS_ERR(config.regmap))
++		return dev_err_probe(dev, PTR_ERR(config.regmap), "regmap init failed\n");
++
++	for (i = 0; i < ARRAY_SIZE(s2dos03_desc); i++) {
++		rdev = devm_regulator_register(dev, &s2dos03_desc[i], &config);
++		if (IS_ERR(rdev))
++			return dev_err_probe(dev, PTR_ERR(rdev),
++					     "could not register %s\n", s2dos03_desc[i].name);
++	}
++
++	return 0;
++}
++
++static const struct of_device_id s2dos03_of_match[] = {
++	{ .compatible = "samsung,s2dos03" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, s2dos03_of_match);
++
++static struct i2c_driver s2dos03_driver = {
++	.driver = {
++		.name = "s2dos03",
++		.of_match_table = s2dos03_of_match,
++	},
++	.probe = s2dos03_probe,
++};
++module_i2c_driver(s2dos03_driver);
++
++MODULE_DESCRIPTION("Samsung S2DOS03 voltage regulators");
++MODULE_LICENSE("GPL");
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -115,3 +115,50 @@
+ 		samsung,pin-drv = <EXYNOS7_PIN_DRV_LV1>;
+ 	};
+ };
++
++/* Display and touch regulators. Keep disabled in the initial boot probe. */
++&hsi2c_16 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++
++	pmic@60 {
++		compatible = "samsung,s2dos03";
++		reg = <0x60>;
++		status = "disabled";
++
++		regulators {
++			panel_vddio: ldo1 {
++				regulator-name = "vdd_ddi_1p8";
++				regulator-min-microvolt = <1800000>;
++				regulator-max-microvolt = <1800000>;
++				regulator-boot-on;
++			};
++
++			touch_vdd: ldo2 {
++				regulator-name = "tsp_io";
++				regulator-min-microvolt = <1850000>;
++				regulator-max-microvolt = <1850000>;
++			};
++
++			panel_vci: ldo3 {
++				regulator-name = "vdd_ddi_3p0";
++				regulator-min-microvolt = <3000000>;
++				regulator-max-microvolt = <3000000>;
++				regulator-boot-on;
++			};
++
++			touch_avdd: ldo4 {
++				regulator-name = "tsp_avdd";
++				regulator-min-microvolt = <3300000>;
++				regulator-max-microvolt = <3300000>;
++			};
++
++			panel_vdd: buck1 {
++				regulator-name = "vdd_ddi_1p6";
++				regulator-min-microvolt = <1500000>;
++				regulator-max-microvolt = <1600000>;
++				regulator-boot-on;
++			};
++		};
++	};
++};

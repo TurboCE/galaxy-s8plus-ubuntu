@@ -28,3 +28,8 @@ Panfrost still needs the Exynos8895 G3D domain, clock and supply. The
 panel path also needs native DECON, DPP, DSI and display IOMMU support.
 The touch, audio and WLAN paths must be validated separately
 once the normal Ubuntu boot and native Wayland path are available.
+
+Patch 0003 adds the S2DOS03 regulator at I2C address 0x60 and maps its
+Samsung panel and touch supplies. It builds with `CONFIG_I2C`,
+`CONFIG_REGULATOR` and `CONFIG_REGULATOR_S2DOS03`. Both the PMIC and the
+parent I2C controller remain disabled for the initramfs-only probe.
