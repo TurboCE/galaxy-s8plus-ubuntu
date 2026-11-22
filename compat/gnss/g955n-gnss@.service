@@ -1,0 +1,28 @@
+[Unit]
+Description=SM-G955N GNSS acquisition for GeoClue
+BindsTo=g955n-location-hub.service
+Wants=g955n-gnss-assist.service g955n-gnss-lto.service
+After=g955n-location-hub.service g955n-gnss-assist.service g955n-gnss-lto.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/g955n-gnss/serve.py
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+RuntimeDirectory=g955n-gnss-session
+RuntimeDirectoryMode=0700
+ReadWritePaths=/data/vendor/gps
+TemporaryFileSystem=/dev/socket:mode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+DevicePolicy=closed
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+InaccessiblePaths=-/efs -/dev/ttyBCM -/dev/bbd_control -/dev/bbd_sensor
+NoNewPrivileges=yes
+LimitCORE=0
+UMask=0077
+KillMode=mixed
+TimeoutStopSec=12s

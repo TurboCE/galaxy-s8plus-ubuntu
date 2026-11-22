@@ -19,7 +19,7 @@ GPS_HAL = Path('/vendor/lib64/hw/gps.default.so')
 GPS_HAL_SHA256 = '26dd3097af5a3a57cb9371f8213a0bba38c68ff68a0e897ced597b9b25fc24aa'
 
 
-def make_config(source, scratch):
+def make_config(source, scratch, lto_directory=None):
     # The vendor parser expects the original XML names, including its unprefixed
     # namespace. ElementTree reserialization replaces these with ns0 prefixes.
     element, = (node for node in ElementTree.fromstring(source).iter()
@@ -30,13 +30,15 @@ def make_config(source, scratch):
         'CtrlPipe': str(scratch / 'ctrl'),
         'NmeaOutName': str(scratch / 'nmea'),
         'NvStorageDir': '/data/vendor/gps/',
-        'LtoDir': str(scratch / 'lto') + '/',
+        'LtoDir': str(lto_directory or scratch / 'lto') + '/',
         'LogDirectory': str(scratch) + '/',
         'LogEnabled': 'false',
         'SuplEnable': 'false',
         'LbsEnable': 'false',
         'LbsCellEnable': 'false',
         'HttpSyncLto': 'false',
+        # The vendor's optional inertial fusion expects Android SensorService.
+        'SensorsEnable': 'false',
     }
     tag, = re.finditer(r'<hal\b[^>]*>', source)
     text = tag.group(0)[:-1].rstrip()
@@ -55,6 +57,14 @@ def make_config(source, scratch):
     if candidate.attrib != {**element.attrib, **attributes}:
         raise ValueError('GNSS configuration changed outside the intended attributes')
     return result
+
+
+def check_vendor():
+    if ENGINE.resolve(strict=True) != Path('/android/system/vendor/bin/hw/gpsd') or STOCK_CONFIG.is_symlink():
+        raise SystemExit('The own-device GNSS engine or its configuration changed')
+    if (GPS_HAL.resolve(strict=True) != Path('/android/system/vendor/lib64/hw/gps.default.so')
+            or hashlib.sha256(GPS_HAL.read_bytes()).hexdigest() != GPS_HAL_SHA256):
+        raise SystemExit('The GNSS HAL does not match the reviewed callback layout')
 
 
 def supervise(directory, seconds):
@@ -93,11 +103,7 @@ def main():
     if (hashlib.sha256(binary).hexdigest() != args.sha256
             or binary[:6] != b'\x7fELF\x02\x01' or binary[18:20] != b'\xb7\x00'):
         parser.error('expected the reviewed AArch64 GNSS client')
-    if ENGINE.resolve(strict=True) != Path('/android/system/vendor/bin/hw/gpsd') or STOCK_CONFIG.is_symlink():
-        raise SystemExit('The own-device GNSS engine or its configuration changed')
-    if (GPS_HAL.resolve(strict=True) != Path('/android/system/vendor/lib64/hw/gps.default.so')
-            or hashlib.sha256(GPS_HAL.read_bytes()).hexdigest() != GPS_HAL_SHA256):
-        raise SystemExit('The GNSS HAL does not match the reviewed callback layout')
+    check_vendor()
     subprocess.run(['systemctl', 'is-active', '--quiet', 'g955n-location-hub.service'],
                    check=True, timeout=5)
     os.umask(0o077)

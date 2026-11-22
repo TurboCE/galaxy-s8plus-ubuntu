@@ -23,3 +23,34 @@ The verified HAL initialized and accepted standalone mode and start. The
 one assistance request, zero NMEA records, zero location/satellite callbacks,
 and a nonzero stop result. Ubuntu's location service still needs a qualified
 hardware data stream.
+
+## Ubuntu Location Services
+
+The desktop integration connects GeoClue to `/run/g955n-gnss/nmea.sock`.
+The socket admits the GeoClue account and activates the Samsung GNSS engine
+on demand. The relay forwards checksum-valid receiver sentences. The vendor
+engine and the existing Broadcom location hub share their original
+`/data/vendor/gps/.pipe.gpsd_to_lhd.to_server` and `.to_client` FIFOs.
+A separate bind-mounted directory breaks this link even when the path of each
+FIFO looks identical.
+
+The GeoClue drop-in uses BeaconDB for network positioning and disables
+coverage submissions. Network assistance uses recent Wi-Fi results and
+available LTE cells from ModemManager, with IP fallback. The lookup runs
+while Ubuntu Location Services is enabled. A private short-lived estimate
+can seed the receiver, and a synchronized system clock supplies UTC.
+Vendor GNSS processes stay network isolated.
+
+`lto.py` adapts the S9 port's GPL-2.0-only downloader for the SM-G955N's own
+Android `gps_debug.conf`. It accepts the Broadcom URLs declared in that
+configuration, uses HTTPS, and checks size, age and integrity before caching.
+The GNSS helper uses the GPS XTRA extension to pass the checked download to
+the receiver.
+
+For deployment on this image, install the reviewed client as
+`/usr/local/lib/g955n-gnss/hal-probe` and its Python support files alongside
+it. Install `run-probe.py` there as `run_probe.py` for the service import.
+Place the socket, template service and two assistance services in
+`/etc/systemd/system`. Install `80-g955n-location.conf` through GeoClue's
+`conf.d` directory, reload systemd, and enable `g955n-gnss.socket`.
+Use GNOME's Location Services setting to grant desktop access.

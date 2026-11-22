@@ -1696,3 +1696,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   extra Samsung callback using the reviewed AArch64 callback layout.
 - Decode the pinned rotation-vector IIO records alongside the existing
   magnetic, gyroscope and step-counter formats.
+
+## 2026-11-22 — Ubuntu Location Services and GNSS assistance
+
+- Connect the native receiver to GeoClue using a demand-activated NMEA socket.
+  Keep network lookup and receiver measurements as separate GeoClue sources.
+- Load checked clock, coarse network-position and Broadcom orbit assistance.
+  Share the existing GPS IPC directory with the Broadcom sensor hub and
+  disable the vendor's optional Android-only inertial fusion path in the
+  private runtime configuration.

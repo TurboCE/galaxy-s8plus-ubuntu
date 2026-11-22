@@ -1,0 +1,14 @@
+[Unit]
+Description=Coarse network position assistance for SM-G955N GNSS
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/g955n-gnss/assistance.py
+StateDirectory=g955n-gnss-assist
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+UMask=0077
+TimeoutStartSec=12s

@@ -1,0 +1,14 @@
+[Unit]
+Description=Verified Broadcom GNSS orbit-data cache for SM-G955N
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/g955n-gnss/lto.py
+StateDirectory=g955n-gnss-lto
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+UMask=0077
+TimeoutStartSec=12s

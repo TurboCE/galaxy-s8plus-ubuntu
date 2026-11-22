@@ -2381,3 +2381,42 @@ restored and SensorProxy restarted. The first rotation vector's magnitude
 was approximately 1,000,000 raw units, so a Q30 conversion is inappropriate
 for this device. Physical heading calibration, a step increase and GNOME
 rotation remain unqualified.
+
+### Kernel55 location integration and sensor recheck
+
+Ubuntu Location Services is enabled. Daemon and socket files passed readback
+and systemd verification. The ordinary GeoClue demo received coarse network
+locations with 25–26 km reported accuracy. The GNSS service accepted an
+actual GeoClue connection. The vendor HAL accepted NTP-synchronized UTC,
+cached network position and 122,527 bytes of fresh Broadcom orbit data from
+the phone's own configured source. The assistance cache was reused on
+subsequent requests. Network coverage submissions are disabled.
+
+Process and filesystem checks showed the sensor hub and vendor GNSS engine
+initially opened different instances of their named FIFO. After sharing the
+existing vendor IPC directory, both processes opened the same pipe pair and
+the HAL produced valid NMEA. An independent local reader received GGA, GSA
+and RMC messages with zero fixed records.
+
+The remaining early receiver exit was an actual SIGSEGV in
+NdkSensorsInfo → NdkSensorsStart, where the optional Android inertial fusion
+expects Android SensorService. The private vendor configuration now disables
+that option. A supervised retest produced 245 checksum-valid NMEA sentences
+with successful start and stop. The standard Ubuntu sensor service stays active.
+
+Owner motion produced transitions between `normal` and `left-up` in
+SensorProxy and real ambient-light changes. The stock orientation-lock policy
+accepted on and off and was restored to its original value. XRandR reported
+the fixed `default` output and rejected a left-rotation dry run. Mutter's
+`PanelOrientationManaged` remains false. No genuine ModemManager modem was
+present, although the Samsung SIPC device nodes were available for a future
+qualified backend. LTE cell-based lookup and operator registration were not
+exercised.
+
+In the 180-second trial through the installed GeoClue service, the corrected
+receiver stream delivered 1,389 checksum-valid NMEA sentences and stopped
+with a zero HAL result. No satellite-status report or location fix was
+received. The desktop client continued to get the network estimate with
+25 km reported accuracy. Readback matched all ten deployed runtime files.
+The Location Services preference was enabled, system time was synchronized,
+and the sensor hub, SensorProxy and GNSS socket were active.
