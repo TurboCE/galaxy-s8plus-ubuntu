@@ -1,0 +1,27 @@
+Subject: [PATCH] Exynos8895: retain UFS controller clocks after Hibern8
+
+The Samsung sequence does not stop the UFS controller clocks after
+Hibern8 entry. Keep them accessible on Exynos8895 while the UFS core
+stops the host and runs normal shutdown. The PHY and clock teardown
+steps still run through the suspend paths.
+
+Depends on the Exynos8895 UniPro Hibern8 completion proposal.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -1629,6 +1629,14 @@
+ 
+ 	if (cmd == UIC_CMD_DME_HIBER_ENTER) {
+ 		ufs->entry_hibern8_t = ktime_get();
++		/*
++		 * The Exynos8895 vendor path leaves the clocks available
++		 * after Hibern8 so the core can still stop the controller.
++		 * Clock and PHY teardown remains in the suspend path.
++		 */
++		if (ufs->drv_data->native_hibern8_status)
++			return;
++
+ 		exynos_ufs_gate_clks(ufs);
+ 		if (ufs->opts & EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL)
+ 			exynos_ufs_enable_auto_ctrl_hcc(ufs);

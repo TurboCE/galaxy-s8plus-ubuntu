@@ -1,0 +1,78 @@
+Subject: [PATCH] uniLoader: read the SM-G955N G3D supply state
+
+Populate a diagnostic DT property with the inherited S2MPS17 BUCK6
+control and voltage selectors, LDO9 control and the Exynos8895 G3D
+PMU status. The loader only does this when the embedded DT explicitly
+reserves the five cells. No G3D power sequence or PMIC write is added.
+
+diff --git a/board/samsung/board-dream2lteks.c b/board/samsung/board-dream2lteks.c
+--- a/board/samsung/board-dream2lteks.c
++++ b/board/samsung/board-dream2lteks.c
+@@ -8,6 +8,7 @@
+ #include <drivers/framework.h>
+ #include <drivers/samsung/exynos-speedy.h>
+ #include <lib/debug.h>
++#include <lib/libfdt/libfdt.h>
+ #include <lib/simplefb.h>
+ #include <main/main.h>
+ 
+@@ -44,6 +45,35 @@
+ 	return 0;
+ }
+ 
++/*
++ * Report the inherited GPU power configuration without touching the CMU
++ * or changing regulator settings. Enabled only by diagnostic DTBs.
++ */
++void dream2lteks_record_g3d_power(void *fdt)
++{
++	struct speedy_transaction pmic = { .base = 0x15b50000, .slave = 1 };
++	static const unsigned int offsets[] = { 0x23, 0x24, 0x25, 0x45 };
++	fdt32_t snapshot[ARRAY_SIZE(offsets) + 1];
++	const char *property = "samsung,g955n-g3d-power-snapshot";
++	int chosen = fdt_path_offset(fdt, "/chosen");
++	int len;
++
++	if (chosen < 0 || !fdt_getprop(fdt, chosen, property, &len) ||
++	    len != sizeof(snapshot))
++		return;
++
++	for (unsigned int i = 0; i < ARRAY_SIZE(offsets); i++) {
++		pmic.offset = offsets[i];
++		if (speedy_read(&pmic))
++			return;
++		snapshot[i] = cpu_to_fdt32(pmic.val & 0xff);
++	}
++	snapshot[ARRAY_SIZE(offsets)] = cpu_to_fdt32(
++		readl((const volatile uint32_t *)0x164840e4) & 0xf);
++	if (fdt_setprop_inplace(fdt, chosen, property, snapshot, sizeof(snapshot)))
++		printk(KERN_ERR, "SM-G955N: failed to publish G3D power snapshot\n");
++}
++
+ static struct video_info dream2lteks_fb = {
+ 	.format = FB_FORMAT_ARGB8888,
+ 	.width = 1440,
+diff --git a/main/boot-fdt.c b/main/boot-fdt.c
+--- a/main/boot-fdt.c
++++ b/main/boot-fdt.c
+@@ -13,6 +13,10 @@
+ static char fdt_buf[CONFIG_FDT_BUF_SIZE] __attribute__((aligned(8)));
+ #endif
+ 
++#ifdef CONFIG_SAMSUNG_DREAM2LTEKS
++void dream2lteks_record_g3d_power(void *fdt);
++#endif
++
+ void patch_dtb(void** dt)
+ {
+ 	int ret;
+@@ -21,6 +25,9 @@
+ 	if (ret != 0)
+ 		printk(KERN_ERR, "failed to patch dtb\n");
+ 	else {
++#ifdef CONFIG_SAMSUNG_DREAM2LTEKS
++		dream2lteks_record_g3d_power(fdt_buf);
++#endif
+ 		*dt = fdt_buf;
+ 		g955n_boot_trace("FDT-OK!\n");
+ 	}

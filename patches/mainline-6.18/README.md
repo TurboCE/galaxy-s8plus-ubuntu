@@ -104,13 +104,25 @@ data for a MODE SENSE request. The SCSI layer can then handle the
 unsupported page with its normal fallback. The Ubuntu fragment enables
 file locking, which systemd uses while creating private namespaces.
 
-For a separate STMFTS trial, apply proposal 0059 to Linux, proposal 0060
-to uniLoader, and append `config/mainline618-touch.fragment`. The loader
-sets the two touchscreen rails to the levels observed on the working
-SM-G955N. The Linux patch uses the standard STMFTS input driver on HSI2C23.
+For a separate STMFTS trial, apply proposals 0059 and 0061 to Linux,
+proposal 0060 to uniLoader, and append `config/mainline618-touch.fragment`.
+The loader sets the two touchscreen rails to the levels observed on the
+working SM-G955N. The FTS8CD56 variant uses the controller reset, chip ID
+and FIFO protocol from the Samsung driver, with the standard STMFTS
+input path on HSI2C23.
 Boot with `g955n.hardware_diag=1` to record input, DRM, Wi-Fi, ALSA and
 sleep interfaces in the timed trial journal. Treat driver enumeration
 and actual input, scanout, audio and resume as separate checks.
+
+Proposals 0062 and 0064 test the Exynos8895 UniPro Hibern8 result and
+the host clock state when shutting down. Apply them in that order for
+the combined trial. Keep using the timed recovery return while testing.
+
+For the G3D power snapshot, also apply proposal 0063 to uniLoader and
+reserve five cells under `/chosen` in the embedded DTB. Use
+`samsung,g955n-g3d-power-snapshot` with each cell initialized to
+`0xffffffff`. The loader collects BUCK6 control and two voltage
+selectors, LDO9 control and G3D power state for the USB boot log.
 
 ## Reading the warm boot trace
 

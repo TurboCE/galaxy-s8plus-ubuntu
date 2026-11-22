@@ -2960,3 +2960,39 @@ DTB. No rail was switched during this test.
   proposals. Touch input, Panfrost and DECON scanout, stock GNOME
   Wayland login and rotation, suspend, audio and Wi-Fi on 6.18 remain
   to be verified on the handset.
+
+### R24–R27 handset trials
+
+- The recovered R22 journal confirmed a private network namespace with a
+  working loopback device. Retained RAM showed a START STOP UNIT CHECK
+  CONDITION response (Unit Attention, ASC 0x29) followed by a synchronous
+  external abort and an init panic. R22 combined the Hibern8 indication
+  proposal with an AXI burst change, so the trace cannot isolate them.
+- R24 reached Ubuntu multi-user.target with a read-write UFS root at
+  194.864 seconds, passed the private network namespace probe and showed a
+  Ubuntu login prompt on macOS over USB CDC ACM. macOS also read the
+  initial kernel log. The diagnostic reboot reached TWRP automatically.
+  The panic and OCS 7 did not recur in the captured shutdown trace. UFS
+  still reported Hibern8 enter (0x17) with UPMCRS 0 followed by a failed
+  T_PEERDEVICEID MIB write during link recovery.
+- R25 replaced the generic touchscreen probe sequence with the FTS8CD56
+  reset and FIFO protocol. The controller reported chip ID 0x3670 and
+  registered its STMFTS input device. It again reached multi-user.target,
+  passed the namespace test and returned to TWRP. macOS received the
+  login prompt. The Hibern8 error still reproduced on reboot.
+- R26 again provided the macOS serial console, kernel log, Ubuntu login
+  prompt and touchscreen device registration. The port stopped responding
+  after the timed shutdown and the handset did not return to TWRP during
+  the observed window. The shutdown trace needs recovery before assigning
+  a root cause.
+- Compared with the Samsung Exynos8895 path, Linux 6.18 also gates the UFS
+  host immediately after Hibern8. Proposal 0064 leaves the clock available
+  through the core's controller-stop operation. The R28 candidate builds
+  with that change and the G3D power snapshot. Neither check has passed on
+  the handset yet.
+- The working Samsung kernel routes S2MPS17 accesses through ACPM. The
+  Exynos8895 firmware channel-count field and mailbox doorbell layout
+  differ from the GS101 configuration in 6.18. The loader snapshot only
+  records the inherited rail mode and voltage selectors. Native Panfrost,
+  DECON PRIME scanout, physical touch login in GNOME Wayland, rotation,
+  suspend, audio and Wi-Fi remain unqualified on 6.18.

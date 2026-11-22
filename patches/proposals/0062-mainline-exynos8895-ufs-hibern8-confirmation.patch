@@ -1,0 +1,112 @@
+Subject: [PATCH] Exynos8895: confirm Hibern8 through UniPro status
+
+The SM-G955N observes a completed UIC interrupt with UPMCRS still
+at PWR_OK. The Samsung driver checks both the command confirmation
+and power indication in the Exynos8895 UniPro registers. Accept those
+results only after the Hibern8 interrupt, and retain the standard
+power status handling for other SoCs and UIC commands.
+
+Keep the existing transfer configuration and SCSI sense handling.
+
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -4383,6 +4383,12 @@
+ 
+ check_upmcrs:
+ 	status = ufshcd_get_upmcrs(hba);
++	if (status == PWR_OK && !ret && !cmd->cmd_active &&
++	    (cmd->command == UIC_CMD_DME_HIBER_ENTER ||
++	     cmd->command == UIC_CMD_DME_HIBER_EXIT) &&
++	    hba->vops && hba->vops->hibern8_completed &&
++	    hba->vops->hibern8_completed(hba, cmd->command))
++		status = PWR_LOCAL;
+ 	if (status != PWR_LOCAL) {
+ 		dev_err(hba->dev,
+ 			"pwr ctrl cmd 0x%x failed, host upmcrs:0x%x\n",
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -1714,6 +1714,35 @@
+ 	return ret;
+ }
+ 
++#define EXYNOS8895_HIBERN8_ENTER_CNF	0x7864
++#define EXYNOS8895_HIBERN8_ENTER_IND	0x7868
++#define EXYNOS8895_HIBERN8_EXIT_CNF	0x7874
++#define EXYNOS8895_HIBERN8_EXIT_IND	0x7878
++
++static bool exynos_ufs_hibern8_completed(struct ufs_hba *hba, enum uic_cmd_dme cmd)
++{
++	struct exynos_ufs *ufs = ufshcd_get_variant(hba);
++	u32 confirmation;
++	u32 indication;
++
++	if (!ufs->drv_data->native_hibern8_status)
++		return false;
++
++	if (cmd == UIC_CMD_DME_HIBER_ENTER) {
++		confirmation = unipro_readl(ufs, EXYNOS8895_HIBERN8_ENTER_CNF);
++		indication = unipro_readl(ufs, EXYNOS8895_HIBERN8_ENTER_IND);
++	} else {
++		confirmation = unipro_readl(ufs, EXYNOS8895_HIBERN8_EXIT_CNF);
++		indication = unipro_readl(ufs, EXYNOS8895_HIBERN8_EXIT_IND);
++	}
++
++	if ((u8)confirmation != UIC_CMD_RESULT_SUCCESS || (u8)indication != PWR_LOCAL)
++		return false;
++
++	dev_info_once(hba->dev, "Hibern8 completion confirmed by UniPro registers\n");
++	return true;
++}
++
+ static void exynos_ufs_hibern8_notify(struct ufs_hba *hba,
+ 				     enum uic_cmd_dme cmd,
+ 				     enum ufs_notify_change_status notify)
+@@ -2037,6 +2066,7 @@
+ 	.setup_xfer_req			= exynos_ufs_specify_nexus_t_xfer_req,
+ 	.setup_task_mgmt		= exynos_ufs_specify_nexus_t_tm_req,
+ 	.hibern8_notify			= exynos_ufs_hibern8_notify,
++	.hibern8_completed		= exynos_ufs_hibern8_completed,
+ 	.suspend			= exynos_ufs_suspend,
+ 	.resume				= exynos_ufs_resume,
+ 	.fill_crypto_prdt		= exynos_ufs_fmp_fill_prdt,
+@@ -2299,6 +2329,7 @@
+ 	.iocc_mask = BIT(8) | BIT(9),
+ 	.pclk_from_unipro = true,
+ 	.skip_pwm_clk_div = true,
++	.native_hibern8_status = true,
+ 	.drv_init = exynos8895_ufs_init,
+ 	.pre_hce_enable = exynos8895_ufs_enable_clocks,
+ 	.init_link_phy = exynos8895_ufs_init_link_phy,
+diff --git a/drivers/ufs/host/ufs-exynos.h b/drivers/ufs/host/ufs-exynos.h
+--- a/drivers/ufs/host/ufs-exynos.h
++++ b/drivers/ufs/host/ufs-exynos.h
+@@ -188,6 +188,7 @@
+ 	int (*init_link_phy)(struct exynos_ufs *ufs);
+ 	bool pclk_from_unipro;
+ 	bool skip_pwm_clk_div;
++	bool native_hibern8_status;
+ 	int (*post_link)(struct exynos_ufs *ufs);
+ 	int (*pre_pwr_change)(struct exynos_ufs *ufs,
+ 				struct ufs_pa_layer_attr *pwr);
+diff --git a/include/ufs/ufshcd.h b/include/ufs/ufshcd.h
+--- a/include/ufs/ufshcd.h
++++ b/include/ufs/ufshcd.h
+@@ -317,6 +317,8 @@
+  * @setup_task_mgmt: called before any task management request is issued
+  *                  to set some things
+  * @hibern8_notify: called around hibern8 enter/exit
++ * @hibern8_completed: check a variant-specific Hibern8 completion when
++ *                      the host power status stays at PWR_OK
+  * @apply_dev_quirks: called to apply device specific quirks
+  * @fixup_dev_quirks: called to modify device specific quirks
+  * @suspend: called during host controller PM callback
+@@ -361,6 +363,7 @@
+ 	void	(*setup_task_mgmt)(struct ufs_hba *, int, u8);
+ 	void    (*hibern8_notify)(struct ufs_hba *, enum uic_cmd_dme,
+ 					enum ufs_notify_change_status);
++	bool	(*hibern8_completed)(struct ufs_hba *hba, enum uic_cmd_dme cmd);
+ 	int	(*apply_dev_quirks)(struct ufs_hba *hba);
+ 	void	(*fixup_dev_quirks)(struct ufs_hba *hba);
+ 	int     (*suspend)(struct ufs_hba *, enum ufs_pm_op,

@@ -1860,3 +1860,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Route valid Exynos8895 SCSI sense responses through the existing UFS OCS quirk.
 - Add opt-in authenticated USB console, network namespace and hardware checks.
 - Store separate Hibern8 and STMFTS bring-up proposals for on-device qualification.
+
+## 2026-11-23 — Linux 6.18 physical USB, UFS and touch trials
+
+- Add FTS8CD56 reset, identification and FIFO handling to the STMFTS proposal.
+- Add the Exynos8895 UniPro Hibern8 completion check for the UFS host.
+- Add an opt-in read-only G3D supply snapshot for Panfrost bring-up.

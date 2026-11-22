@@ -1,0 +1,274 @@
+Subject: [PATCH] Input: stmfts - add SM-G955N FTS8CD56 protocol
+
+Use the Samsung reset, identification and FIFO commands when the board
+describes an FTS8CD56. Its contact coordinate layout matches stmfts.
+Keep this dependent on the board and loader patches until the touchscreen
+is exercised on the handset.
+
+diff --git a/Documentation/devicetree/bindings/input/touchscreen/st,stmfts.yaml b/Documentation/devicetree/bindings/input/touchscreen/st,stmfts.yaml
+--- a/Documentation/devicetree/bindings/input/touchscreen/st,stmfts.yaml
++++ b/Documentation/devicetree/bindings/input/touchscreen/st,stmfts.yaml
+@@ -19,7 +19,9 @@
+ 
+ properties:
+   compatible:
+-    const: st,stmfts
++    enum:
++      - st,stmfts
++      - st,fts8cd56
+ 
+   reg:
+     maxItems: 1
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -307,7 +307,7 @@
+ 	status = "okay";
+ 
+ 	touchscreen@49 {
+-		compatible = "st,stmfts";
++		compatible = "st,fts8cd56";
+ 		reg = <0x49>;
+ 		interrupt-parent = <&gpa1>;
+ 		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+diff --git a/drivers/input/touchscreen/stmfts.c b/drivers/input/touchscreen/stmfts.c
+--- a/drivers/input/touchscreen/stmfts.c
++++ b/drivers/input/touchscreen/stmfts.c
+@@ -13,6 +13,7 @@
+ #include <linux/leds.h>
+ #include <linux/module.h>
+ #include <linux/pm_runtime.h>
++#include <linux/property.h>
+ #include <linux/regulator/consumer.h>
+ 
+ /* I2C commands */
+@@ -100,6 +101,7 @@
+ 
+ 	struct completion cmd_done;
+ 
++	bool fts8cd56;
+ 	bool use_key;
+ 	bool led_status;
+ 	bool hover_enabled;
+@@ -139,33 +141,47 @@
+ 	return !!regulator_is_enabled(sdata->ledvdd);
+ }
+ 
+-/*
+- * We can't simply use i2c_smbus_read_i2c_block_data because we
+- * need to read more than 255 bytes (
+- */
+-static int stmfts_read_events(struct stmfts_data *sdata)
+-{
+-	u8 cmd = STMFTS_READ_ALL_EVENT;
+-	struct i2c_msg msgs[2] = {
+-		{
+-			.addr	= sdata->client->addr,
+-			.len	= 1,
+-			.buf	= &cmd,
+-		},
+-		{
+-			.addr	= sdata->client->addr,
+-			.flags	= I2C_M_RD,
+-			.len	= STMFTS_DATA_MAX_SIZE,
+-			.buf	= sdata->data,
+-		},
++static int stmfts_read(struct i2c_client *client, u8 *cmd, size_t cmd_len,
++		      u8 *data, size_t len)
++{
++	struct i2c_msg msgs[] = {
++		{ .addr = client->addr, .len = cmd_len, .buf = cmd },
++		{ .addr = client->addr, .flags = I2C_M_RD,
++		  .len = len, .buf = data },
+ 	};
+ 	int ret;
+ 
+-	ret = i2c_transfer(sdata->client->adapter, msgs, ARRAY_SIZE(msgs));
++	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+ 	if (ret < 0)
+ 		return ret;
+ 
+ 	return ret == ARRAY_SIZE(msgs) ? 0 : -EIO;
++}
++
++static int stmfts_read_events(struct stmfts_data *sdata)
++{
++	u8 cmd = STMFTS_READ_ALL_EVENT;
++	int count = STMFTS_STACK_DEPTH;
++	int ret;
++
++	if (sdata->fts8cd56) {
++		u8 fifo_status_cmd[] = { 0xb6, 0x00, 0x23 };
++		u8 fifo_status[2];
++
++		ret = stmfts_read(sdata->client, fifo_status_cmd,
++				  sizeof(fifo_status_cmd), fifo_status,
++				  sizeof(fifo_status));
++		if (ret)
++			return ret;
++
++		count = min_t(int, fifo_status[1] / 2, STMFTS_STACK_DEPTH);
++		if (!count)
++			return 0;
++	}
++
++	ret = stmfts_read(sdata->client, &cmd, sizeof(cmd), sdata->data,
++			  count * STMFTS_EVENT_SIZE);
++	return ret ? ret : count;
+ }
+ 
+ static void stmfts_report_contact_event(struct stmfts_data *sdata,
+@@ -242,11 +258,11 @@
+ 	input_sync(sdata->input);
+ }
+ 
+-static void stmfts_parse_events(struct stmfts_data *sdata)
++static void stmfts_parse_events(struct stmfts_data *sdata, int count)
+ {
+ 	int i;
+ 
+-	for (i = 0; i < STMFTS_STACK_DEPTH; i++) {
++	for (i = 0; i < count; i++) {
+ 		u8 *event = &sdata->data[i * STMFTS_EVENT_SIZE];
+ 
+ 		switch (event[0]) {
+@@ -300,16 +316,16 @@
+ static irqreturn_t stmfts_irq_handler(int irq, void *dev)
+ {
+ 	struct stmfts_data *sdata = dev;
+-	int err;
++	int count;
+ 
+ 	mutex_lock(&sdata->mutex);
+ 
+-	err = stmfts_read_events(sdata);
+-	if (unlikely(err))
+-		dev_err(&sdata->client->dev,
+-			"failed to read events: %d\n", err);
++	count = stmfts_read_events(sdata);
++	if (unlikely(count < 0))
++		dev_err_ratelimited(&sdata->client->dev,
++				    "failed to read events: %d\n", count);
+ 	else
+-		stmfts_parse_events(sdata);
++		stmfts_parse_events(sdata, count);
+ 
+ 	mutex_unlock(&sdata->mutex);
+ 	return IRQ_HANDLED;
+@@ -519,6 +535,72 @@
+ };
+ ATTRIBUTE_GROUPS(stmfts_sysfs);
+ 
++static int stmfts_fts8cd56_write(struct i2c_client *client, u8 reg, u8 value)
++{
++	u8 data[] = { 0xb6, 0x00, reg, value };
++	int ret;
++
++	ret = i2c_master_send(client, data, sizeof(data));
++	if (ret < 0)
++		return ret;
++
++	return ret == sizeof(data) ? 0 : -EIO;
++}
++
++static int stmfts_fts8cd56_power_on(struct stmfts_data *sdata)
++{
++	struct i2c_client *client = sdata->client;
++	u8 id_cmd[] = { 0xb6, 0x00, 0x04 };
++	u8 event_cmd = STMFTS_READ_ONE_EVENT;
++	u8 event[STMFTS_EVENT_SIZE];
++	u8 id[7];
++	int ret;
++	int attempt;
++
++	ret = stmfts_fts8cd56_write(client, 0x1e, 0x20);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "warm boot setup failed\n");
++
++	msleep(10);
++	ret = stmfts_fts8cd56_write(client, 0x28, 0x80);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "reset write failed\n");
++
++	msleep(10);
++	for (attempt = 0; attempt < 12; attempt++) {
++		ret = stmfts_read(client, &event_cmd, sizeof(event_cmd),
++				  event, sizeof(event));
++		if (ret)
++			return dev_err_probe(&client->dev, ret, "reset event read failed\n");
++
++		if (event[0] == STMFTS_EV_CONTROLLER_READY)
++			break;
++
++		msleep(20);
++	}
++	if (event[0] != STMFTS_EV_CONTROLLER_READY)
++		return dev_err_probe(&client->dev, -ETIMEDOUT,
++				     "controller ready event missing (last %#x)\n",
++				     event[0]);
++
++	ret = stmfts_read(client, id_cmd, sizeof(id_cmd), id, sizeof(id));
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "chip ID read failed\n");
++
++	if (id[1] != 0x36 || id[2] != 0x70)
++		return dev_err_probe(&client->dev, -ENODEV, "unexpected chip ID %02x%02x\n",
++				     id[1], id[2]);
++
++	sdata->chip_id = (id[1] << 8) | id[2];
++
++	ret = stmfts_fts8cd56_write(client, 0x2c, 0x48);
++	if (ret)
++		return dev_err_probe(&client->dev, ret, "controller interrupt enable failed\n");
++
++	enable_irq(client->irq);
++	return 0;
++}
++
+ static int stmfts_power_on(struct stmfts_data *sdata)
+ {
+ 	int err;
+@@ -535,6 +617,14 @@
+ 	 */
+ 	msleep(20);
+ 
++	if (sdata->fts8cd56) {
++		err = stmfts_fts8cd56_power_on(sdata);
++		if (err)
++			regulator_bulk_disable(ARRAY_SIZE(sdata->regulators),
++					       sdata->regulators);
++		return err;
++	}
++
+ 	err = i2c_smbus_read_i2c_block_data(sdata->client, STMFTS_READ_INFO,
+ 					    sizeof(reg), reg);
+ 	if (err < 0)
+@@ -590,6 +680,8 @@
+ 	struct stmfts_data *sdata = data;
+ 
+ 	disable_irq(sdata->client->irq);
++	if (sdata->fts8cd56)
++		stmfts_fts8cd56_write(sdata->client, 0x2c, 0x08);
+ 	regulator_bulk_disable(ARRAY_SIZE(sdata->regulators),
+ 						sdata->regulators);
+ }
+@@ -638,6 +730,7 @@
+ 	i2c_set_clientdata(client, sdata);
+ 
+ 	sdata->client = client;
++	sdata->fts8cd56 = !!device_get_match_data(&client->dev);
+ 	mutex_init(&sdata->mutex);
+ 	init_completion(&sdata->cmd_done);
+ 
+@@ -781,8 +874,11 @@
+ };
+ 
+ #ifdef CONFIG_OF
++static const bool stmfts_fts8cd56 = true;
++
+ static const struct of_device_id stmfts_of_match[] = {
+ 	{ .compatible = "st,stmfts", },
++	{ .compatible = "st,fts8cd56", .data = &stmfts_fts8cd56 },
+ 	{ },
+ };
+ MODULE_DEVICE_TABLE(of, stmfts_of_match);

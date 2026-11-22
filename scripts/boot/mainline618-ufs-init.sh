@@ -201,6 +201,18 @@ partdev() {
 [ "$("$BB" tr -d '\000' < /proc/device-tree/model)" = 'Samsung Galaxy S8+ (SM-G955N)' ] ||
     stop 'Unexpected board model'
 log 'SM-G955N UFS INIT'
+g3d_snapshot=/proc/device-tree/chosen/samsung,g955n-g3d-power-snapshot
+if [ -r "$g3d_snapshot" ]; then
+    g3d_state=$("$BB" od -An -v -tx1 "$g3d_snapshot" | "$BB" tr -d ' \n')
+    case "$g3d_state" in
+        ffffffffffffffffffffffffffffffffffffffff|'')
+            log 'G3D power: loader snapshot unavailable'
+            ;;
+        *)
+            log "G3D power: BUCK6_CTRL OUT1 OUT2 LDO9_CTRL PMU_STATUS (BE32) $g3d_state"
+            ;;
+    esac
+fi
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.usb_diag=1 "*)
         if start_usb_gadget; then
