@@ -168,6 +168,11 @@ int g955n_kms_open(struct g955n_kms **result)
     return -ENODEV;
 }
 
+int g955n_kms_fd(const struct g955n_kms *output)
+{
+    return output->fd;
+}
+
 static uint32_t pixel_format(enum g955n_decon_rgb format)
 {
     switch (format) {

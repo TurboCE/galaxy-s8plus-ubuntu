@@ -155,6 +155,13 @@ The existing kernel57 reached the DECON PRIME/DSI checks but has no
 accessible Panfrost render device. The fixture exits with status 3 in this
 case before allocating any render targets.
 
+Run `./panfrost-scanout-test --check-kms-gbm` with the unmodified Ubuntu
+Mesa packages to test the GBM path used by stock Mutter. This opens GBM
+on the DECON display file and requires Mesa to select Mali-G71 Panfrost
+and render to linear buffers allocated with `GBM_BO_USE_SCANOUT`. It
+leaves the current display session active. A pass in `--check` alone
+does not establish that Mesa can pair the display and render devices.
+
 When those prerequisites pass, stop the current display session and vacate
 the panel before using `--present-reviewed-sm-g955n`. This strict mode
 submits the actual GBM DMA-BUFs to DECON using the existing KMS presenter.

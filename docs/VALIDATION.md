@@ -2656,3 +2656,17 @@ ramdisk and boot parameters. Initial TWRP access succeeded, but the USB
 connection disappeared during BOOT backup. The incomplete backup cannot
 be used. No BOOT write was performed and the kernel58 and stock ALSA
 hardware trials are pending.
+
+### DECON-card GBM qualification
+
+The Panfrost fixture now exercises the display-file GBM setup used by stock
+Mutter. It checks the Mesa renderer and draws to linear DMA-BUFs allocated
+with the scanout usage flag. The ARM64 build with Ubuntu Mesa 25.2.8 headers
+passed with warnings as errors. The simulated KMS presenter check passed and
+the Python suite reported 155 tests with 9 skipped.
+
+The Ubuntu ARM64 Mesa package contains `exynos_dri.so` and `panfrost_dri.so`.
+The current DECON wrapper reports `g955n-decon`; whether stock Mesa can
+automatically pair that DRM device name with Panfrost remains unverified.
+The handset did not enumerate on the host during this continuation, so the
+new mode and the #58 ALSA kernel were not tested on hardware.

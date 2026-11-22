@@ -1771,3 +1771,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add a kernel58 candidate that checks the built-in audio endpoint before
   native ALSA dispatches its open callback. Add an optional, boot-scoped
   selector for Ubuntu's standard audio packages.
+
+### Stock Mesa GBM qualification
+
+- Add a DECON-card GBM check alongside the Panfrost render-node and panel
+  presentation checks. The new mode requires Mali-G71 Panfrost to render to
+  linear buffers allocated for scanout without changing the running session.

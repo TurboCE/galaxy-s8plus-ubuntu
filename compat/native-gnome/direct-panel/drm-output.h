@@ -7,6 +7,8 @@ struct g955n_kms;
 /* Open verifies the driver, PRIME import and the connected native panel mode.
  * It does not modeset or map pixels. The caller must hold the display lease. */
 int g955n_kms_open(struct g955n_kms **output);
+/* Borrow the display file for GBM. Keep output alive until GBM is destroyed. */
+int g955n_kms_fd(const struct g955n_kms *output);
 enum { G955N_KMS_DEFERRED = 1 };
 /* Resume an outstanding flip. A deferred result keeps both buffers held and
  * lets the event loop run while the screen is off. */

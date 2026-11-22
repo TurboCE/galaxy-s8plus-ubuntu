@@ -63,11 +63,12 @@ static bool correct_device(void)
 }
 
 static bool build_slot(struct slot *slot, struct gbm_device *gbm,
-                       EGLDisplay dpy, PFNEGLCREATEIMAGEKHRPROC create_image,
+                       uint32_t usage, EGLDisplay dpy,
+                       PFNEGLCREATEIMAGEKHRPROC create_image,
                        PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_texture)
 {
     slot->bo = gbm_bo_create(gbm, WIDTH, HEIGHT, GBM_FORMAT_ARGB8888,
-                             GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+                             usage);
     if (!slot->bo || gbm_bo_get_plane_count(slot->bo) != 1 ||
         gbm_bo_get_modifier(slot->bo) != DRM_FORMAT_MOD_LINEAR ||
         gbm_bo_get_offset(slot->bo, 0))
@@ -136,9 +137,10 @@ static bool present_frames(struct g955n_kms *output, struct slot *slots)
 
 int main(int argc, char **argv)
 {
-    bool check = argc == 2 && !strcmp(argv[1], "--check");
+    bool kms_gbm = argc == 2 && !strcmp(argv[1], "--check-kms-gbm");
+    bool check = kms_gbm || (argc == 2 && !strcmp(argv[1], "--check"));
     if (argc != 2 || (!check && strcmp(argv[1], "--present-reviewed-sm-g955n"))) {
-        fprintf(stderr, "Use --check or --present-reviewed-sm-g955n after vacating the panel\n");
+        fprintf(stderr, "Use --check, --check-kms-gbm or --present-reviewed-sm-g955n after vacating the panel\n");
         return 2;
     }
     if (!correct_device()) {
@@ -162,13 +164,21 @@ int main(int argc, char **argv)
         return 3;
     }
 
-    struct gbm_device *gbm = gbm_create_device(fd);
-    if (!gbm)
+    const int gbm_fd = kms_gbm ? g955n_kms_fd(output) : fd;
+    const uint32_t usage = GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR |
+                           (kms_gbm ? GBM_BO_USE_SCANOUT : 0);
+    printf("GBM device: %s\n", kms_gbm ? "DECON KMS card" : "Panfrost render node");
+    struct gbm_device *gbm = gbm_create_device(gbm_fd);
+    if (!gbm) {
+        fprintf(stderr, "Could not create GBM device\n");
         goto close_devices;
+    }
 
     EGLDisplay dpy = eglGetPlatformDisplay(EGL_PLATFORM_GBM_KHR, gbm, NULL);
-    if (dpy == EGL_NO_DISPLAY || !eglInitialize(dpy, NULL, NULL))
+    if (dpy == EGL_NO_DISPLAY || !eglInitialize(dpy, NULL, NULL)) {
+        fprintf(stderr, "Could not initialize GBM EGL (error 0x%x)\n", eglGetError());
         goto close_devices;
+    }
 
     EGLContext context = EGL_NO_CONTEXT;
     struct slot slots[SLOT_COUNT] = {0};
@@ -206,19 +216,22 @@ int main(int argc, char **argv)
 
     bool ready = true;
     for (size_t i = 0; i < SLOT_COUNT && ready; i++)
-        ready = build_slot(&slots[i], gbm, dpy, create_image, image_texture) &&
+        ready = build_slot(&slots[i], gbm, usage, dpy, create_image, image_texture) &&
                 paint_slot(&slots[i], i);
     if (ready && (check || present_frames(output, slots))) {
-        puts(check ? "Panfrost GBM allocation and DMA-BUF EGL rendering ready" :
+        puts(kms_gbm ? "DECON GBM selected Panfrost and rendered to linear scanout buffers" :
+             check ? "Panfrost GBM allocation and DMA-BUF EGL rendering ready" :
                      "12 Mesa/Panfrost DECON presentations completed");
         result = 0;
     } else if (!ready) {
         fprintf(stderr, "Could not create or render a linear, single-plane Panfrost target\n");
     }
 
-    /* Release KMS ownership and its buffer references before destroying BOs. */
-    g955n_kms_close(output);
-    output = NULL;
+    /* Presentation owns the KMS buffers. The KMS GBM check borrows its fd. */
+    if (!kms_gbm) {
+        g955n_kms_close(output);
+        output = NULL;
+    }
     for (size_t i = 0; i < SLOT_COUNT; i++) {
         struct slot *slot = &slots[i];
         glDeleteFramebuffers(1, &slot->framebuffer);
