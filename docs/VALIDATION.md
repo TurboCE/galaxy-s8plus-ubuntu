@@ -2613,3 +2613,10 @@ test used the numeric OSK. It counted one inserted character per key,
 preserved the numeric page and completed normal PAM unlock. It checked
 that logind cleared LockedHint, the boot and Shell were unchanged,
 no failed-session screen appeared and no new kernel fault was observed.
+
+The default build also passed injected power-button events through the
+real GPIO evdev device. A long press showed the Power Off confirmation,
+which was cancelled. The next short press made the power-key service
+request suspend. The RTC woke the same boot and GNOME/KMS process after
+23.98 seconds with taint zero. USB and Wi-Fi returned. Wake was by RTC
+during this test.
