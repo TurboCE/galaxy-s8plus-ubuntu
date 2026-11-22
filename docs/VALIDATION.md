@@ -2620,3 +2620,24 @@ which was cancelled. The next short press made the power-key service
 request suspend. The RTC woke the same boot and GNOME/KMS process after
 23.98 seconds with taint zero. USB and Wi-Fi returned. Wake was by RTC
 during this test.
+
+### APT compatibility and private fbdev on kernel57
+
+A root APT simulation using the handset's current indexes selected 52
+upgrades, including systemd packages, with no packages added or removed.
+No Xorg, Mutter, GNOME Shell, GDM or PipeWire packages were selected.
+The installed package audit showed the original rotation module and the
+touch Clutter library in Ubuntu package paths.
+
+After migration, dpkg verified the stock fbdev package and the active Xorg
+process mapped its rotation driver from the private GPU prefix. The
+handset passed touchscreen login, all four rotation/touch targets, and warm
+reboot with default GPU output. The reboot retained normal touchscreen
+login, three DPMS off/on cycles and a 23.95-second RTC suspend/resume with
+the same GNOME/KMS process and zero taint. Orientation lock and ambient
+brightness settings accepted both values and were restored. The acoustic
+loopback detected both test tones, with no new PCM hardware errors. After resume, the
+numeric OSK accepted each injected touch exactly once and completed PAM
+unlock. The timing probe put the microphone clipping between 18.31 and
+26.46 ms after the beginning of capture, with no steady clipping or new
+kernel fault signature.

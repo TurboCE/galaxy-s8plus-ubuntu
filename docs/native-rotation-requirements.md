@@ -145,3 +145,24 @@ CPU use of 16.74% through the original X11 copy route and 9.07% through
 direct KMS. All runs saw 179 of 180 requested movements, with a 17 ms median
 geometry-update gap on both routes. This measures a scripted workload and
 does not establish physical drag latency or panel FPS.
+
+### Ubuntu package updates
+
+New rotation installations load the fbdev module from
+`/opt/g955n-native-gpu/xorg/drivers/fbdev_drv.so`. The distro module stays
+under `/usr/lib/xorg/modules` and remains available as a fallback. The trial
+receipt checks the private module, the Xorg configuration, and the Xorg
+server binary. On reboot after an Xorg server binary change, the controller
+restores normal framebuffer output until the port is requalified. Recovery
+preserves the current Ubuntu package file. Legacy recovery likewise avoids
+overwriting a package driver that differs from its recorded trial binary.
+
+Use `sudo apt-get -s upgrade` to inspect planned changes without installing
+packages. Pay particular attention to Xorg, Mutter, GNOME Shell, GDM,
+PipeWire, WirePlumber and the systemd/logind stack. A Mutter package can
+replace the device-specific touch library. The private audio build has its
+own version guard and needs to be rebuilt and requalified when the stock
+ALSA plugin changes. See the [Mutter installation notes](../compat/mutter-x11-touch/README.md)
+and [PipeWire guard](../compat/pipewire/README.md). Review the currently
+available versions and exercise login, rotation, sound and suspend after
+updating a package in these paths.

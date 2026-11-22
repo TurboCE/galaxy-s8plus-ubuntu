@@ -68,8 +68,11 @@ def statistics(raw):
             imag = sum(x * math.sin(omega*i) for i, x in enumerate(window))
             energies.append(round(2 * math.hypot(real, imag) / len(window), 3))
         windows.append(energies)
+    startup_clips = [index for index, value in enumerate(startup) if abs(value) >= 32767]
     result = dict(startup_ignored_seconds=0.25,
-                  startup_clipped_samples=sum(abs(x) >= 32767 for x in startup),
+                  startup_clipped_samples=len(startup_clips),
+                  startup_first_clip_ms=round(startup_clips[0] * 1000 / RATE, 2) if startup_clips else None,
+                  startup_last_clip_ms=round(startup_clips[-1] * 1000 / RATE, 2) if startup_clips else None,
                   frames=len(mono), seconds=round(len(mono)/RATE, 3),
                   rms=round(rms, 3), peak=max(abs(x) for x in mono),
                   distinct_values=len(set(mono)),

@@ -30,7 +30,7 @@ class DirectPanelBootTests(unittest.TestCase):
         (backup / 'session.py').chmod(0o755)
         values = dict(PREFIX=root, FILES=self.files, POLICY_FILES=(), BACKUP=backup,
                       DEFAULT=self.policy, LEASE=self.lease, LAUNCHER=self.files[2],
-                      DRM_PROBE=root / 'drm-kms-probe')
+                      DRM_PROBE=root / 'drm-kms-probe', PRIVATE_FBDEV=root / 'private-fbdev.so')
         options = patch.multiple(controller, **values)
         options.start()
         self.addCleanup(options.stop)
@@ -60,7 +60,7 @@ class DirectPanelBootTests(unittest.TestCase):
             snapshot = self.policy.parent / path.name
             snapshot.write_bytes(path.name.encode())
             snapshot.chmod(0o644)
-        with patch.multiple(controller, FBDEV=rotation[0], ROTATION_FILES=rotation):
+        with patch.multiple(controller, FBDEV=rotation[0], XORG_CONFIG=rotation[1], ROTATION_FILES=rotation):
             self.prepare()
         self.assert_recovered()
         for path in rotation:
@@ -148,7 +148,7 @@ class DirectPanelBootTests(unittest.TestCase):
         self.files[2].write_bytes(
             b"env['G955N_DRM_KMS']='1'\nenv['G955N_DIRECT_PANEL_ROTATION']='1'")
         controller.DRM_PROBE.write_bytes(b'reviewed probe')
-        with patch.multiple(controller, FBDEV=rotation[0], ROTATION_FILES=rotation):
+        with patch.multiple(controller, FBDEV=rotation[0], XORG_CONFIG=rotation[1], ROTATION_FILES=rotation):
             self.enable_default()
             self.assertTrue(all(str(path) in json.loads(self.policy.read_text())
                                 for path in rotation))
@@ -160,6 +160,53 @@ class DirectPanelBootTests(unittest.TestCase):
                 controller.prepare_boot()
             self.assert_recovered()
         self.assertEqual([path.read_bytes() for path in rotation], [b'prior', b'prior'])
+
+    def test_legacy_recovery_preserves_a_replaced_package_module(self):
+        xorg_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(xorg_dir.cleanup)
+        config = Path(xorg_dir.name) / 'xorg.conf'
+        fbdev = Path(xorg_dir.name) / 'fbdev_drv.so'
+        for path in (config, fbdev):
+            path.write_bytes(b'candidate')
+            (self.policy.parent / path.name).write_bytes(b'original')
+        self.select_kms()
+        self.files[2].write_bytes(self.files[2].read_bytes() +
+                                  b"\nenv['G955N_DIRECT_PANEL_ROTATION']='1'")
+        with patch.multiple(controller, FBDEV=fbdev, XORG_CONFIG=config,
+                            ROTATION_FILES=(fbdev, config)):
+            self.enable_default()
+            fbdev.write_bytes(b'new package version')
+            controller.prepare_boot()
+            self.assert_recovered()
+        self.assertEqual(config.read_bytes(), b'original')
+        self.assertEqual(fbdev.read_bytes(), b'new package version')
+
+    def test_private_rotation_preserves_package_module_and_checks_server(self):
+        root = self.files[0].parent
+        config = root / 'xorg.conf'
+        fbdev = root / 'package-fbdev.so'
+        server = root / 'Xorg'
+        files = (config, fbdev, server, controller.PRIVATE_FBDEV)
+        for path in files:
+            path.write_bytes(b'validated')
+        (self.policy.parent / config.name).write_bytes(b'original config')
+        (self.policy.parent / 'xorg-server.sha256').touch()
+        self.select_kms()
+        self.files[2].write_bytes(self.files[2].read_bytes() +
+                                  b"\nenv['G955N_DIRECT_PANEL_ROTATION']='1'")
+        with patch.multiple(controller, FBDEV=fbdev, XORG_CONFIG=config, XORG_SERVER=server), \
+             patch.object(controller, 'qualified_kms', return_value=True):
+            self.enable_default()
+            fbdev.write_bytes(b'upgraded package module')
+            controller.prepare_boot()
+            self.assertTrue(self.lease.exists())
+            self.lease.unlink()
+            server.write_bytes(b'changed Xorg')
+            controller.prepare_boot()
+            self.assert_recovered()
+        self.assertFalse(controller.PRIVATE_FBDEV.exists())
+        self.assertEqual(config.read_bytes(), b'original config')
+        self.assertEqual(fbdev.read_bytes(), b'upgraded package module')
 
     def test_kms_probe_binary_is_part_of_persistent_hashes(self):
         self.select_kms()

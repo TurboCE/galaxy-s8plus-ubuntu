@@ -19,7 +19,10 @@ LAUNCHER = PREFIX / 'session.py'
 FILES = (LIBRARY, MANIFEST, LAUNCHER)
 FBDEV = Path('/usr/lib/xorg/modules/drivers/fbdev_drv.so')
 XORG_CONFIG = Path('/etc/X11/xorg.conf.d/10-g955n-fbdev.conf')
-ROTATION_FILES = (FBDEV, XORG_CONFIG)
+ROTATION_FILES = (FBDEV, XORG_CONFIG)  # Legacy snapshots
+XORG_MODULES = PREFIX / 'xorg'
+PRIVATE_FBDEV = XORG_MODULES / 'drivers/fbdev_drv.so'
+XORG_SERVER = Path('/usr/lib/xorg/Xorg')
 BACKUP = Path('/var/lib/g955n/direct-panel-trial')
 LEASE = Path('/run/lock/g955n-direct-panel-trial')
 TIMER = 'g955n-direct-panel-rollback'
@@ -81,11 +84,30 @@ def remove_backup():
 
 def restore_files():
     LEASE.unlink(missing_ok=True)
-    paths = FILES + ROTATION_FILES if (BACKUP / FBDEV.name).is_file() else FILES
-    for path in paths:
+    if (BACKUP / XORG_CONFIG.name).is_file():
+        config = (XORG_CONFIG,)
+    else:
+        config = ()
+    legacy = BACKUP / FBDEV.name
+    if legacy.is_file():
+        # Older trials replaced the package file. Leave a subsequently
+        # upgraded package file alone if it no longer matches that trial.
+        expected = None
+        try:
+            if DEFAULT.is_file():
+                receipt = json.loads(DEFAULT.read_text())
+                if isinstance(receipt, dict):
+                    expected = receipt.get(str(FBDEV))
+        except (OSError, ValueError):
+            pass
+        if not DEFAULT.exists() or (expected and FBDEV.is_file() and
+                                    digest(FBDEV.read_bytes()) == expected):
+            replace(FBDEV, legacy.read_bytes(), stat.S_IMODE(legacy.stat().st_mode))
+    for path in FILES + config:
         snapshot = BACKUP / path.name
-        mode = stat.S_IMODE(snapshot.stat().st_mode)
-        replace(path, snapshot.read_bytes(), mode)
+        replace(path, snapshot.read_bytes(), stat.S_IMODE(snapshot.stat().st_mode))
+    if (BACKUP / 'xorg-server.sha256').is_file():
+        PRIVATE_FBDEV.unlink(missing_ok=True)
 
 
 def restore():
@@ -149,7 +171,8 @@ def default_hashes():
     if kms_selected():
         paths += (DRM_PROBE,)
     if rotation_selected():
-        paths += ROTATION_FILES
+        paths += ((PRIVATE_FBDEV, XORG_CONFIG, XORG_SERVER)
+                  if (BACKUP / 'xorg-server.sha256').is_file() else ROTATION_FILES)
     return {
         str(path.relative_to(PREFIX) if path.is_relative_to(PREFIX) else path):
         digest(path.read_bytes()) for path in paths
@@ -165,11 +188,15 @@ def save_default():
 def confirm_rotation_default():
     if (not LEASE.is_file() or not BACKUP.is_dir() or not kms_selected()
             or not rotation_selected()
-            or not all((BACKUP / path.name).is_file() for path in ROTATION_FILES)):
+            or not (BACKUP / XORG_CONFIG.name).is_file()
+            or not ((BACKUP / FBDEV.name).is_file() or PRIVATE_FBDEV.is_file())):
         raise RuntimeError('No current rotation trial to confirm')
     ctl('is-active', 'gdm.service', 'g955n-fb-display.service', TIMER + '.timer')
     if Path('/proc/sys/kernel/tainted').read_text().strip() != '0' or not qualified_kms():
         raise RuntimeError('The active kernel no longer qualifies for direct output')
+    server_pin = BACKUP / 'xorg-server.sha256'
+    if server_pin.is_file() and digest(XORG_SERVER.read_bytes()) != server_pin.read_text().strip():
+        raise RuntimeError('Xorg changed during the rotation trial')
     save_default()
 
 
@@ -213,7 +240,7 @@ def rotation_files(candidate, expected):
     data = candidate.read_bytes()
     if digest(data) != expected or data[:6] != b'\x7fELF\x02\x01' or data[18:20] != b'\xb7\x00':
         raise RuntimeError('Rotation driver checksum or AArch64 ELF header mismatch')
-    for path in ROTATION_FILES:
+    for path in (*ROTATION_FILES, XORG_SERVER):
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid or info.st_mode & 0o022:
             raise RuntimeError(f'Untrusted rotation target: {path}')
@@ -221,7 +248,12 @@ def rotation_files(candidate, expected):
     marker = b'Option "ShadowFB" "true"'
     if config.count(marker) != 1 or b'G955NRotation' in config or b'Driver "fbdev"' not in config:
         raise RuntimeError('Unexpected SM-G955N Xorg configuration')
-    return {FBDEV: data, XORG_CONFIG: config.replace(marker, marker + b'\n    Option "G955NRotation" "true"')}
+    if PRIVATE_FBDEV.exists() or PRIVATE_FBDEV.is_symlink() or b'Section "Files"' in config:
+        raise RuntimeError('Unexpected private module or existing Xorg Files section')
+    files = (f'Section "Files"\n    ModulePath "{XORG_MODULES}"\n'
+             '    ModulePath "/usr/lib/xorg/modules"\nEndSection\n\n').encode()
+    return {PRIVATE_FBDEV: data,
+            XORG_CONFIG: files + config.replace(marker, marker + b'\n    Option "G955NRotation" "true"')}
 
 
 def run(candidate, expected, default, drm_kms=False, rotation=None, rotation_hash=None):
@@ -235,7 +267,8 @@ def run(candidate, expected, default, drm_kms=False, rotation=None, rotation_has
     if digest(data) != expected:
         raise RuntimeError('Candidate checksum mismatch')
     rotation_changes = rotation_files(rotation, rotation_hash)
-    original = {path: path.read_bytes() for path in (*FILES, *rotation_changes)}
+    original = {path: path.read_bytes()
+                for path in FILES + ((XORG_CONFIG,) if rotation_changes else ())}
     manifest = json.loads(original[MANIFEST])
     if manifest['target'] != 'SM-G955N' or digest(original[LIBRARY]) != manifest['files'][KEY]['sha256']:
         raise RuntimeError('The installed GPU prefix does not match its manifest')
@@ -253,6 +286,9 @@ def run(candidate, expected, default, drm_kms=False, rotation=None, rotation_has
                 stream.write(content)
                 stream.flush()
                 os.fsync(stream.fileno())
+        if rotation_changes:
+            replace(snapshot / 'xorg-server.sha256',
+                    (digest(XORG_SERVER.read_bytes()) + '\n').encode(), 0o600)
         sync_directory(snapshot)
         snapshot.rename(BACKUP)
         sync_directory(BACKUP.parent)
@@ -291,8 +327,10 @@ def run(candidate, expected, default, drm_kms=False, rotation=None, rotation_has
         launcher = launcher.replace(cleanup,
             b"keys=sorted(set(ENV)|set(REMOVE)|{'XDG_DATA_DIRS','G955N_DIRECT_PANEL_TRIAL','G955N_DRM_KMS','G955N_DIRECT_PANEL_ROTATION'})")
         replace(LAUNCHER, launcher)
-        for path, content in rotation_changes.items():
-            replace(path, content)
+        if rotation_changes:
+            PRIVATE_FBDEV.parent.mkdir(parents=True, exist_ok=True)
+            replace(PRIVATE_FBDEV, rotation_changes[PRIVATE_FBDEV], 0o644)
+            replace(XORG_CONFIG, rotation_changes[XORG_CONFIG])
         ctl('start', 'gdm.service')
         if default:
             save_default()

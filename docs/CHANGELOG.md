@@ -1758,3 +1758,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Validate normal GDM touch login and rotated touch after warm reboot.
 - Let scripted window moves run without depending on mouse-grab
   prerequisites. The same-boot CPU comparison is in VALIDATION.md.
+
+### Isolate the built-in display driver from Ubuntu packages
+
+- Move the rotation-capable Xorg module into the private GPU prefix. Preserve
+  the distro driver and check the exact Xorg server at boot.
+- Add first and last clipping timestamps to the audio startup diagnostic.
