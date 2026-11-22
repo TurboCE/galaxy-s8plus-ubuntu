@@ -2158,3 +2158,69 @@ and the comparison unit was inactive. The app was left running from its normal
 desktop entry. Recovery is observed; recurrence prevention and the original
 failure's cause are not qualified. Private evidence is under
 artifacts/system-monitor-current/normal-final.private.log.
+
+
+### GNOME app-grid touch cancellation repair (2026-11-22)
+
+The owner reported that Settings and other apps also failed from the app grid.
+The installed entries and activation-manager GPU environment were valid. Files,
+Help, xgps and Software & Updates could create viewable windows when launched
+directly, so that observation alone did not qualify grid activation. A bounded
+app-icon-only extension recorded the failing grid path: BUTTON_PRESS reached
+software-properties-gtk.desktop, pressed became true then false, but no native
+clicked signal or application launch followed. The touchscreen had no held
+tracking slots or BTN_TOUCH between tests.
+
+The stock46 app-title hover/focus reallocation and AppIcon's unconditional leave
+fake_release interacted with X11 DND grab crossings. Holding title allocation
+alone improved but did not eliminate the failed clicks. The final patch keeps
+a real primary press through a synthetic leave only for the same device, at
+most600ms, inside both original/current mapped reactive bounds, without drag or
+open menu. Actual leave, touch cancellation, drag, menu and release clear the
+record. It never synthesizes clicked or invokes application activation itself.
+Pointer-hover title expansion is disabled on this handset; keyboard focus and
+explicit menu highlighting can expand outside a held press.
+
+Initial repetitions mixed XTEST mouse parking with touch replay and were
+excluded from hardware acceptance after that difference was identified. The
+controlled comparison parked through the actual sec_touchscreen evdev device,
+opened the grid, and replayed the same fresh touch. With the original resource
+restored, one of three trials activated and two lost the click. The final
+resource passed an initial3/3 and, after the original-code comparison and final
+installation,6/6 with120/300/450ms presses. Each accepted click closed the
+overview normally; the final Software & Updates window was separately verified
+IsViewable. These are real-device event-replay results, not optical latency or
+a long-term reliability guarantee. The owner also reported the app opening
+during the investigation; that is not substituted for every replay result.
+
+Additional touch trials activated Software & Updates, Language Support,
+Additional Drivers and Settings. Language Support and Software & Updates also
+created normal X11 windows with the diagnostic extension disabled. Long hold,
+drag outside and an outside/back cancellation did not launch the app; a normal
+tap afterward did. Actual generated-method fixtures check native release,
+same-device/bounds/time/visibility/drag/menu cancellation, duplicate release,
+label allocation and keyboard-focus highlighting. Full generated-module syntax
+was checked. An AT-SPI-focus plus XTEST Return/Space activation probe did not
+activate the app, even though accessible focus was reported; it is not counted
+as a keyboard pass. A physical keyboard was not tested and that route remains
+unqualified; the native key press/release implementation was not modified.
+
+The root-owned overlay, manifest and default record were installed atomically
+with matching prior backups. Source and payload hashes, existing GPU hashes,
+readback and ownership passed. The startup stock-resource pin covers
+appDisplay.js, so a GNOME update requires review. Normal GDM/PAM login loaded
+the resource; no kernel, firmware or graphics library was replaced. The final
+GNOME mapped Mali without swrast, held the KMS card, reported kernel55/taint0,
+and retained the100ms System Monitor preference. Both saved user extension
+preferences were restored, diagnostics were inactive and the mode-required
+direct-panel extension remained enabled. A final touch launch after this
+cleanup passed, confirming the repair does not depend on the diagnostic module.
+
+Private receipts remain under artifacts/system-monitor-current/, notably
+native-park-stock.private.log, native-park-final-six.private.log,
+native-multiple-apps-final.private.log, gesture-regressions.private.log,
+no-diagnostic-acceptance.private.log, final-runtime-receipt.private.log,
+restore-session-preferences.private.log and final-integrity.private.log.
+The first historical System Monitor failure had no equivalent captured click
+trace; these results qualify the reproduced grid-cancellation defect rather
+than retroactively proving every earlier startup failure had the same cause.

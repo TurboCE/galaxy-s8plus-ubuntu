@@ -1,0 +1,5 @@
+<schemalist>
+  <schema id="org.gnome.shell.extensions.g955n-app-grid" path="/org/gnome/shell/extensions/g955n-app-grid/">
+    <key name="diagnostic-enabled" type="b"><default>false</default></key>
+  </schema>
+</schemalist>

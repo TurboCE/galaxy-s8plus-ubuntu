@@ -1635,3 +1635,18 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   System Monitor and verified the ordinary desktop entry creates a viewable
   window with the original GL configuration. No persistent renderer override
   was installed; the initial failure's root cause remains unproven.
+
+
+### Repair lost app-grid touch activation (2026-11-22)
+
+- Reproduced Software & Updates receiving a real touch but losing its pressed
+  state without a native click. Kept a valid primary press across X11 synthetic
+  grab crossings inside the same tile and froze label allocation during presses.
+  Native releases still generate clicks; no forced launch or fake click is used.
+- Added a pinned resource builder, guarded atomic installer/backups/startup hashes,
+  actual-method fixtures and a separate opt-in bounded diagnostic extension.
+- Corrected the comparison to use touchscreen parking rather than XTEST pointer
+  warps: original code failed2/3 trials; the final repair passed6/6 across
+  three press durations, plus four app launches and cancellation checks.
+  Restored owner extension preferences and disabled diagnostics. Mali/KMS and
+  the100ms System Monitor preference were preserved.
