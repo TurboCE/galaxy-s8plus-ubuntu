@@ -8,6 +8,7 @@ import signal
 import socket
 import stat
 import subprocess
+import time
 
 from lto import read_cache
 from run_probe import ENGINE, MODEL, STOCK_CONFIG, check_vendor, make_config
@@ -42,6 +43,22 @@ def relay(peer, stream, engine, client):
                 continue
 
 
+def wait_for_hub(state, timeout=12):
+    if state.is_symlink() or state.stat().st_uid != 0:
+        raise SystemExit('Unexpected GNSS state directory')
+    fifo = state / '.pipe.gpsd_to_lhd.to_server'
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if stat.S_ISFIFO(fifo.lstat().st_mode):
+                return
+            raise SystemExit('Unexpected type for the location hub GNSS FIFO')
+        except FileNotFoundError:
+            if time.monotonic() >= deadline:
+                raise SystemExit('The location hub did not create its GNSS FIFO')
+            time.sleep(0.25)
+
+
 def main():
     if os.geteuid() or b'SM-G955N' not in MODEL.read_bytes():
         raise SystemExit('Requires root on the SM-G955N')
@@ -55,9 +72,7 @@ def main():
     # gpsd and the already-running Broadcom hub must open the same IPC inode.
     # A separate bind-mounted cache creates a second FIFO with the same name.
     state = Path('/data/vendor/gps')
-    fifo = state / '.pipe.gpsd_to_lhd.to_server'
-    if state.is_symlink() or state.stat().st_uid != 0 or not stat.S_ISFIFO(fifo.lstat().st_mode):
-        raise SystemExit('The verified location hub does not own its GNSS FIFO')
+    wait_for_hub(state)
     scratch = Path(os.environ['RUNTIME_DIRECTORY'])
     (scratch / 'lto').mkdir(exist_ok=True)
     config = scratch / 'gps.xml'

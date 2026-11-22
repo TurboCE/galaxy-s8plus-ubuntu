@@ -1,5 +1,7 @@
 [Unit]
 Description=Verified Broadcom GNSS orbit-data cache for SM-G955N
+Requires=g955n-gnss-bsp.service
+After=g955n-gnss-bsp.service
 
 [Service]
 Type=oneshot

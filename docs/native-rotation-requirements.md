@@ -35,3 +35,19 @@ scanout. In the pinned SM-G955N source, `dpp_reg_set_rotation()` in
 therefore needs a compositor transform into the existing native-size DMA-BUF
 and a matching logical output and input transform. Advertising a DRM rotation
 property alone would leave the pixels and touch coordinates unrotated.
+
+
+On kernel55, real SensorProxy orientation events reached the desktop session.
+The live RandR output was `default`, and XRandR rejected a left-rotation dry
+run. The standard GNOME rotation-lock setting accepted both values and was
+restored. This verifies the setting and sensor path while leaving panel
+rotation and touch remapping open.
+
+The pinned Mutter XRandR backend recognizes the `ConnectorType` atom
+`Panel` as a built-in monitor. The current synthetic RandR output does not
+provide that identification. Mutter's orientation management also requires
+touch mode and an accelerometer. Both valid CRTC rotation and built-in panel
+identification are required before enabling the GNOME rotation control on
+this path. The presenter additionally guards native portrait dimensions and
+format, so rotated rendering must still deliver correctly arranged pixels in
+the native Mali DMA-BUFs that DECON scans out.

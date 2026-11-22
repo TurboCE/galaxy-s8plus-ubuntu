@@ -11,6 +11,7 @@ import tempfile
 SOURCE = Path(__file__).resolve().parents[1]
 AMBIENT = SOURCE / 'compat/ambient-brightness'
 AUDIO = SOURCE / 'compat/pipewire'
+GNSS = SOURCE / 'compat/gnss'
 SENSORS = SOURCE / 'compat/sensors'
 STOCK_SPA = Path('usr/lib/aarch64-linux-gnu/spa-0.2')
 PRIVATE_SPA = Path('usr/local/lib/g955n/spa-0.2')
@@ -88,6 +89,28 @@ def link(root, name, target):
     file.symlink_to(target)
 
 
+def install_gnss(root, client):
+    binary = client.read_bytes()
+    if not arm64_elf(client) or any(tag not in binary for tag in (
+            b'/vendor/lib64/hw/gps.default.so', b'GPS XTRA injection result', b'--serve')):
+        raise ValueError('Expected the reviewed AArch64 SM-G955N GNSS client')
+    if not any(line.startswith('geoclue:') for line in (root / 'etc/group').read_text().splitlines()):
+        raise ValueError('Install geoclue-2.0 in the Ubuntu rootfs before staging GNSS')
+    units = ('g955n-gnss.socket', 'g955n-gnss@.service',
+             'g955n-gnss-bsp.service', 'g955n-gnss-assist.service', 'g955n-gnss-lto.service')
+    library = Path('usr/local/lib/g955n-gnss')
+    stage(root, library / 'hal-probe', binary, 0o755)
+    for name in ('serve.py', 'assistance.py', 'lto.py', 'run-probe.py'):
+        target = 'run_probe.py' if name == 'run-probe.py' else name
+        stage(root, library / target, (GNSS / name).read_bytes())
+    for name in units:
+        stage(root, Path('etc/systemd/system') / name, (GNSS / name).read_bytes())
+    name = '80-g955n-location.conf'
+    stage(root, Path('etc/geoclue/conf.d') / name, (GNSS / name).read_bytes())
+    link(root, 'etc/systemd/system/sockets.target.wants/g955n-gnss.socket',
+         Path('../g955n-gnss.socket'))
+
+
 def install_audio(root, build):
     guards = {
         'usr/local/libexec/g955n-wireplumber': 'g955n-wireplumber',
@@ -142,6 +165,7 @@ def main():
     parser.add_argument('--sensor-daemon', type=Path)
     parser.add_argument('--audio-build', type=Path)
     parser.add_argument('--ambient-power-daemon', type=Path)
+    parser.add_argument('--gnss-client', type=Path)
     args = parser.parse_args()
     root = args.rootfs.resolve(strict=True)
     if root == Path('/') or (root / 'etc/hostname').read_text().strip() != 'g955n-ubuntu':
@@ -152,6 +176,8 @@ def main():
         install_ambient_power(root, args.ambient_power_daemon)
     if args.audio_build:
         install_audio(root, args.audio_build)
+    if args.gnss_client:
+        install_gnss(root, args.gnss_client)
 
 
 if __name__ == '__main__':

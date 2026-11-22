@@ -1,8 +1,9 @@
 [Unit]
 Description=SM-G955N GNSS acquisition for GeoClue
+Requires=g955n-gnss-bsp.service
 BindsTo=g955n-location-hub.service
 Wants=g955n-gnss-assist.service g955n-gnss-lto.service
-After=g955n-location-hub.service g955n-gnss-assist.service g955n-gnss-lto.service
+After=g955n-gnss-bsp.service g955n-location-hub.service g955n-gnss-assist.service g955n-gnss-lto.service
 
 [Service]
 ExecStart=/usr/bin/python3 /usr/local/lib/g955n-gnss/serve.py

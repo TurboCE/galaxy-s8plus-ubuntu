@@ -1,7 +1,10 @@
 import importlib.util
 from pathlib import Path
 import hashlib
+import os
+from tempfile import TemporaryDirectory
 import unittest
+from unittest import mock
 from xml.etree import ElementTree
 
 probe = Path(__file__).resolve().parents[1] / 'compat/gnss/run-probe.py'
@@ -56,6 +59,32 @@ class LtoCache(unittest.TestCase):
         self.assertFalse(lto.valid_metadata(metadata, data + b'x', config, 100))
         with self.assertRaises(RuntimeError):
             lto.sources(b'XTRA_SERVER_1=http://unreviewed.invalid/4day/v5/latest/lto2.dat\n')
+
+
+class HubReadiness(unittest.TestCase):
+    def test_cold_start_waits_for_the_shared_fifo(self):
+        lto = mock.Mock()
+        with mock.patch.dict('sys.modules', {'lto': lto, 'run_probe': module}):
+            serve_spec = importlib.util.spec_from_file_location('gnss_serve', probe.with_name('serve.py'))
+            serve = importlib.util.module_from_spec(serve_spec)
+            serve_spec.loader.exec_module(serve)
+
+        with TemporaryDirectory() as temporary:
+            state = mock.MagicMock(spec=Path)
+            state.is_symlink.return_value = False
+            state.stat.return_value.st_uid = 0
+            fifo = Path(temporary) / 'hub.fifo'
+            state.__truediv__.return_value = fifo
+            with self.assertRaisesRegex(SystemExit, 'did not create'):
+                serve.wait_for_hub(state, timeout=0)
+            with mock.patch.object(serve.time, 'sleep', side_effect=lambda _: os.mkfifo(fifo)) as sleep:
+                serve.wait_for_hub(state)
+                sleep.assert_called_once()
+
+            fifo.unlink()
+            fifo.touch()
+            with self.assertRaisesRegex(SystemExit, 'Unexpected type'):
+                serve.wait_for_hub(state)
 
 
 if __name__ == '__main__':

@@ -32,7 +32,7 @@ real issues. It is not a clean-log result. No global severity filter is applied.
 | Calls / SMS / VoLTE | No call/message test performed | Incoming/outgoing calls with two-way audio, SMS, carrier IMS registration | Not tested; no SIM |
 | Wi-Fi 2.4 / 5 GHz | Framework dump collected privately | Separate association + traffic test on both bands, reconnect | Partial: three explicit disconnect/reconnect cycles per band, each with bound-interface TLS HTTP 200 and 254968-byte download at 2467/5745 MHz; original profile restored, same boot. Full suspend/resume pending |
 | Bluetooth | Framework dump collected privately | Discovery, pairing, audio and reconnect | Kernel36 BlueZ discovery received 18 BLE advertising reports with the ROM/H4 controller; firmware/pairing/audio/resume pending |
-| GPS / GNSS | Location service dump collected privately | Fresh outdoor fix with plausible coordinates and timestamps | Not tested |
+| GPS / GNSS | Location service dump collected privately | Fresh fix through Ubuntu Location Services | Kernel55 field trial passed through GeoClue with 144 receiver fixes and 246 satellite reports. GeoClue reported a best accuracy estimate of 1 m. Independent position error and repeatable time-to-fix are unmeasured |
 | Accelerometer / gyroscope | LSM6DSL listed by sensorservice | Live samples respond to motion; units, axes, timestamps | Kernel36 streams both through IIO. GNOME uses SensorProxy for accelerometer orientation, previously verified against controlled poses. Physical gyroscope response and axis calibration remain open |
 | Other sensors | LPS22H pressure listed; full sensor list private | Magnetometer, pedometer, proximity, light and calibration | Kernel36 reads magnetic and light records and a zero step total while stationary. GNOME's light response passed a controlled shade trial on kernel32. Compass calibration, actual step increase and proximity remain open |
 | Cameras | Camera service dump collected privately | Front/rear preview, capture, video, autofocus and flash | Not tested |
@@ -2420,3 +2420,40 @@ received. The desktop client continued to get the network estimate with
 25 km reported accuracy. Readback matched all ten deployed runtime files.
 The Location Services preference was enabled, system time was synchronized,
 and the sensor hub, SensorProxy and GNSS socket were active.
+
+
+### Field GNSS and recovered LTE trace on kernel55
+
+After moving the handset to a location with better sky visibility, the pinned
+Wi-Fi host key identified its new lease. The normal GeoClue client started
+with the 25 km network estimate. A 275-second request delivered 3,526
+checksum-valid NMEA records, 144 HAL location callbacks and 246 nonempty
+satellite reports. GeoClue then reported estimates down to 1 m. This is the
+accuracy reported by the service. Absolute position error was not measured.
+The HAL stopped with result zero. No coordinates or AP identifiers are retained
+in the shared record.
+
+The new GNSS BSP preparation unit ran successfully on demand on the handset.
+The startup now allows the original hub to create its FIFO before opening the
+vendor engine. A 95-second integration check then produced 606 NMEA records and
+a successful stop, with only network estimates during that shorter interval.
+A second 275-second acquisition ended normally with 2,244 valid NMEA
+records, no satellite reports and only network estimates. The Broadcom
+hub recorded CORE_ON and CORE_OFF for each trial, with no system suspend
+between those markers. Repeatable satellite acquisition remains open.
+The offline GNSS staging path was exercised twice in the Ubuntu builder with
+the real reviewed ARM64 client, a fixture Ubuntu group database, and the socket
+enablement link. It rejected a non-ARM64 input without replacing the client.
+No newly generated rootfs was installed for this check.
+
+The recovered, fsynced log for the earlier passive CP trial reports 28 FMT
+frames, two RFS frames, zero transmitted status queries and no RFS replies.
+Its last durable entry is CP ONLINE after the observation completed. No
+shutdown completion or post-off read appears. The retained kernel journal
+ends earlier, so the failure is narrowed to after passive observation and
+before confirmed CP cleanup. It cannot distinguish reset, power-off, cleanup
+of the endpoints or a concurrent kernel failure. Source inspection also
+shows that the CP reset IOCTL can panic when the PMU reset does not reach
+its expected state. The recovered record does not show that timeout.
+ModemManager still exposes no usable modem, and SIM registration and mobile
+data remain unverified.

@@ -19,6 +19,8 @@ def main():
                         help='Stage the reviewed AArch64 GNOME power daemon with ambient brightness ramping')
     parser.add_argument('--audio-build', type=Path,
                         help='Stage the reviewed scoped ALSA build directory for desktop speaker output')
+    parser.add_argument('--gnss-client', type=Path,
+                        help='Stage the reviewed AArch64 SM-G955N GNSS client and GeoClue configuration')
     args = parser.parse_args()
     if not re.fullmatch(r'g955n-[a-z0-9-]+', args.volume):
         raise SystemExit('Requires a dedicated g955n-* build volume')
@@ -52,6 +54,8 @@ def main():
         hardware_mounts += ['-v', str(args.ambient_power_daemon.resolve(strict=True)) + ':/adapters/gsd-power:ro']
     if args.audio_build:
         hardware_mounts += ['-v', str(args.audio_build.resolve(strict=True)) + ':/adapters/audio:ro']
+    if args.gnss_client:
+        hardware_mounts += ['-v', str(args.gnss_client.resolve(strict=True)) + ':/adapters/gnss-client:ro']
     subprocess.run([*common, '--network', 'none',
                     '-v', str(inputs) + ':/inputs:ro',
                     '-v', str(ROOT / 'image') + ':/source/image:ro',

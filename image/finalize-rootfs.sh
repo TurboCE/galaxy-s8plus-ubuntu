@@ -24,6 +24,9 @@ fi
 if [ -d /adapters/audio ]; then
   hardware_args+=(--audio-build /adapters/audio)
 fi
+if [ -f /adapters/gnss-client ]; then
+  hardware_args+=(--gnss-client /adapters/gnss-client)
+fi
 python3 /source/image/stage-ubuntu-hardware.py "${hardware_args[@]}"
 chmod 755 "$R/usr/local/sbin/g955n-hardware"
 chmod 755 "$R/usr/local/sbin/g955n-grow-root"

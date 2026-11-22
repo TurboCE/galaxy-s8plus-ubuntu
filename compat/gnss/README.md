@@ -12,17 +12,15 @@ the ordinary legacy Android GPS interface in standalone mode and emits
 counts of NMEA sentences, satellite reports, and location callbacks.
 
 Use `run-probe.py --client PATH --sha256 HASH --seconds 75` as root on the
-SM-G955N. It runs the vendor GNSS engine and trial client with the same
-private `/data/vendor/gps` mount. Both sides can open the original named
-pipes. The vendor XML keeps its original namespace and enables only local
-standalone testing. The existing sensor/location hub owns the hardware
-transport and continues to run throughout the trial.
+SM-G955N. It runs the vendor GNSS engine and trial client in the same private
+`/data/vendor/gps` mount. This isolates their state from the running
+sensor/location hub, so this command is an ABI test. Use Ubuntu Location
+Services below to exercise the real receiver through the hub's shared FIFO.
 
 The verified HAL initialized and accepted standalone mode and start. The
 75-second trial completed without the previous callback crash and recorded
 one assistance request, zero NMEA records, zero location/satellite callbacks,
-and a nonzero stop result. Ubuntu's location service still needs a qualified
-hardware data stream.
+and a nonzero stop result.
 
 ## Ubuntu Location Services
 
@@ -50,7 +48,15 @@ the receiver.
 For deployment on this image, install the reviewed client as
 `/usr/local/lib/g955n-gnss/hal-probe` and its Python support files alongside
 it. Install `run-probe.py` there as `run_probe.py` for the service import.
-Place the socket, template service and two assistance services in
+Place the socket, template, BSP preparation and two assistance services in
 `/etc/systemd/system`. Install `80-g955n-location.conf` through GeoClue's
 `conf.d` directory, reload systemd, and enable `g955n-gnss.socket`.
 Use GNOME's Location Services setting to grant desktop access.
+
+
+For an offline image, pass the reviewed private ARM64 client to
+`python3 scripts/build_rootfs.py --gnss-client /path/to/hal-probe`. The builder
+installs GeoClue and time synchronization, stages the client and helpers, and
+enables the socket in the image. GNOME retains control of the Location Services
+preference. The first request prepares the board's read-only Android ABI paths
+and allows time for the location hub to create the shared GNSS FIFO.

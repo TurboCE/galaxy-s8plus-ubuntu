@@ -54,6 +54,9 @@ the boot, GNOME and taint0. Earlier GNOME failures and remaining qualification
 are recorded in VALIDATION.md. Speaker/mic desktop routing and native
 accelerometer/light integration are active, with microphone startup quality,
 dynamic rotation, native LTE integration and physical sensor acceptance open.
+Ubuntu Location Services receives real satellite fixes through GeoClue on
+kernel55. A 275-second field trial also verified the network fallback and
+A-GNSS delivery. See [GNSS setup and image staging](compat/gnss/README.md).
 Physical cold-boot regression and other hardware acceptance remain open.
 
 Historical failures: Kernel24 passed bounded graphics trials, but later unattended operation produced

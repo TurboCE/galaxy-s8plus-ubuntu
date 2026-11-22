@@ -1705,3 +1705,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Share the existing GPS IPC directory with the Broadcom sensor hub and
   disable the vendor's optional Android-only inertial fusion path in the
   private runtime configuration.
+
+
+## 2026-11-22 — GNSS field fix and rootfs integration
+
+- Verify satellite fixes through the ordinary Ubuntu location client after
+  moving the handset to better sky visibility.
+- Stage the GNSS adapter in the offline image with the reviewed ARM64 client.
+  Prepare the vendor ABI at acquisition startup and wait for the shared FIFO.
+- Recover the earlier passive CP trial's durable trace and narrow its failure
+  interval to the end of observation and the unconfirmed shutdown sequence.

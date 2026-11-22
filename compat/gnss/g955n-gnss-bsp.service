@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare the SM-G955N vendor GNSS paths
+Requires=g955n-hardware.service
+After=g955n-hardware.service g955n-native-gpu-prepare.service
+Before=g955n-location-hub.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/g955n-android-bsp
+ExecStart=/usr/bin/mkdir -p /data/vendor/gps
+RemainAfterExit=yes
+UMask=0077
+TimeoutStartSec=20s
