@@ -2706,3 +2706,27 @@ Both Panfrost modes reached the DECON DSI and PRIME capability checks on
 kernel58 and returned status 3 because the kernel publishes no accessible
 Panfrost render node. These checks do not qualify Panfrost panel output or
 stock GNOME Wayland login, rotation or resume.
+
+### SM-G955N Panfrost platform bring-up
+
+A live read on kernel58 confirmed the Samsung kbase binding, the GPU register
+window at 0x13900000, job/MMU/GPU interrupt indices 60/61/59, and CAL G3D clock
+and power domain IDs 0x0b040004 and 0xb1380008. DECON reported a connected DSI
+panel and PRIME import. Both Panfrost test modes returned status 3 because
+the running kernel had no Panfrost render device.
+
+Proposal 0057 applied to the kernel58 sources. The Exynos8895 clock object
+and both SM-G955N DTBs compiled for ARM64. The normal DTB matched the existing
+kernel58 artifact byte for byte. Checking the experimental DTB confirmed
+unchanged GPU register and interrupt resources, lower-case standard interrupt
+names, and phandles for the Hz clock, G3D power domain and BUCK6 supply.
+The clock reports the CAL rate and exposes no rate-changing operation.
+
+Unmodified Linux 6.18 built the ARM64 Panfrost driver objects and the
+SM-G950F reference DTB. The reference DTB had a simple framebuffer and no
+Panfrost GPU node. A separate compile attempt with those Panfrost sources in
+the SM-G955N 4.4 tree failed on the kernel and DRM APIs. The baseline lacks
+the modern I/O page-table interface, DMA reservations, DRM scheduler, GEM
+shmem helpers and sync objects used by this driver. The platform proposal
+therefore remains build-only. No Panfrost image was installed, and Panfrost
+scanout and stock Wayland touch login, rotation and suspend remain untested.

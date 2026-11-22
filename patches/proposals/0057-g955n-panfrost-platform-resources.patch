@@ -1,0 +1,119 @@
+Subject: Exynos8895: describe SM-G955N G3D resources for Panfrost bring-up
+
+The separate board DT selects Panfrost in place of kbase, keeps the vendor
+CAL power sequence and supplies a read-only Hz clock. The normal DTB is
+unmodified. A DRM Panfrost driver and its dependencies are still required.
+
+--- a/include/dt-bindings/clock/exynos8895.h
++++ b/include/dt-bindings/clock/exynos8895.h
+@@ -527,8 +527,10 @@
+ #define DVFS_LITTLE				(CLK_DVFS_BASE + 4)
+ #define DFS_ABOX				(CLK_DVFS_BASE + 5)
+ 
++#define CLK_G3D_RATE_HZ			(CLK_DVFS_BASE + 6)
++
+ /* must be greater than maximal clock id */
+-#define CLK_NR_CLKS				(1205 + 1)
++#define CLK_NR_CLKS				(CLK_G3D_RATE_HZ + 1)
+ 
+ #define ACPM_DVFS_MIF				(0x0B040000)
+ #define ACPM_DVFS_INT				(0x0B040001)
+--- a/drivers/clk/samsung/clk-exynos8895.c
++++ b/drivers/clk/samsung/clk-exynos8895.c
+@@ -629,6 +629,67 @@
+ 	cal_clk_disable(GOUT_BLK_ABOX_UID_ABOX_TOP_IPCLKPORT_BCLK_UAIF3);
+ 	cal_clk_disable(GOUT_BLK_ABOX_UID_ABOX_TOP_IPCLKPORT_BCLK_UAIF4);
+ 	cal_clk_disable(GOUT_BLK_ABOX_UID_ABOX_TOP_IPCLKPORT_BCLK_DSIF);
++}
++
++/*
++ * The CAL rate table uses kHz. The G3D power domain owns clock sequencing;
++ * expose the observed rate to standard clock consumers without letting them
++ * bypass firmware voltage coordination by programming the PLL.
++ */
++#define EXYNOS8895_G3D_CAL_PD_ID 0xB1380008
++
++static unsigned long exynos8895_g3d_recalc_rate(struct clk_hw *hw,
++					       unsigned long parent_rate)
++{
++	unsigned long khz;
++
++	if (cal_pd_status(EXYNOS8895_G3D_CAL_PD_ID) != 1)
++		return 0;
++
++	khz = cal_dfs_get_rate(ACPM_DVFS_G3D);
++	if (khz > ULONG_MAX / 1000)
++		return 0;
++
++	return khz * 1000;
++}
++
++static const struct clk_ops exynos8895_g3d_clk_ops = {
++	.recalc_rate = exynos8895_g3d_recalc_rate,
++};
++
++static const struct clk_init_data exynos8895_g3d_clk_init = {
++	.name = "g3d_rate_hz",
++	.ops = &exynos8895_g3d_clk_ops,
++	.flags = CLK_IS_ROOT | CLK_GET_RATE_NOCACHE,
++};
++
++static struct clk_hw exynos8895_g3d_clk_hw = {
++	.init = &exynos8895_g3d_clk_init,
++};
++
++static void __init exynos8895_register_g3d_rate(void)
++{
++	struct device_node *gpu;
++	struct clk *clk;
++	bool available;
++
++	gpu = of_find_compatible_node(NULL, NULL, "samsung,exynos8895-mali");
++	if (!gpu)
++		return;
++
++	available = of_device_is_available(gpu);
++	of_node_put(gpu);
++	if (!available)
++		return;
++
++	clk = clk_register(NULL, &exynos8895_g3d_clk_hw);
++	if (IS_ERR(clk)) {
++		pr_err("Exynos8895: cannot register G3D rate clock: %ld\n",
++		       PTR_ERR(clk));
++		return;
++	}
++
++	exynos8895_clk_privider->clk_data.clks[CLK_G3D_RATE_HZ] = clk;
+ }
+ 
+ /* register exynos8895 clocks */
+@@ -699,6 +760,7 @@
+ 
+ 	clk_register_fixed_factor(NULL, "pwm-clock", "fin_pll",CLK_SET_RATE_PARENT, 1, 1);
+ 
++	exynos8895_register_g3d_rate();
+ 	samsung_clk_of_add_provider(np, exynos8895_clk_privider);
+ 
+ 	late_time_init = exynos8895_vclk_init;
+--- /dev/null
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lte_kor_10-panfrost.dts
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Experimental DTB for the SM-G955N rev10 board. Build explicitly. */
++
++#include "exynos8895-dream2lte_kor_10.dts"
++
++&pd_g3d {
++	#power-domain-cells = <0>;
++};
++
++&mali {
++	compatible = "samsung,exynos8895-mali", "arm,mali-bifrost";
++	interrupt-names = "job", "mmu", "gpu";
++	clocks = <&clock CLK_G3D_RATE_HZ>;
++	clock-names = "gpu";
++	power-domains = <&pd_g3d>;
++	mali-supply = <&buck6_reg>;
++	/delete-property/ samsung,power-domain;
++};

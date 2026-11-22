@@ -1784,3 +1784,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   kernel endpoint guard on SM-G955N.
 - Keep the same-boot guard receipt in a root-managed systemd state directory
   on installations where the top-level runtime directory is writable.
+
+### SM-G955N Panfrost platform bring-up
+
+- Add an experimental SM-G955N DTB for the Bifrost driver and expose the
+  existing CAL G3D clock rate through the Common Clock Framework in Hz.
+  The experimental DTB reuses the vendor G3D power domain and BUCK6 supply.
