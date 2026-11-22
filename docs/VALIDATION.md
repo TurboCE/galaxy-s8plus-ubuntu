@@ -2350,3 +2350,34 @@ wake retained the same GNOME process, Mali library and DECON DRM file. The
 installed startup manifest and module digests matched after the test. A
 separate system suspend and long unattended wake soak remain unqualified
 for this module revision.
+
+### Kernel55 suspend follow-up after the DECON userspace fix
+
+A 25-second RTC alarm was programmed for the normal system suspend route.
+The kernel journal recorded suspend entry and exit 25.79 seconds apart.
+USB transport dropped during the test and returned. Once connected, the
+owner's original GNOME process still mapped the candidate and held DECON,
+Mutter answered the idle query, Wi-Fi was connected, the USB gadget was
+configured, and the RTC alarm was clear. The transport timeout prevented a
+continuous remote trace across the sleep interval.
+
+### Native GNSS HAL and sensor follow-up
+
+The handset's vendor GNSS engine started from a standalone scratch
+configuration with the original XML namespace. Initially its FIFO opens and
+the HAL's FIFO opens targeted different directories. Sharing the stock
+`/data/vendor/gps` path within the trial allowed mode selection and start.
+A longer session previously crashed in the location request marshaller.
+The matching vendor library calls the AArch64 callback at offset 96 with one
+boolean. The corrected client handled one request over 75 seconds without
+that crash. HAL open, initialization, standalone mode and start returned
+success; stop returned -1. The test produced no NMEA, satellite reports or
+fix callbacks. GeoClue availability remains dependent on real receiver data.
+
+A four-second native IIO capture recorded 19 rotation vectors, 19 gyroscope
+records, 16 calibrated-magnetometer records and one step-counter record
+with total zero while stationary. The original buffer and mask state was
+restored and SensorProxy restarted. The first rotation vector's magnitude
+was approximately 1,000,000 raw units, so a Q30 conversion is inappropriate
+for this device. Physical heading calibration, a step increase and GNOME
+rotation remain unqualified.

@@ -28,3 +28,10 @@ No replacement display driver is installed or claimed working at this
 checkpoint. Kernel screen-power stability takes priority before changing this
 production display path. HDMI/DisplayPort Alt Mode remains explicitly deferred,
 including after the two porting projects finish unless newly authorized.
+
+The current accelerated DECON route uses `IDMA_G1` and a fixed-format native
+scanout. In the pinned SM-G955N source, `dpp_reg_set_rotation()` in
+`drivers/video/fbdev/exynos/dpu/dpp_reg.c` is a stub. A working GNOME route
+therefore needs a compositor transform into the existing native-size DMA-BUF
+and a matching logical output and input transform. Advertising a DRM rotation
+property alone would leave the pixels and touch coordinates unrotated.

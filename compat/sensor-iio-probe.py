@@ -22,6 +22,7 @@ SENSORS = {
     'gyro_sensor': (1, 20, 'continuous'),
     'geomagnetic_sensor': (4, 16, 'continuous'),
     'light_sensor': (9, 26, 'on-change'),
+    'rotation_vector_sensor': (17, 25, 'continuous'),
     'step_cnt_sensor': (18, 16, 'on-change'),
 }
 
@@ -38,6 +39,11 @@ def decode_record(name, sample):
         out['raw_xyz'] = list(struct.unpack_from('<3h', sample))
         out['accuracy'] = sample[6]
         out['overflow'] = sample[7]
+    elif name == 'rotation_vector_sensor':
+        # Samsung SSP supplies four signed components and an accuracy byte.
+        # A frame convention and scaling are needed to publish a compass heading.
+        out['raw_quaternion'] = list(struct.unpack_from('<4i', sample))
+        out['accuracy'] = sample[16]
     elif name == 'light_sensor':
         # CONFIG_SENSORS_SSP_LIGHT_REPORT_LUX=y: lux precedes raw channels.
         out['mcu_lux'] = struct.unpack_from('<I', sample)[0]

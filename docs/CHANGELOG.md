@@ -1688,3 +1688,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   keep a third buffer available for rendering.
 - Rebuilt and activated the SM-G955N output module with the existing
   accelerated desktop session. Three real display off/on cycles passed.
+
+## 2026-11-22 — Standalone GNSS diagnostics and rotation-vector records
+
+- Add the board-matched Android GNSS test client and bounded launcher. Share
+  the vendor GPS FIFO directory between the HAL and engine, and supply the
+  extra Samsung callback using the reviewed AArch64 callback layout.
+- Decode the pinned rotation-vector IIO records alongside the existing
+  magnetic, gyroscope and step-counter formats.
