@@ -1,0 +1,170 @@
+Subject: route optional X11 quarter-turns through the Mali panel buffers
+
+--- a/hybris/egl/platforms/x11/x11_window.cpp
++++ b/hybris/egl/platforms/x11/x11_window.cpp
+@@ -39,6 +39,10 @@
+ #include <stdint.h>
+ #include "xcb_drihybris.h"
+ #include <X11/Xutil.h>
++#ifdef G955N_NATIVE_ROTATION
++#include <X11/extensions/Xrandr.h>
++#include "panel-rotation.h"
++#endif
+ #include <dlfcn.h>
+ #include <fcntl.h>
+ #include <sys/file.h>
+@@ -392,6 +396,38 @@
+     X11NativeWindowBuffer *retired[2] = {};
+ };
+ 
++#ifdef G955N_NATIVE_ROTATION
++static bool g955n_panel_rotation(Display *display, unsigned int *degrees)
++{
++    XRRScreenResources *resources = XRRGetScreenResourcesCurrent(display, DefaultRootWindow(display));
++    if (!resources)
++        return false;
++    bool ok = false;
++    for (int i = 0; i < resources->noutput && !ok; ++i) {
++        XRROutputInfo *output = XRRGetOutputInfo(display, resources, resources->outputs[i]);
++        if (!output)
++            continue;
++        if (output->connection == RR_Connected && output->nameLen == 5 &&
++            !memcmp(output->name, "DSI-1", 5) && output->crtc) {
++            XRRCrtcInfo *crtc = XRRGetCrtcInfo(display, resources, output->crtc);
++            if (crtc && crtc->mode && crtc->x == 0 && crtc->y == 0) {
++                switch (crtc->rotation) {
++                case RR_Rotate_0:   *degrees = 0;   ok = true; break;
++                case RR_Rotate_90:  *degrees = 90;  ok = true; break;
++                case RR_Rotate_180: *degrees = 180; ok = true; break;
++                case RR_Rotate_270: *degrees = 270; ok = true; break;
++                }
++            }
++            if (crtc)
++                XRRFreeCrtcInfo(crtc);
++        }
++        XRRFreeOutputInfo(output);
++    }
++    XRRFreeScreenResources(resources);
++    return ok;
++}
++#endif
++
+ /* The root-owned test supervisor supplies an exclusive lease and disables
+  * the legacy pan pump before authorizing this experimental path. */
+ static bool direct_panel_frame(Display *display, Window window,
+@@ -400,6 +436,9 @@
+     static int panel = -1, lease = -1, previous_fence = -1;
+     static g955n_kms *kms;
+     static X11NativeWindowBuffer *scanout, *pending;
++#ifdef G955N_NATIVE_ROTATION
++    static int scanout_slot = -1, pending_slot = -1;
++#endif
+     static unsigned retired;
+     static Window output = None;
+     static bool rejected;
+@@ -436,6 +475,33 @@
+         if (!match)
+             return false;
+     }
++    int logical_width = 1440, logical_height = 2960;
++#ifdef G955N_NATIVE_ROTATION
++    const bool rotation_enabled = getenv("G955N_DIRECT_PANEL_ROTATION") && getenv("G955N_DRM_KMS");
++    unsigned int rotation = 0;
++    if (rotation_enabled) {
++        if (!g955n_panel_rotation(display, &rotation)) {
++            if (!kms)
++                return false;
++            use.kms = true;
++            use.retained = false;
++            return true;
++        }
++        if (rotation == 90 || rotation == 270) {
++            logical_width = 2960;
++            logical_height = 1440;
++        }
++        if (buffer->width != logical_width || buffer->height != logical_height) {
++            /* RandR and the compositor may transition on successive events.
++             * Keep the confirmed scanout while the overlay is being resized. */
++            if (!kms)
++                return false;
++            use.kms = true;
++            use.retained = false;
++            return true;
++        }
++    }
++#endif
+     const native_handle_t *handle = buffer->handle;
+     uint32_t magic = 0;
+     uint64_t internal = 0;
+@@ -445,7 +511,7 @@
+         memcpy(&magic, bytes + 24, sizeof(magic));
+         memcpy(&internal, bytes + 56, sizeof(internal));
+     }
+-    if (buffer->width != 1440 || buffer->height != 2960 || buffer->stride != 1440 ||
++    if (buffer->width != logical_width || buffer->height != logical_height || buffer->stride != logical_width ||
+         buffer->format != HAL_PIXEL_FORMAT_RGBX_8888 || magic != 0x03141592 ||
+         internal != HAL_PIXEL_FORMAT_RGBX_8888) {
+         if (output != None)
+@@ -478,7 +544,7 @@
+             }
+         }
+     }
+-    const g955n_panel_frame frame = {handle->data[0], -1, 1440, 2960, G955N_DECON_RGBX8888};
++    g955n_panel_frame frame = {handle->data[0], -1, 1440, 2960, G955N_DECON_RGBX8888};
+     if (kms) {
+         output = window;
+         use.kms = true;
+@@ -496,15 +562,39 @@
+             use.retired[completed++] = scanout;
+             scanout = pending;
+             pending = nullptr;
+-        }
+-
++#ifdef G955N_NATIVE_ROTATION
++            scanout_slot = pending_slot;
++            pending_slot = -1;
++#endif
++        }
++
++#ifdef G955N_NATIVE_ROTATION
++        int slot = -1;
++        if (rotation) {
++            for (int i = 0; i < G955N_ROTATION_SLOTS; ++i) {
++                if (i != scanout_slot && i != pending_slot) {
++                    slot = i;
++                    break;
++                }
++            }
++            if (slot < 0 || !g955n_rotate_panel_buffer(buffer->getNativeBuffer(), rotation,
++                                                        slot, &frame.dma_buf, nullptr)) {
++                fprintf(stderr, "G955N Mali rotation failed; releasing the panel lease\n");
++                _exit(35);
++            }
++        }
++#endif
+         int submitted = 0;
+         int status = g955n_kms_present(kms, &frame, &submitted);
+         if (status == G955N_KMS_DEFERRED) {
+-            if (submitted)
++            if (submitted) {
+                 pending = buffer;
+-            else
++#ifdef G955N_NATIVE_ROTATION
++                pending_slot = slot;
++#endif
++            } else {
+                 use.retained = false;
++            }
+             return true;
+         }
+         if (status) {
+@@ -516,6 +606,9 @@
+         if (scanout && (++retired == 1 || retired == 60))
+             fprintf(stderr, "G955N DRM/KMS retired %u GNOME frames without CPU pixel transfer\n", retired);
+         scanout = buffer;
++#ifdef G955N_NATIVE_ROTATION
++        scanout_slot = slot;
++#endif
+         return true;
+     }
+     int fence, submitted;

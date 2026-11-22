@@ -1735,3 +1735,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verify BOOT-only kernel57 deployment and repeated passive and read-only
   modem trials. Report generic replies, unsolicited state and RFS command
   totals without dumping payloads.
+
+### SM-G955N RandR and Mali/KMS rotation trial
+
+- Added opt-in Xorg output rotation, a built-in panel identifier and a Mali
+  rotation pass for direct KMS. Kept the portrait scanout dimensions fixed.
+- Verified all four directions on the handset and submitted the rotated Mali
+  DMA-BUFs through the physical display controller. Added rollback for Xorg
+  as part of the same supervised GNOME trial.

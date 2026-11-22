@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /* Exercise the Mali rotation pass between two full-size gralloc buffers. */
+#include "../native-gnome/direct-panel/panel-rotation.h"
+#ifdef G955N_ROTATION_PROBE_KMS
+#include "../native-gnome/direct-panel/drm-output.h"
+#endif
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <X11/Xlib.h>
 #include <fcntl.h>
-#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +37,27 @@ struct target {
     int height;
 };
 
+#ifdef G955N_ROTATION_PROBE_KMS
+static struct g955n_kms *kms;
+
+static void verify_scanout(int fd, unsigned int angle)
+{
+    if (!kms)
+        return;
+    const struct g955n_panel_frame frame = {
+        .dma_buf = fd, .acquire_fence = -1, .stride_pixels = 1440,
+        .allocation_height = 2960, .format = G955N_DECON_RGBX8888,
+    };
+    int submitted;
+    int error = g955n_kms_present(kms, &frame, &submitted);
+    if (error)
+        fprintf(stderr, "KMS present failed: %d (submitted=%d)\n", error, submitted);
+    REQUIRE(!error && submitted);
+    printf("KMS presented Mali DMA-BUF at %u degrees\n", angle);
+    fflush(stdout);
+}
+#endif
+
 static CreateBuffer create_buffer;
 static ReleaseBuffer release_buffer;
 static GetHandle get_handle;
@@ -41,14 +65,10 @@ static PFNEGLCREATEIMAGEKHRPROC create_image;
 static PFNEGLDESTROYIMAGEKHRPROC destroy_image;
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_texture;
 
-static struct target make_target(EGLDisplay display, int width, int height)
+static struct target import_target(EGLDisplay display, EGLClientBuffer buffer, int width, int height)
 {
-    struct target target = {.width = width, .height = height};
+    struct target target = {.width = width, .height = height, .buffer = buffer};
     const EGLint rgbx8888 = 2; /* Android 9 HAL_PIXEL_FORMAT_RGBX_8888 */
-    const EGLint gpu_usage = 0x100 | 0x200; /* HW_TEXTURE | HW_RENDER */
-    EGLint stride;
-    REQUIRE(create_buffer(width, height, gpu_usage, rgbx8888, &stride, &target.buffer));
-    REQUIRE(stride == width);
     void *handle = NULL;
     REQUIRE(get_handle(display, target.buffer, &handle) && handle);
     /* Android native_handle_t starts with version, numFds and numInts.
@@ -80,23 +100,22 @@ static struct target make_target(EGLDisplay display, int width, int height)
     return target;
 }
 
+static struct target make_source(EGLDisplay display, int width, int height)
+{
+    const EGLint rgbx8888 = 2;
+    const EGLint gpu_usage = 0x100 | 0x200;
+    EGLint stride;
+    EGLClientBuffer buffer;
+    REQUIRE(create_buffer(width, height, gpu_usage, rgbx8888, &stride, &buffer));
+    REQUIRE(stride == width);
+    return import_target(display, buffer, width, height);
+}
+
 static void destroy_target(EGLDisplay display, const struct target *target)
 {
     glDeleteFramebuffers(1, &target->framebuffer);
     glDeleteTextures(1, &target->texture);
     REQUIRE(destroy_image(display, target->image));
-    REQUIRE(release_buffer(target->buffer));
-}
-
-static GLuint compile_shader(GLenum type, const char *source)
-{
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, NULL);
-    glCompileShader(shader);
-    GLint compiled;
-    glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
-    REQUIRE(compiled);
-    return shader;
 }
 
 static void fill_source(const struct target *src, const unsigned int colors[4][3])
@@ -113,44 +132,58 @@ static void fill_source(const struct target *src, const unsigned int colors[4][3
     glDisable(GL_SCISSOR_TEST);
 }
 
-static void rotate_and_verify(GLuint program, const struct target *src, const struct target *dst,
-                              bool clockwise, const unsigned int colors[4][3])
+static void rotate_and_verify(EGLDisplay display, const struct target *src,
+                              unsigned int angle, unsigned int slot,
+                              const int mapping[4], const unsigned int colors[4][3])
 {
-    static const GLfloat quad[] = {-1, -1, 1, -1, -1, 1, 1, 1};
-    static const int corner_map[][4] = {{2, 0, 3, 1}, {1, 3, 0, 2}};
-    glBindFramebuffer(GL_FRAMEBUFFER, dst->framebuffer);
-    glViewport(0, 0, dst->width, dst->height);
-    glUseProgram(program);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, src->texture);
-    glUniform1i(glGetUniformLocation(program, "source"), 0);
-    glUniform1i(glGetUniformLocation(program, "clockwise"), clockwise);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
-    glEnableVertexAttribArray(0);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    EGLContext context = eglGetCurrentContext();
+    EGLSurface surface = eglGetCurrentSurface(EGL_DRAW);
+    EGLClientBuffer output;
+    int fd;
     glFinish();
-
-    /* Diagnostic readback only. The rotation pass itself does not map either
-     * gralloc buffer and the destination remains a native DMA-BUF. */
+    REQUIRE(g955n_rotate_panel_buffer(src->buffer, angle, slot, &fd, &output));
+    REQUIRE(eglGetCurrentContext() == context && eglGetCurrentSurface(EGL_DRAW) == surface);
+    struct target dst = import_target(display, output, 1440, 2960);
+    REQUIRE(fd == dst.fd && src->fd != dst.fd);
     for (int corner = 0; corner < 4; corner++) {
         unsigned char pixel[4] = {0};
-        glReadPixels((1 + 2 * (corner % 2)) * dst->width / 4,
-                     (1 + 2 * (corner / 2)) * dst->height / 4,
+        glReadPixels((1 + 2 * (corner % 2)) * dst.width / 4,
+                     (1 + 2 * (corner / 2)) * dst.height / 4,
                      1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
         REQUIRE(glGetError() == GL_NO_ERROR);
         for (int k = 0; k < 3; k++)
-            REQUIRE(pixel[k] == colors[corner_map[clockwise][corner]][k]);
+            REQUIRE(pixel[k] == colors[mapping[corner]][k]);
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    destroy_target(display, &dst);
+#ifdef G955N_ROTATION_PROBE_KMS
+    verify_scanout(fd, angle);
+#endif
 }
 
 int main(int argc, char **argv)
 {
-    REQUIRE(argc == 2 && !strcmp(argv[1], "--run-sm-g955n-rotation-probe"));
+    REQUIRE(argc == 2);
+#ifdef G955N_ROTATION_PROBE_KMS
+    int scanout = !strcmp(argv[1], "--present-sm-g955n-rotation-probe");
+    REQUIRE(scanout || !strcmp(argv[1], "--run-sm-g955n-rotation-probe"));
+#else
+    REQUIRE(!strcmp(argv[1], "--run-sm-g955n-rotation-probe"));
+#endif
     FILE *model = fopen("/proc/device-tree/model", "r");
     char name[128] = {0};
     REQUIRE(model && fgets(name, sizeof(name), model) && strstr(name, "SM-G955N"));
     fclose(model);
     REQUIRE(getuid() == 1000);
+#ifdef G955N_ROTATION_PROBE_KMS
+    if (scanout) {
+        int error = g955n_kms_open(&kms);
+        if (error)
+            fprintf(stderr, "KMS open failed: %d\n", error);
+        REQUIRE(!error);
+    }
+#endif
     Display *x11 = XOpenDisplay(NULL);
     REQUIRE(x11);
     EGLDisplay dpy = eglGetDisplay((EGLNativeDisplayType)x11);
@@ -181,39 +214,24 @@ int main(int argc, char **argv)
     image_texture = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
     REQUIRE(create_buffer && release_buffer && get_handle && create_image && destroy_image && image_texture);
 
-    const struct target src = make_target(dpy, 2960, 1440);
-    const struct target dst = make_target(dpy, 1440, 2960);
-    REQUIRE(src.fd != dst.fd);
-    printf("Source and destination are full-size native RGBX gralloc buffers\n");
     const unsigned int colors[][3] = {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}, {255, 255, 0}};
-    const GLuint vertex = compile_shader(GL_VERTEX_SHADER,
-        "attribute vec2 vertex; varying vec2 uv; void main() {"
-        "gl_Position=vec4(vertex,0.0,1.0); uv=vertex*0.5+0.5; }");
-    const GLuint fragment = compile_shader(GL_FRAGMENT_SHADER,
-        "precision highp float; varying vec2 uv; uniform sampler2D source; uniform bool clockwise;"
-        "void main() { vec2 st = clockwise ? vec2(1.0-uv.y,uv.x) : vec2(uv.y,1.0-uv.x);"
-        "gl_FragColor=texture2D(source,st); }");
-    const GLuint program = glCreateProgram();
-    glAttachShader(program, vertex);
-    glAttachShader(program, fragment);
-    glBindAttribLocation(program, 0, "vertex");
-    glLinkProgram(program);
-    GLint linked;
-    glGetProgramiv(program, GL_LINK_STATUS, &linked);
-    REQUIRE(linked);
-    fill_source(&src, colors);
-    rotate_and_verify(program, &src, &dst, false, colors);
-    rotate_and_verify(program, &src, &dst, true, colors);
-    puts("Clockwise and counterclockwise native-buffer pixels verified");
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
-    glDeleteProgram(program);
-    glDeleteShader(vertex);
-    glDeleteShader(fragment);
-    glFinish();
-    destroy_target(dpy, &dst);
-    destroy_target(dpy, &src);
+    const int left[] = {2, 0, 3, 1}, inverted[] = {3, 2, 1, 0}, right[] = {1, 3, 0, 2};
+    const struct target landscape = make_source(dpy, 2960, 1440);
+    fill_source(&landscape, colors);
+    rotate_and_verify(dpy, &landscape, 90, 0, left, colors);
+    rotate_and_verify(dpy, &landscape, 270, 1, right, colors);
+    destroy_target(dpy, &landscape);
+    REQUIRE(release_buffer(landscape.buffer));
+    const struct target portrait = make_source(dpy, 1440, 2960);
+    fill_source(&portrait, colors);
+    rotate_and_verify(dpy, &portrait, 180, 2, inverted, colors);
+    rotate_and_verify(dpy, &portrait, 180, 0, inverted, colors);
+    destroy_target(dpy, &portrait);
+    REQUIRE(release_buffer(portrait.buffer));
+    puts("90, 180 and 270 degree native-buffer pixels verified; producer EGL binding restored");
+#ifdef G955N_ROTATION_PROBE_KMS
+    g955n_kms_close(kms);
+#endif
     REQUIRE(eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT));
     REQUIRE(eglDestroySurface(dpy, surface));
     REQUIRE(eglDestroyContext(dpy, context));

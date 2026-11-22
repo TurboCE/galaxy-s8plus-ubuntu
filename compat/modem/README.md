@@ -131,3 +131,16 @@ These are recorded separately from a matching typed GET response. Two RFS
 requests per trial were observed, with no RFS or NV writes. ModemManager
 integration and real cellular service still require a supported control and
 data path.
+
+### Installed Android radio stack evidence
+
+The exact handset's read-only stock Android system declares
+`/vendor/bin/hw/rild` with the vendor RIL library and a separate Samsung radio
+configuration HIDL service. The installed `libsec-ril.so` references
+`umts_boot0`, `umts_ipc0`, and `umts_rfs0`, and links against Samsung's
+radio channel HIDL library. It also references the live NV store. This ties
+the unresolved RFS requests to the vendor radio startup path and rules out
+treating the control device as a generic AT port. A confined vendor RIL
+adapter or native SIPC/RFS implementation is still needed. ModemManager
+enumeration on kernel57 still returned no modem. No Android radio process
+was launched and no NV data was read or modified by this inspection.

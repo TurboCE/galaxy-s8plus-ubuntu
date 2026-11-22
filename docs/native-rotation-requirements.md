@@ -24,10 +24,7 @@ A native runtime-rotation implementation needs all of the following:
 * Integration with genuine SensorProxy orientation and Ubuntu's rotation lock.
   Existing Mali window-resize tests are useful but do not establish this path.
 
-No replacement display driver is installed or claimed working at this
-checkpoint. Kernel screen-power stability takes priority before changing this
-production display path. HDMI/DisplayPort Alt Mode remains explicitly deferred,
-including after the two porting projects finish unless newly authorized.
+The stock production path at this checkpoint used the original fbdev driver.
 
 The current accelerated DECON route uses `IDMA_G1` and a fixed-format native
 scanout. In the pinned SM-G955N source, `dpp_reg_set_rotation()` in
@@ -69,11 +66,40 @@ the stock phone display session still running. This establishes a GPU path
 between the logical and panel-size buffers. The Xorg output transform, touch
 coordinate mapping, and submission of rotated frames by GNOME remain open.
 
-Build the diagnostic in the existing X11 cross builder with its private
-libhybris build prefix available at `/work/prefix`.
+### Runtime RandR and direct Mali/KMS trial
+
+The opt-in fbdev module in `compat/fbdev-rotation` publishes a built-in
+`DSI-1` output with `ConnectorType: Panel`. It supports the native portrait
+and transposed landscape root pixmap with the underlying scanout fixed at
+1440×2960, 60 Hz. It applies the RandR transform to shadow damage so that
+the greeter and the framebuffer fallback can display either orientation.
+
+Build the ARM64 module with Ubuntu fbdev 0.5.0 and Canonical's matching Xorg
+SDK. The build script checks the source archive digest.
 
 ```sh
-aarch64-linux-gnu-gcc -O2 -Wall -Wextra -Werror -I/work/prefix/include \
-  /source/x11-rotation-probe.c -L/work/prefix/lib -lEGL -lGLESv2 -lX11 \
-  -o /out/x11-rotation-probe
+compat/fbdev-rotation/build.sh xserver-xorg-video-fbdev_0.5.0.orig.tar.gz out-fbdev
 ```
+
+Pass `--native-rotation` to the private X11 bridge builder. In the direct
+GNOME path, the bridge reads the RandR CRTC rotation and imports the compositor
+DMA-BUF into Mali. Portrait uses the original native buffer. Other orientations
+use a Mali draw between native buffers. There is no CPU pixel mapping or copy
+in this path. Each rotated target stays in use until its KMS replacement is
+confirmed. The GPU pass requires reading the source, writing a second buffer
+and waiting for completion.
+
+On kernel57 a separate Xorg drove the real panel in portrait, both landscape
+orientations, inverted and back to portrait. All four mapped framebuffer
+regions matched the expected colors after every transition. A separate
+Mali-G71 test checked the production helper's target pixels and EGL context
+restoration. The KMS probe imported those same Mali DMA-BUFs, modeset once and
+completed three subsequent KMS page flips, including reuse of the first
+rotation slot. The original GDM configuration was restored after the test.
+
+The root-owned trial supervisor accepts `--drm-kms --rotation-driver
+PATH --rotation-driver-sha256 SHA256` in addition to the bridge candidate and
+its digest. The rotation trial restores the original Xorg files, bridge,
+manifest and session launcher on timeout or reboot. Default activation is
+reserved until the real GNOME session passes automatic orientation, rotation
+lock, physical touch, screen power and performance testing.

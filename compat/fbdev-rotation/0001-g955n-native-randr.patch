@@ -1,0 +1,269 @@
+Subject: fbdev: allow opt-in RandR rotation on the G955N panel
+
+--- a/src/fbdev.c
++++ b/src/fbdev.c
+@@ -18,6 +18,8 @@
+ #include "colormapst.h"
+ #include "xf86cmap.h"
+ #include "shadow.h"
++#include <X11/Xatom.h>
++#include "randrstr.h"
+ #include "dgaproc.h"
+ 
+ /* for visuals */
+@@ -125,13 +127,15 @@
+ 	OPTION_SHADOW_FB,
+ 	OPTION_ROTATE,
+ 	OPTION_FBDEV,
+-	OPTION_DEBUG
++	OPTION_DEBUG,
++	OPTION_G955N_ROTATION
+ } FBDevOpts;
+ 
+ static const OptionInfoRec FBDevOptions[] = {
+ 	{ OPTION_SHADOW_FB,	"ShadowFB",	OPTV_BOOLEAN,	{0},	FALSE },
+ 	{ OPTION_ROTATE,	"Rotate",	OPTV_STRING,	{0},	FALSE },
+ 	{ OPTION_FBDEV,		"fbdev",	OPTV_STRING,	{0},	FALSE },
++	{ OPTION_G955N_ROTATION, "G955NRotation", OPTV_BOOLEAN, {0}, FALSE },
+ 	{ OPTION_DEBUG,		"debug",	OPTV_BOOLEAN,	{0},	FALSE },
+ 	{ -1,			NULL,		OPTV_NONE,	{0},	FALSE }
+ };
+@@ -186,6 +190,9 @@
+ 	int				rotate;
+ 	Bool				shadowFB;
+         Bool                            shadow24;
++        Bool                            runtime_rotation;
++        RRCrtcPtr                       rotation_crtc;
++        RROutputPtr                     rotation_output;
+ 	void				*shadow;
+ 	CloseScreenProcPtr		CloseScreen;
+ 	CreateScreenResourcesProcPtr	CreateScreenResources;
+@@ -697,6 +704,178 @@
+     shadowUpdatePacked(pScreen, pBuf);
+ }
+ 
++/* The framebuffer stays in panel coordinates. RandR only changes the
++ * logical root pixmap and how shadow damage reaches the physical panel. */
++enum { G955N_PANEL_W = 1440, G955N_PANEL_H = 2960 };
++
++static Bool
++g955n_rotation_geometry(Rotation rotation, int *width, int *height, int *angle)
++{
++    switch (rotation) {
++    case RR_Rotate_0:   *angle = 0;   break;
++    case RR_Rotate_90:  *angle = 90;  break;
++    case RR_Rotate_180: *angle = 180; break;
++    case RR_Rotate_270: *angle = 270; break;
++    default: return FALSE;
++    }
++    Bool sideways = rotation == RR_Rotate_90 || rotation == RR_Rotate_270;
++    *width = sideways ? G955N_PANEL_H : G955N_PANEL_W;
++    *height = sideways ? G955N_PANEL_W : G955N_PANEL_H;
++    return TRUE;
++}
++
++static void
++g955n_shadow_update(ScreenPtr screen, shadowBufPtr buffer)
++{
++    FBDevPtr state = FBDEVPTR(xf86ScreenToScrn(screen));
++    RRCrtcPtr crtc = state->rotation_crtc;
++    int width, height, angle;
++
++    /* Mutter may resize the root before reconfiguring the CRTC. Do not
++     * run the old transform on the new pitch until the CRTC is committed. */
++    if (!crtc || !crtc->mode ||
++        !g955n_rotation_geometry(crtc->rotation, &width, &height, &angle) ||
++        width != screen->width || height != screen->height)
++        return;
++
++    buffer->randr = crtc->rotation;
++    if (angle)
++        shadowUpdateRotatePacked(screen, buffer);
++    else
++        shadowUpdatePacked(screen, buffer);
++}
++
++static void
++g955n_damage_root(ScreenPtr screen)
++{
++    if (screen->root) {
++        BoxRec bounds = {0, 0, screen->width, screen->height};
++        RegionRec region;
++        RegionInit(&region, &bounds, 1);
++        DamageDamageRegion(&screen->root->drawable, &region);
++        RegionUninit(&region);
++    }
++}
++
++static Bool
++g955n_set_screen_size(ScreenPtr screen, CARD16 width, CARD16 height,
++                      CARD32 mm_width, CARD32 mm_height)
++{
++    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
++    FBDevPtr state = FBDEVPTR(scrn);
++    PixmapPtr pixmap = screen->GetScreenPixmap(screen);
++    Bool portrait = width == G955N_PANEL_W && height == G955N_PANEL_H;
++    Bool landscape = width == G955N_PANEL_H && height == G955N_PANEL_W;
++
++    if ((!portrait && !landscape) || !pixmap || mm_width > 1000 || mm_height > 1000)
++        return FALSE;
++
++    if (width != screen->width || height != screen->height) {
++        if (!screen->ModifyPixmapHeader(pixmap, width, height, -1, -1,
++                                        width * 4, state->shadow))
++            return FALSE;
++        if (screen->root)
++            SetRootClip(screen, ROOT_CLIP_NONE);
++        screen->width = width;
++        screen->height = height;
++        memset(state->shadow, 0, (size_t)width * height * 4);
++        if (screen->root)
++            SetRootClip(screen, ROOT_CLIP_FULL);
++    }
++    screen->mmWidth = mm_width;
++    screen->mmHeight = mm_height;
++    RRScreenSizeNotify(screen);
++    g955n_damage_root(screen);
++    return TRUE;
++}
++
++static Bool
++g955n_set_crtc(ScreenPtr screen, RRCrtcPtr crtc, RRModePtr mode,
++              int x, int y, Rotation rotation, int count, RROutputPtr *outputs)
++{
++    FBDevPtr state = FBDEVPTR(xf86ScreenToScrn(screen));
++    int width, height, angle;
++
++    if (crtc != state->rotation_crtc || x || y)
++        return FALSE;
++    if (!mode)
++        return count == 0 &&
++            RRCrtcNotify(crtc, NULL, 0, 0, RR_Rotate_0, NULL, 0, NULL);
++    if (count != 1 || outputs[0] != state->rotation_output ||
++        mode != state->rotation_output->modes[0] ||
++        RRCrtcGetTransform(crtc) ||
++        !g955n_rotation_geometry(rotation, &width, &height, &angle) ||
++        width != screen->width || height != screen->height)
++        return FALSE;
++
++    if (!RRCrtcNotify(crtc, mode, 0, 0, rotation, NULL, count, outputs))
++        return FALSE;
++    g955n_damage_root(screen);
++    return TRUE;
++}
++
++static Bool
++g955n_get_info(ScreenPtr screen, Rotation *rotations)
++{
++    FBDevPtr state = FBDEVPTR(xf86ScreenToScrn(screen));
++    *rotations = state->rotation_crtc->rotations;
++    return TRUE;
++}
++
++static Bool
++g955n_init_randr(ScreenPtr screen)
++{
++    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
++    FBDevPtr state = FBDEVPTR(scrn);
++    rrScrPrivPtr rr = rrGetScrPriv(screen);
++    const char name[] = "1440x2960";
++    xRRModeInfo info = {
++        .width = G955N_PANEL_W, .height = G955N_PANEL_H,
++        /* Pinned dream2 display DT: 2/2/2 horizontal, 15/3/1 vertical,
++         * 60-Hz command mode and native physical size of 70 x 143 mm. */
++        .hSyncStart = G955N_PANEL_W + 2, .hSyncEnd = G955N_PANEL_W + 4,
++        .hTotal = G955N_PANEL_W + 6,
++        .vSyncStart = G955N_PANEL_H + 3, .vSyncEnd = G955N_PANEL_H + 4,
++        .vTotal = G955N_PANEL_H + 19,
++        .dotClock = (G955N_PANEL_W + 6) * (G955N_PANEL_H + 19) * 60,
++        .nameLength = sizeof(name) - 1,
++    };
++    RRCrtcPtr crtc;
++    RROutputPtr output;
++    RRModePtr rrmode;
++    Atom connector = MakeAtom("ConnectorType", sizeof("ConnectorType") - 1, TRUE);
++    Atom panel = MakeAtom("Panel", sizeof("Panel") - 1, TRUE);
++
++    if (!rr || rr->numCrtcs || rr->numOutputs)
++        return FALSE;
++    crtc = RRCrtcCreate(screen, NULL);
++    output = RROutputCreate(screen, "DSI-1", 5, NULL);
++    rrmode = RRModeGet(&info, name);
++    if (!crtc || !output || !rrmode ||
++        !RROutputSetCrtcs(output, &crtc, 1) ||
++        !RROutputSetModes(output, &rrmode, 1, 1) ||
++        RRConfigureOutputProperty(output, connector, FALSE, FALSE, TRUE, 0, NULL) != Success ||
++        RRChangeOutputProperty(output, connector, XA_ATOM, 32, PropModeReplace,
++                               1, &panel, FALSE, FALSE) != Success)
++        return FALSE;
++
++    RRCrtcSetRotations(crtc, RR_Rotate_0 | RR_Rotate_90 | RR_Rotate_180 | RR_Rotate_270);
++    RROutputSetConnection(output, RR_Connected);
++    RROutputSetPhysicalSize(output, 70, 143);
++    if (!RRCrtcNotify(crtc, rrmode, 0, 0, RR_Rotate_0, NULL, 1, &output))
++        return FALSE;
++    state->rotation_crtc = crtc;
++    state->rotation_output = output;
++    rr->rrGetInfo = g955n_get_info;
++    rr->rrSetConfig = NULL;
++    rr->rrScreenSetSize = g955n_set_screen_size;
++    rr->rrCrtcSet = g955n_set_crtc;
++    RRScreenSetSizeRange(screen, G955N_PANEL_W, G955N_PANEL_W,
++                          G955N_PANEL_H, G955N_PANEL_H);
++    RRTellChanged(screen);
++    return TRUE;
++}
++
+ static Bool
+ FBDevCreateScreenResources(ScreenPtr pScreen)
+ {
+@@ -715,7 +894,9 @@
+ 
+     pPixmap = pScreen->GetScreenPixmap(pScreen);
+ 
+-    if (fPtr->shadow24)
++    if (fPtr->runtime_rotation)
++        update = g955n_shadow_update;
++    else if (fPtr->shadow24)
+         update = fbdevUpdate32to24;
+     else if (fPtr->rotate)
+         update = fbdevUpdateRotatePacked;
+@@ -727,6 +908,8 @@
+ 	return FALSE;
+     }
+ 
++    if (fPtr->runtime_rotation && !g955n_init_randr(pScreen))
++        return FALSE;
+     return TRUE;
+ }
+ 
+@@ -775,6 +958,17 @@
+ 	int type;
+ 
+ 	TRACE_ENTER("FBDevScreenInit");
++
++        fPtr->runtime_rotation = xf86ReturnOptValBool(fPtr->Options, OPTION_G955N_ROTATION, FALSE);
++        fPtr->rotation_crtc = NULL;
++        fPtr->rotation_output = NULL;
++        if (fPtr->runtime_rotation &&
++            (!fPtr->shadowFB || fPtr->shadow24 || fPtr->rotate ||
++             pScrn->bitsPerPixel != 32 || pScrn->virtualX != G955N_PANEL_W ||
++             pScrn->virtualY != G955N_PANEL_H || pScrn->displayWidth != G955N_PANEL_W)) {
++            xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "G955NRotation requires the native 32-bit shadow framebuffer\n");
++            return FALSE;
++        }
+ 
+ #if DEBUG
+ 	ErrorF("\tbitsPerPixel=%d, depth=%d, defaultVisual=%s\n"
+@@ -945,9 +1139,9 @@
+ 	    return FALSE;
+ 	}
+ 
+-	if (!fPtr->rotate)
++	if (!fPtr->rotate && !fPtr->runtime_rotation)
+ 	  FBDevDGAInit(pScrn, pScreen);
+-	else {
++	else if (fPtr->rotate) {
+ 	  xf86DrvMsg(pScrn->scrnIndex, X_INFO, "display rotated; disabling DGA\n");
+ 	  xf86DrvMsg(pScrn->scrnIndex, X_INFO, "using driver rotation; disabling "
+ 			                "XRandR\n");

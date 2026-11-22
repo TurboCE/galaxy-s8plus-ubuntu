@@ -12,12 +12,16 @@ import tempfile
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--base-archive',type=Path,required=True)
 p.add_argument('--reference-patch',type=Path,required=True)
+p.add_argument('--native-rotation',action='store_true',help='Build the opt-in G955N XRandR/Mali rotation path')
 a=p.parse_args();scripts=Path(__file__).resolve().parent;work=Path('/work');hybris=work/'input/libhybris';prefix=work/'prefix'
 pin=json.loads((scripts/'sources.json').read_text())['x11-platform-reference']
 def sha(f):return hashlib.sha256(f.read_bytes()).hexdigest()
 if sha(a.base_archive)!=pin['base_archive_sha256'] or sha(a.reference_patch)!=pin['reference_patch_sha256']:raise SystemExit('Pinned public source checksums differ')
 relative=Path('hybris/egl/platforms/x11');names={'Makefile.am','eglplatform_x11.cpp','x11_window.cpp','x11_window.h','xcb_drihybris.c','xcb_drihybris.h'}
-x11_has_direct_patch=False
+window_patches = ['0019', '0024', '0025', '0026', '0027']
+if a.native_rotation:
+ window_patches.append('0028')
+applied_window_patches = set()
 with tempfile.TemporaryDirectory() as temporary:
  root=Path(temporary)
  with tarfile.open(a.base_archive) as archive:
@@ -37,34 +41,27 @@ with tempfile.TemporaryDirectory() as temporary:
   source=root/relative/name;target=hybris/relative/name
   if target.exists():
    if sha(target)!=hashes[name]:
-    # Accept a repaired source only by exact reviewed reconstruction.
-    repaired=root/'hybris/egl/platforms/x11'/name
-    if name!='x11_window.cpp':raise SystemExit('Unreviewed existing X11 source: '+name)
-    repair=next((scripts/'patches').glob('0019-*.patch')).read_text()
-    subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=repair,text=True,check=True)
-    if sha(target)!=sha(repaired):
-     layout=next((scripts/'patches').glob('0024-*.patch')).read_text()
-     subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=layout,text=True,check=True)
-     if sha(target)!=sha(repaired):
-      direct=next((scripts/'patches').glob('0025-*.patch')).read_text()
-      subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=direct,text=True,check=True)
-      if sha(target)!=sha(repaired):
-       kms=next((scripts/'patches').glob('0026-*.patch')).read_text()
-       subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=kms,text=True,check=True)
-       if sha(target)!=sha(repaired):
-        deferred=next((scripts/'patches').glob('0027-*.patch')).read_bytes()
-        subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],input=deferred,check=True)
-        if sha(target)!=sha(repaired):raise SystemExit('Unreviewed repaired X11 source: '+name)
-      x11_has_direct_patch=True
+    if name!='x11_window.cpp':
+     raise SystemExit('Unreviewed existing X11 source: '+name)
+    for number in window_patches:
+     patch=next((scripts/'patches').glob(number+'-*.patch'))
+     subprocess.run(['patch','--fuzz=0','-p1','--forward','--batch','-d',str(root)],
+                    input=patch.read_bytes(),check=True)
+     applied_window_patches.add(number)
+     if sha(target)==sha(source):
+      break
+    else:
+     raise SystemExit('Unreviewed existing X11 source: '+name)
   else:target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(source,target)
-for number in ['0014','0015','0018','0019','0021','0022','0023','0024','0025','0026','0027']:
- if x11_has_direct_patch and number in ('0019','0024','0025'):continue
+for number in ['0014','0015','0018','0019','0021','0022','0023','0024','0025','0026','0027','0028']:
+ if number in applied_window_patches or (number=='0028' and not a.native_rotation):
+  continue
  patch=next((scripts/'patches').glob(number+'-*.patch'))
  command=['patch','--fuzz=0','-p1','--batch','--silent','-d',str(hybris)]
  if subprocess.run([*command,'--forward','--dry-run'],input=patch.read_bytes()).returncode==0:
   subprocess.run([*command,'--forward'],input=patch.read_bytes(),check=True)
  elif subprocess.run([*command,'--reverse','--dry-run'],input=patch.read_bytes()).returncode:
-  raise SystemExit('Unreviewed X11 core integration state')
+  raise SystemExit('Unreviewed X11 core integration state for patch '+number)
 license_file=scripts/'references/s8-x11-LICENSE'
 if sha(license_file)!=pin['reference_license_sha256']:raise SystemExit('Changed reference license')
 license_target=work/'sources/s8-x11-reference'/ 'LICENSE'
@@ -77,6 +74,7 @@ includes=[hybris/'hybris',hybris/'hybris/common',hybris/'hybris/include',hybris/
 common=['-fPIC','-O2','-g',*[item for path in includes for item in ['-I',str(path)]]]
 env={**os.environ,'PKG_CONFIG_LIBDIR':'/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'}
 packages=['x11','x11-xcb','xcb','xcb-present','xext','pixman-1','libdrm']
+if a.native_rotation:packages.append('xrandr')
 flags=subprocess.check_output(['pkg-config','--cflags','--libs',*packages],env=env,text=True).split()
 panel=scripts.parent/'native-gnome/direct-panel'
 panel_object=build/'decon-output.o'
@@ -87,12 +85,21 @@ kms_object=build/'drm-output.o'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-fPIC','-O2','-Wall','-Wextra','-Werror',
                 *flags,'-c',str(panel/'drm-output.c'),'-o',str(kms_object)],check=True)
 objects=[str(panel_object),str(kms_object)]
+rotation_libs = []
+if a.native_rotation:
+ common.append('-DG955N_NATIVE_ROTATION=1')
+ rotation_object = build / 'panel-rotation.o'
+ subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-fPIC','-O2','-Wall','-Wextra','-Werror',
+                 '-I'+str(prefix/'include'),'-c',str(panel/'panel-rotation.c'),'-o',str(rotation_object)],check=True)
+ objects.append(str(rotation_object))
+ rotation_libs.append('-lGLESv2')
+
 for name in ['eglplatform_x11.cpp','x11_window.cpp','xcb_drihybris.c']:
  obj=build/(name+'.o');objects.append(str(obj));cxx=name.endswith('.cpp')
  subprocess.run(['aarch64-linux-gnu-g++' if cxx else 'aarch64-linux-gnu-gcc',*common,*(['-std=c++17'] if cxx else []),'-Wall','-Wextra','-c',str(source/name),'-o',str(obj),*flags],check=True)
 binary=prefix/'lib/libhybris/eglplatform_x11.so'
 subprocess.run(['aarch64-linux-gnu-g++','-shared','-Wl,--no-undefined,-z,relro,-z,now',*objects,'-L'+str(prefix/'lib'),'-Wl,-rpath-link,'+str(prefix/'lib'),
- '-lhybris-eglplatformcommon','-lhybris-platformcommon','-lgralloc','-lsync','-lEGL','-lhybris-common','-lpthread','-ldl',*flags,'-o',str(binary)],check=True)
+ '-lhybris-eglplatformcommon','-lhybris-platformcommon','-lgralloc','-lsync','-lEGL','-lhybris-common','-lpthread','-ldl',*rotation_libs,*flags,'-o',str(binary)],check=True)
 kms_probe=prefix/'bin/drm-kms-probe'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=c11','-O2','-Wall','-Wextra','-Werror',
                 str(panel/'drm-probe.c'),str(kms_object),*flags,'-o',str(kms_probe)],check=True)
@@ -102,4 +109,8 @@ probe=build/'x11-pixel-probe'
 subprocess.run(['aarch64-linux-gnu-gcc','-std=gnu11','-O2','-g','-Wall','-Wextra','-Werror',str(scripts/'x11-pixel-probe.c'),
  '-I'+str(prefix/'include'),'-L'+str(prefix/'lib'),'-Wl,-rpath-link,'+str(prefix/'lib'),'-lX11','-lEGL','-lGLESv2','-ldl','-o',str(probe)],check=True)
 record={'pixel_probe_sha256':sha(probe),'pixel_probe_source_sha256':sha(scripts/'x11-pixel-probe.c'),'source':pin,'adaptation_sha256':sha(next((scripts/'patches').glob('0013-*.patch'))),'core_integration_sha256':sha(next((scripts/'patches').glob('0014-*.patch'))),'submission_order_sha256':sha(next((scripts/'patches').glob('0019-*.patch'))),'buffer_age_sha256':sha(next((scripts/'patches').glob('0018-*.patch'))),'gralloc_ownership_sha256':sha(next((scripts/'patches').glob('0015-*.patch'))),'gralloc_lifetime_sha256':sha(next((scripts/'patches').glob('0023-*.patch'))),'native_property_snapshot_sha256':sha(next((scripts/'patches').glob('0022-*.patch'))),'legacy_property_hooks_sha256':sha(next((scripts/'patches').glob('0021-*.patch'))),'direct_panel_trial_sha256':sha(next((scripts/'patches').glob('0025-*.patch'))),'overlay_layout_report_sha256':sha(next((scripts/'patches').glob('0024-*.patch'))),'source_hashes':{name:sha(hybris/relative/name) for name in names},'binary_sha256':sha(binary),'decon_submit_source_sha256':sha(panel/'decon-output.c'),'decon_submit_header_sha256':sha(panel/'decon-output.h'),'drm_kms_patch_sha256':sha(next((scripts/'patches').glob('0026-*.patch'))),'drm_deferred_flip_patch_sha256':sha(next((scripts/'patches').glob('0027-*.patch'))),'drm_submit_source_sha256':sha(panel/'drm-output.c'),'drm_submit_header_sha256':sha(panel/'drm-output.h'),'drm_probe_sha256':sha(kms_probe),'drm_probe_source_sha256':sha(panel/'drm-probe.c'),'status':'built only; opt-in supervised DECON or DRM/KMS output'}
+if a.native_rotation:
+ record['rotation_patch_sha256']=sha(next((scripts/'patches').glob('0028-*.patch')))
+ record['rotation_source_sha256']=sha(panel/'panel-rotation.c')
+ record['rotation_header_sha256']=sha(panel/'panel-rotation.h')
 (build/'build.json').write_text(json.dumps(record,indent=2)+'\n');print(json.dumps(record,indent=2))

@@ -2526,3 +2526,18 @@ SensorProxy and the GNSS socket were active, taint remained zero and the
 RTC alarm was clear. The first duration checker used the BOOTTIME/monotonic
 difference, which did not advance during this s2idle interval. Acceptance
 uses the kernel PM records and the independently checked transport recovery.
+
+### Kernel57 SM-G955N runtime rotation
+
+A separately started Xorg exposed a connected 1440×2960, 60 Hz `DSI-1`
+with `ConnectorType: Panel`. Manual RandR transitions normal, left, right,
+inverted and normal checked all four physical framebuffer regions after
+each transition. An independent Mali-G71 probe verified the exact
+production GPU transform by readback and checked the producer EGL binding.
+KMS accepted the generated DMA-BUFs in one modeset and three completed flips.
+The probe's CPU readback was used only for pixel verification. The standard
+connector and buffer lifetime paths handled the panel submissions.
+
+A temporary GNOME trial stages the two drivers, Xorg configuration and GPU
+manifest together. Test status and limits are in
+[native rotation requirements](native-rotation-requirements.md).

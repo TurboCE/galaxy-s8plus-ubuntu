@@ -52,6 +52,21 @@ class DirectPanelBootTests(unittest.TestCase):
         self.prepare()
         self.assert_recovered()
 
+    def test_rotation_trial_restores_driver_and_xorg_config_after_reboot(self):
+        rotation = tuple(self.files[0].parent / name for name in
+                         ('fbdev_drv.so', '10-g955n-fbdev.conf'))
+        for path in rotation:
+            path.write_bytes(b'candidate')
+            snapshot = self.policy.parent / path.name
+            snapshot.write_bytes(path.name.encode())
+            snapshot.chmod(0o644)
+        with patch.multiple(controller, FBDEV=rotation[0], ROTATION_FILES=rotation):
+            self.prepare()
+        self.assert_recovered()
+        for path in rotation:
+            self.assertEqual(path.read_bytes(), path.name.encode())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
     def test_verified_default_recreates_runtime_lease(self):
         self.enable_default()
         self.prepare()

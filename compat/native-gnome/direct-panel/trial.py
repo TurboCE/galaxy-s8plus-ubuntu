@@ -17,6 +17,9 @@ LIBRARY = PREFIX / KEY
 MANIFEST = PREFIX / 'manifest.json'
 LAUNCHER = PREFIX / 'session.py'
 FILES = (LIBRARY, MANIFEST, LAUNCHER)
+FBDEV = Path('/usr/lib/xorg/modules/drivers/fbdev_drv.so')
+XORG_CONFIG = Path('/etc/X11/xorg.conf.d/10-g955n-fbdev.conf')
+ROTATION_FILES = (FBDEV, XORG_CONFIG)
 BACKUP = Path('/var/lib/g955n/direct-panel-trial')
 LEASE = Path('/run/lock/g955n-direct-panel-trial')
 TIMER = 'g955n-direct-panel-rollback'
@@ -78,7 +81,8 @@ def remove_backup():
 
 def restore_files():
     LEASE.unlink(missing_ok=True)
-    for path in FILES:
+    paths = FILES + ROTATION_FILES if (BACKUP / FBDEV.name).is_file() else FILES
+    for path in paths:
         snapshot = BACKUP / path.name
         mode = stat.S_IMODE(snapshot.stat().st_mode)
         replace(path, snapshot.read_bytes(), mode)
@@ -178,7 +182,24 @@ def prepare_boot():
     remove_backup()
 
 
-def run(candidate, expected, default, drm_kms=False):
+def rotation_files(candidate, expected):
+    if candidate is None:
+        return {}
+    data = candidate.read_bytes()
+    if digest(data) != expected or data[:6] != b'\x7fELF\x02\x01' or data[18:20] != b'\xb7\x00':
+        raise RuntimeError('Rotation driver checksum or AArch64 ELF header mismatch')
+    for path in ROTATION_FILES:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid or info.st_mode & 0o022:
+            raise RuntimeError(f'Untrusted rotation target: {path}')
+    config = XORG_CONFIG.read_bytes()
+    marker = b'Option "ShadowFB" "true"'
+    if config.count(marker) != 1 or b'G955NRotation' in config or b'Driver "fbdev"' not in config:
+        raise RuntimeError('Unexpected SM-G955N Xorg configuration')
+    return {FBDEV: data, XORG_CONFIG: config.replace(marker, marker + b'\n    Option "G955NRotation" "true"')}
+
+
+def run(candidate, expected, default, drm_kms=False, rotation=None, rotation_hash=None):
     if LEASE.exists() or BACKUP.exists():
         raise RuntimeError('A previous trial still has state; restore it before staging another')
     if b'pan_with_trial_lease' not in Path('/usr/local/sbin/g955n-fb-display').read_bytes():
@@ -188,7 +209,8 @@ def run(candidate, expected, default, drm_kms=False):
     data = candidate.read_bytes()
     if digest(data) != expected:
         raise RuntimeError('Candidate checksum mismatch')
-    original = {path: path.read_bytes() for path in FILES}
+    rotation_changes = rotation_files(rotation, rotation_hash)
+    original = {path: path.read_bytes() for path in (*FILES, *rotation_changes)}
     manifest = json.loads(original[MANIFEST])
     if manifest['target'] != 'SM-G955N' or digest(original[LIBRARY]) != manifest['files'][KEY]['sha256']:
         raise RuntimeError('The installed GPU prefix does not match its manifest')
@@ -212,7 +234,8 @@ def run(candidate, expected, default, drm_kms=False):
 
     # Schedule recovery on the phone before interrupting its desktop.
     try:
-        subprocess.run(['systemd-run', '--collect', f'--unit={TIMER}', '--on-active=150s',
+        timeout = '--on-active=240s' if rotation_changes else '--on-active=150s'
+        subprocess.run(['systemd-run', '--collect', f'--unit={TIMER}', timeout,
                         sys.executable, str(Path(__file__).resolve()), '--restore-trial'],
                        check=True, timeout=15)
     except (subprocess.SubprocessError, OSError):
@@ -228,18 +251,23 @@ def run(candidate, expected, default, drm_kms=False):
         replace(LIBRARY, data)
         replace(MANIFEST, json.dumps(manifest, indent=2).encode())
         settings = b"\n env.pop('G955N_DIRECT_PANEL_TRIAL',None)\n env.pop('G955N_DRM_KMS',None)\n"
+        settings += b" env.pop('G955N_DIRECT_PANEL_ROTATION',None)\n"
         settings += b" if Path('/run/lock/g955n-direct-panel-trial').is_file():\n"
         settings += b"  env['G955N_DIRECT_PANEL_TRIAL']='1'\n"
         if drm_kms:
             settings += b"  env['G955N_DRM_KMS']='1'\n"
+        if rotation_changes:
+            settings += b"  env['G955N_DIRECT_PANEL_ROTATION']='1'\n"
         settings += (b"  env['XDG_DATA_DIRS']="
                      + repr(str(SHELL_DATA) + ':').encode()
                      + b"+(original.get('XDG_DATA_DIRS') or '/usr/local/share:/usr/share')\n")
         # Include the dynamic output keys in logout cleanup.
         launcher = original[LAUNCHER].replace(marker, marker + settings.rstrip(b"\n"))
         launcher = launcher.replace(cleanup,
-            b"keys=sorted(set(ENV)|set(REMOVE)|{'XDG_DATA_DIRS','G955N_DIRECT_PANEL_TRIAL','G955N_DRM_KMS'})")
+            b"keys=sorted(set(ENV)|set(REMOVE)|{'XDG_DATA_DIRS','G955N_DIRECT_PANEL_TRIAL','G955N_DRM_KMS','G955N_DIRECT_PANEL_ROTATION'})")
         replace(LAUNCHER, launcher)
+        for path, content in rotation_changes.items():
+            replace(path, content)
         ctl('start', 'gdm.service')
         if default:
             hashes = default_hashes()
@@ -261,6 +289,8 @@ def main():
     mode.add_argument('--restore-trial', action='store_true')
     mode.add_argument('--boot-recover', action='store_true')
     parser.add_argument('--sha256')
+    parser.add_argument('--rotation-driver', type=Path)
+    parser.add_argument('--rotation-driver-sha256')
     parser.add_argument('--enable-default', action='store_true')
     parser.add_argument('--drm-kms', action='store_true',
                         help='Use the probed standard KMS/PRIME interface')
@@ -283,6 +313,10 @@ def main():
             return
         if not args.sha256:
             parser.error('--candidate requires --sha256')
+        if bool(args.rotation_driver) != bool(args.rotation_driver_sha256):
+            parser.error('Specify both --rotation-driver and --rotation-driver-sha256')
+        if args.rotation_driver and (not args.drm_kms or args.enable_default):
+            parser.error('Rotation requires --drm-kms and is available only as a temporary trial')
         if not (qualified_kms() if args.drm_kms else qualified_kernel()):
             raise RuntimeError('Direct output requires the selected verified display interface')
         if Path('/proc/sys/kernel/tainted').read_text().strip() != '0':
@@ -296,7 +330,8 @@ def main():
             if info.st_uid or info.st_mode & 0o022:
                 raise RuntimeError('Install the trial controller under a root-owned prefix')
         ctl('is-enabled', RECOVERY)
-        run(args.candidate, args.sha256, args.enable_default, args.drm_kms)
+        run(args.candidate, args.sha256, args.enable_default, args.drm_kms,
+            args.rotation_driver, args.rotation_driver_sha256)
 
 
 if __name__ == '__main__':
