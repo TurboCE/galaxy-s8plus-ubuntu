@@ -3249,3 +3249,61 @@ DTB. No rail was switched during this test.
   access after desktop login without identifying the underlying
   fault. The Settings window, speaker, microphone and sensor
   readings remain unqualified.
+
+### R59 transport fault isolation
+
+R58 has `CONFIG_SUSPEND` disabled. The recorded loss of both IP paths
+and the serial prompt occurred after the desktop session started.
+The Mac still saw the USB device during the incident. The failing component
+remains undetermined.
+
+The R59 diagnostic uses proposal 0080 and
+`config/mainline618-transport-evidence.fragment`. The initramfs puts
+`scripts/boot/mainline618-transport-evidence.sh` at
+`/bin/g955n-transport-evidence`. The `g955n.transport_evidence=1` switch
+starts the recorder from multi-user.target. It writes a heartbeat before
+querying device state and limits the session to 60 samples in the verified
+16 KiB pmsg region. TWRP can read this region with
+`scripts/read_mainline_boot_trace.py --save`. The kernel panic record
+retains its separate 16 KiB area.
+
+The first comparison boots to multi-user with on-board WLAN modules
+blacklisted for autoload. Start the GDM framebuffer session over USB and
+compare it with a second run that loads PCIe and brcmfmac and connects
+Wi-Fi before starting GDM. Monitor USB serial and SSH independently.
+Hardware qualification requires a recovered trace and a repeatable
+difference between the runs.
+
+The diagnostic image uses `softlockup_panic=1 panic=0` so a detected
+soft lockup leaves a stack trace for recovery. This is a trial boot
+policy. Hung-task reporting stays nonfatal.
+
+The host collector now accepts the observed 6.18 G955N release and serial
+names. The regression tests simulate USB loss during capture, verify
+continuation over the pinned Wi-Fi route on the same boot and reject a
+replacement boot. Live transport failure remains a separate test.
+
+### R58 incident and R60 memory reservation
+
+After the owner's reboot, systemd-pstore exposed the R58 dmesg record.
+It captured an ARM64 asynchronous SError (ESR `0xbe000000`) on CPU 1
+followed by a kernel panic. The exact R58 vmlinux places the PC at
+`clear_page+0x34` and the return address in `get_page_from_freelist`.
+The caller's register and instruction sequence reconstruct the page
+address as `0xffff000050144000`, physical `0xd0144000` on this handset.
+The offset in the recovered, partially corrupted x0 register agrees
+with the page-zeroing loop.
+
+R58's live memory map includes that page in System RAM. Samsung's board
+tree and vendor-kernel log identify a 20 MiB secure camera reservation
+starting at `0xd0000000`. R60 has the same R58 kernel, modules, command
+line and initramfs. Its device tree adds only the corresponding
+`reserved-memory` node with `no-map`.
+
+On the handset, R60 reported the whole region as non-reusable and
+excluded it from the linear map. GNOME started after GDM authentication,
+the Wi-Fi panel launched in GNOME Settings, and a 512 MiB anonymous-memory
+test completed with all sampled pages intact. Eight paired SSH samples
+over USB Ethernet and Wi-Fi spanned approximately 59 seconds after login.
+The kernel journal contained no SError or panic during that test.
+APT then succeeded over Wi-Fi with the USB data gadget unbound.

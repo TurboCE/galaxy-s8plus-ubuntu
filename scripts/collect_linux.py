@@ -4,6 +4,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 import subprocess
@@ -24,6 +25,21 @@ CHECKS = {
     'power': 'ls /sys/class/power_supply; cat /sys/power/state',
     'audio_camera': 'cat /proc/asound/cards; ls -l /dev/video*',
 }
+
+IDENTIFY = ("uname -r; tr -d '\\000' < /proc/device-tree/model; printf '\\n'; "
+            "cat /proc/sys/kernel/random/boot_id")
+
+
+def capture_identity(result):
+    lines = result['stdout'].splitlines()
+    if result['exit_code'] or len(lines) != 3:
+        return None
+    release, model, boot_id = lines
+    accepted = 'g955n-ubuntu' in release or re.fullmatch(
+        r'6\.18\.\d+(-g955n-usb-r\d+){1,2}', release)
+    if accepted and 'SM-G955N' in model and boot_id:
+        return release, model, boot_id
+    return None
 
 
 def main():
@@ -72,20 +88,34 @@ def main():
         except subprocess.TimeoutExpired:
             return dict(exit_code=124, stdout='', stderr='Capture timed out')
 
-    transport_used = 'serial' if serial else 'ssh'
-    identify = 'uname -r; cat /proc/device-tree/model'
-    identity = run(identify)
-    if args.wifi_host and identity['exit_code'] in (124, 255):
+    def switch_to_wifi():
+        nonlocal host, transport_used
         host = args.wifi_host
         transport_used = 'wifi_fallback'
-        identity = run(identify)
-    if identity['exit_code'] or 'g955n-ubuntu' not in identity['stdout'] or 'SM-G955N' not in identity['stdout']:
+        return run(IDENTIFY)
+
+    transport_used = 'serial' if serial else 'ssh'
+    identity = run(IDENTIFY)
+    if args.wifi_host and identity['exit_code'] in (124, 255):
+        identity = switch_to_wifi()
+    device = capture_identity(identity)
+    if device is None:
         raise SystemExit('Refusing capture: not the expected SM-G955N Ubuntu kernel/DT')
+    identity['stdout'] = '\n'.join(device[:2]) + '\n'
     os.umask(0o077)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     directory = ROOT / 'inventory' / stamp
     directory.mkdir(parents=True, mode=0o700)
-    checks = {name: run(command) for name, command in CHECKS.items()}
+    checks = {}
+    for name, command in CHECKS.items():
+        result = run(command)
+        if args.wifi_host and transport_used == 'ssh' and result['exit_code'] in (124, 255):
+            if capture_identity(switch_to_wifi()) != device:
+                transport_used = 'ssh'
+                checks[name] = result
+                break
+            result = run(command)
+        checks[name] = result
     kernel = checks['dmesg']
     report = dict(timestamp_utc=stamp, transport=transport_used, identity=identity, checks=checks,
                   kernel_audit=audit(kernel['stdout']) if kernel['exit_code'] == 0 else

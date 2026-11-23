@@ -15,7 +15,9 @@ import uuid
 
 class SerialShell:
     def __init__(self, port):
-        if not Path(port).name.startswith('cu.usbmodemG955N_UBUNTU'):
+        name = Path(port).name
+        if (not name.startswith('cu.usbmodemG955N_UBUNTU')
+                and not re.fullmatch(r'cu\.usbmodemG955N618[0-9]+', name)):
             raise ValueError('Select the dedicated G955N USB serial port explicitly')
         self.fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         self.original = termios.tcgetattr(self.fd)

@@ -1937,3 +1937,18 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   with the Korean Galaxy S8+ board pin mappings.
 - Sync the persistent bring-up journal more frequently to narrow
   the log gap when a trial abruptly stops responding.
+
+### R59 transport fault isolation
+
+- Add an opt-in retained-RAM recorder for the Ubuntu scheduler
+  heartbeat, USB gadget and Ethernet state, Wi-Fi state, and GNOME Shell.
+- Add a diagnostic kernel configuration with symbol names and software
+  lockup detectors. The trial keeps the Samsung TWRP pmsg layout.
+- Recognize the Linux 6.18 kernel and UDC serial names in the host
+  collector. Read-only SSH capture can continue over the pinned Wi-Fi
+  route when USB drops, after verifying that the boot is the same.
+
+### R60 secure camera RAM
+
+- Reserve the Samsung secure camera carveout in the SM-G955N device tree.
+  The recovered R58 panic interrupted page initialization within that region.

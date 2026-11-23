@@ -180,6 +180,22 @@ prepare_ubuntu_services() {
     esac
 }
 
+prepare_transport_evidence() {
+    [ -c /dev/pmsg0 ] && [ -r /bin/g955n-transport-evidence ] || return 1
+    "$BB" mkdir -p /run/g955n-trial /run/systemd/system/multi-user.target.wants || return 1
+    "$BB" cp /bin/g955n-transport-evidence /run/g955n-trial/transport-evidence || return 1
+    "$BB" cat > /run/systemd/system/g955n-transport-evidence.service <<'EOF' || return 1
+[Unit]
+Description=Record SM-G955N transport health in retained RAM
+
+[Service]
+ExecStart=/bin/sh /run/g955n-trial/transport-evidence
+RuntimeMaxSec=320
+EOF
+    "$BB" ln -s ../g955n-transport-evidence.service \
+        /run/systemd/system/multi-user.target.wants/g955n-transport-evidence.service
+}
+
 # Keep the framebuffer session scoped to GDM on the 6.18 boot.
 prepare_ubuntu_desktop() {
     local desktop=/run/g955n-mainline-desktop
@@ -476,6 +492,9 @@ case " $("$BB" cat /proc/cmdline) " in
 esac
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.desktop=1 "*) prepare_ubuntu_desktop || log 'Cannot stage Ubuntu framebuffer desktop' ;;
+esac
+case " $("$BB" cat /proc/cmdline) " in
+    *" g955n.transport_evidence=1 "*) prepare_transport_evidence || log 'Cannot stage transport evidence' ;;
 esac
 log 'Handing PID 1 to Ubuntu systemd'
 boot_timing switch-root

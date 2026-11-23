@@ -1,0 +1,18 @@
+Subject: [PATCH] arm64: dts: exynos8895: preserve transport evidence for TWRP
+
+Use the second half of the retained RAM area as pmsg for the transport
+diagnostic boot. Match the Samsung recovery layout so the recorder can
+be read after a reset even when the Ubuntu root cannot be reached.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -49,7 +49,7 @@
+ 			compatible = "ramoops";
+ 			reg = <0 0x92000000 0x8000>;
+ 			record-size = <0x4000>;
+-			console-size = <0x4000>;
++			pmsg-size = <0x4000>;
+ 		};
+ 
+ 		framebuffer@cc000000 {

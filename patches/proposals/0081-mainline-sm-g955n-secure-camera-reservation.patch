@@ -1,0 +1,23 @@
+Subject: [PATCH] arm64: dts: exynos8895: reserve SM-G955N secure camera RAM
+
+Samsung's dream2lte reserved-memory layout places the secure camera
+carveout at 0xd0000000 for 20 MiB. Keep it out of the Linux allocator
+and linear map on the Korean board. R58 included this interval in
+System RAM and reported an asynchronous abort while the page allocator
+was clearing a page consistent with an address inside the carveout.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -54,6 +54,11 @@
+ 
+ 		framebuffer@cc000000 {
+ 			reg = <0 0xcc000000 (1440 * 2960 * 4)>;
++			no-map;
++		};
++
++		secure-camera@d0000000 {
++			reg = <0 0xd0000000 0x1400000>;
+ 			no-map;
+ 		};
+ 	};
