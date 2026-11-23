@@ -135,8 +135,8 @@ start_usb_gadget() {
         printf '%s\n' "$udc" > "$gadget/UDC"
 }
 
-prepare_ubuntu_trial_return() {
-    "$BB" mkdir -p /run/systemd/system/timers.target.wants /run/g955n-trial || return 1
+prepare_ubuntu_services() {
+    "$BB" mkdir -p /run/g955n-trial || return 1
     if [ -x /bin/g955n-kernel-evidence ] && [ -r /bin/g955n-kernel-evidence.service ]; then
         "$BB" cp /bin/g955n-kernel-evidence /run/g955n-trial/kernel-evidence || return 1
         "$BB" mkdir -p /run/systemd/system/g955n-kernel-evidence.service.d || return 1
@@ -145,6 +145,21 @@ prepare_ubuntu_trial_return() {
             "$BB" sed -n '/^Type=/p; /^RuntimeMaxSec=/p' /bin/g955n-kernel-evidence.service
         } > /run/systemd/system/g955n-kernel-evidence.service.d/50-g955n-trial.conf || return 1
     fi
+    case " $("$BB" cat /proc/cmdline) " in
+        *" g955n.usb_login=1 "*)
+            if [ -c /dev/ttyGS0 ] && [ -f /newroot/usr/lib/systemd/system/serial-getty@.service ]; then
+                "$BB" mkdir -p /run/systemd/system/getty.target.wants || return 1
+                "$BB" ln -s /usr/lib/systemd/system/serial-getty@.service \
+                    /run/systemd/system/getty.target.wants/serial-getty@ttyGS0.service || return 1
+            else
+                log 'USB serial login unavailable'
+            fi
+            ;;
+    esac
+}
+
+prepare_ubuntu_trial_return() {
+    "$BB" mkdir -p /run/systemd/system/timers.target.wants /run/g955n-trial || return 1
     "$BB" cat > /run/g955n-trial/check <<'EOF' || return 1
 #!/bin/sh
 state=$(systemctl is-system-running 2>/dev/null)
@@ -222,18 +237,16 @@ OnUnitInactiveSec=10s
 AccuracySec=1s
 EOF
     "$BB" ln -s ../g955n-trial-return.timer /run/systemd/system/timers.target.wants/ || return 1
+}
 
-    case " $("$BB" cat /proc/cmdline) " in
-        *" g955n.usb_login=1 "*)
-            if [ -c /dev/ttyGS0 ] && [ -f /newroot/usr/lib/systemd/system/serial-getty@.service ]; then
-                "$BB" mkdir -p /run/systemd/system/getty.target.wants || return 1
-                "$BB" ln -s /usr/lib/systemd/system/serial-getty@.service \
-                    /run/systemd/system/getty.target.wants/serial-getty@ttyGS0.service || return 1
-            else
-                log 'USB serial login unavailable'
-            fi
-            ;;
-    esac
+start_ufs_hs_module() {
+    [ -r /bin/ufs-exynos.ko ] || stop 'UFS HS module unavailable'
+    (
+        log 'Starting UFS HS module'
+        if ! "$BB" insmod /bin/ufs-exynos.ko exynos8895_hs_trial=1; then
+            log 'UFS HS module load failed'
+        fi
+    ) &
 }
 
 partdev() {
@@ -269,6 +282,9 @@ probe_panfrost_render() (
         mounts="$dir $mounts"
     done
     set -- /run/g955n-panfrost-render "$render"
+    case " $("$BB" cat /proc/cmdline) " in
+        *" g955n.panfrost_linear_dmabuf=1 "*) set -- "$@" --linear-dmabuf ;;
+    esac
     if [ -x /bin/g955n-strace ]; then
         "$BB" cp /bin/g955n-strace /run/g955n-strace || exit 1
         set -- /run/g955n-strace --kill-on-exit -f -tt -T \
@@ -302,16 +318,18 @@ boot_timing initramfs
 log_g3d_snapshot power 'BUCK6_CTRL OUT1 OUT2 LDO9_CTRL PMU_STATUS'
 log_g3d_snapshot clock 'REF_MUX SWITCH_MUX PLL_CTRL PLL_OPTIONS BUSD_MUX BUSP_DIV AGPU_GATE'
 case " $("$BB" cat /proc/cmdline) " in
-    *" g955n.usb_diag=1 "*)
+    *" g955n.usb_diag=1 "*|*" g955n.usb_login=1 "*)
         if start_usb_gadget; then
             log 'USB ACM gadget bound'
             case " $("$BB" cat /proc/cmdline) " in
-                *" g955n.usb_handoff=1 "*)
-                    : > /run/g955n-usb-handoff.wait
+                *" g955n.usb_diag=1 "*)
+                    case " $("$BB" cat /proc/cmdline) " in
+                        *" g955n.usb_handoff=1 "*) : > /run/g955n-usb-handoff.wait ;;
+                    esac
+                    usb_diagnostics &
+                    diag_pid=$!
                     ;;
             esac
-            usb_diagnostics &
-            diag_pid=$!
         else
             log 'USB ACM gadget bind failed'
         fi
@@ -327,17 +345,14 @@ esac
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.ufs_module_hs_trial=1 "*)
         [ -n "$diag_pid" ] || stop 'UFS module trial requires USB diagnostics'
-        [ -r /bin/ufs-exynos.ko ] || stop 'UFS trial module unavailable'
         [ -e /run/g955n-usb-handoff.wait ] || [ -e /run/g955n-usb-handoff.ready ] ||
             stop 'UFS module trial requires USB handoff'
         wait_for_usb_handoff || stop 'UFS module trial did not receive host acknowledgement'
         usb_handoff_done=1
-        (
-            log 'Starting UFS HS module with USB diagnostics active'
-            if ! "$BB" insmod /bin/ufs-exynos.ko exynos8895_hs_trial=1; then
-                log 'UFS HS module load failed'
-            fi
-        ) &
+        start_ufs_hs_module
+        ;;
+    *" g955n.ufs_hs_boot=1 "*)
+        start_ufs_hs_module
         ;;
 esac
 
@@ -397,6 +412,7 @@ for dir in dev proc sys run efs; do
 done
 "$BB" mount -t ext4 -o ro,noload "$efsdev" /newroot/efs ||
     stop 'Read-only EFS mount failed'
+prepare_ubuntu_services || stop 'Cannot stage Ubuntu services'
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.ubuntu_return=1 "*) prepare_ubuntu_trial_return || stop 'Cannot stage Ubuntu return timer' ;;
 esac

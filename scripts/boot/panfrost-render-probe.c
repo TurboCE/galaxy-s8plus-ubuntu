@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#include <stdbool.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -10,6 +11,8 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
+#include <drm/drm_fourcc.h>
 #include <gbm.h>
 #include <drm/panfrost_drm.h>
 
@@ -53,6 +56,85 @@ static int probe_drm(int fd)
     return 0;
 }
 
+/* Exercise the kind of linear image a separate KMS device can import. */
+static EGLImage create_linear_image(void *gbm, void *egl, struct gbm_device *device,
+                                    EGLDisplay display, int width, int height,
+                                    int *out_fd)
+{
+    API(gbm_bo_create);
+    API(gbm_bo_get_fd);
+    API(gbm_bo_get_stride);
+    API(gbm_bo_get_offset);
+    API(gbm_bo_get_modifier);
+    API(gbm_bo_get_plane_count);
+    API(gbm_bo_destroy);
+    API(eglCreateImage);
+
+    /* Unlike the main probe, this helper returns an EGLImage on failure. */
+    gbm_bo_create_fn = dlsym(gbm, "gbm_bo_create");
+    gbm_bo_get_fd_fn = dlsym(gbm, "gbm_bo_get_fd");
+    gbm_bo_get_stride_fn = dlsym(gbm, "gbm_bo_get_stride");
+    gbm_bo_get_offset_fn = dlsym(gbm, "gbm_bo_get_offset");
+    gbm_bo_get_modifier_fn = dlsym(gbm, "gbm_bo_get_modifier");
+    gbm_bo_get_plane_count_fn = dlsym(gbm, "gbm_bo_get_plane_count");
+    gbm_bo_destroy_fn = dlsym(gbm, "gbm_bo_destroy");
+    eglCreateImage_fn = dlsym(egl, "eglCreateImage");
+    if (!gbm_bo_create_fn || !gbm_bo_get_fd_fn || !gbm_bo_get_stride_fn ||
+        !gbm_bo_get_offset_fn || !gbm_bo_get_modifier_fn ||
+        !gbm_bo_get_plane_count_fn || !gbm_bo_destroy_fn || !eglCreateImage_fn)
+        return EGL_NO_IMAGE;
+
+    struct gbm_bo *bo = gbm_bo_create_fn(device, width, height, GBM_FORMAT_ARGB8888,
+                                         GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+    if (!bo)
+        return EGL_NO_IMAGE;
+
+    EGLImage image = EGL_NO_IMAGE;
+    int dma_fd = -1;
+    uint64_t modifier = gbm_bo_get_modifier_fn(bo);
+    if (gbm_bo_get_plane_count_fn(bo) != 1 || modifier != DRM_FORMAT_MOD_LINEAR)
+        goto fail;
+    dma_fd = gbm_bo_get_fd_fn(bo);
+    if (dma_fd < 0)
+        goto fail;
+
+    const EGLAttrib attrs[] = {
+        EGL_WIDTH, width, EGL_HEIGHT, height,
+        EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ARGB8888,
+        EGL_DMA_BUF_PLANE0_FD_EXT, dma_fd,
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT, gbm_bo_get_offset_fn(bo, 0),
+        EGL_DMA_BUF_PLANE0_PITCH_EXT, gbm_bo_get_stride_fn(bo), EGL_NONE
+    };
+    image = eglCreateImage_fn(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attrs);
+    if (image == EGL_NO_IMAGE)
+        goto fail;
+
+    fprintf(stderr, "Panfrost DMA-BUF: AR24 %dx%d pitch=%u offset=%u modifier=LINEAR\n",
+            width, height, gbm_bo_get_stride_fn(bo), gbm_bo_get_offset_fn(bo, 0));
+    *out_fd = dma_fd;
+    gbm_bo_destroy_fn(bo);
+    return image;
+
+fail:
+    if (dma_fd >= 0)
+        close(dma_fd);
+    gbm_bo_destroy_fn(bo);
+    return EGL_NO_IMAGE;
+}
+
+static int verify_prime_import(const char *render_node, int dma_fd)
+{
+    int importer = open(render_node, O_RDWR | O_CLOEXEC);
+    if (importer < 0)
+        return fail("second DRM file");
+    struct drm_prime_handle prime = { .fd = dma_fd };
+    int ret = ioctl(importer, DRM_IOCTL_PRIME_FD_TO_HANDLE, &prime);
+    if (ret < 0)
+        perror("DRM_IOCTL_PRIME_FD_TO_HANDLE");
+    close(importer);
+    return ret < 0 ? fail("DMA-BUF reimport") : 0;
+}
+
 int main(int argc, char **argv)
 {
     static const char *vertex =
@@ -82,8 +164,11 @@ int main(int argc, char **argv)
     EGLConfig config;
     EGLint count;
 
-    if (argc != 2)
+    bool linear = argc == 3 && strcmp(argv[2], "--linear-dmabuf") == 0;
+    if (argc != 2 && !linear)
         return fail("render node argument");
+    int width = linear ? 1440 : 16;
+    int height = linear ? 2960 : 16;
     int fd = open(argv[1], O_RDWR | O_CLOEXEC);
     if (fd < 0) {
         perror("DRM render node");
@@ -151,7 +236,24 @@ int main(int argc, char **argv)
     GLuint texture, framebuffer;
     glGenTextures_fn(1, &texture);
     glBindTexture_fn(GL_TEXTURE_2D, texture);
-    glTexStorage2D_fn(GL_TEXTURE_2D, 1, GL_RGBA8, 16, 16);
+    int dma_fd = -1;
+    if (linear) {
+        API(eglDestroyImage);
+        LOAD(egl, eglDestroyImage);
+        PFNGLEGLIMAGETARGETTEXTURE2DOESPROC bind_image =
+            (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
+            eglGetProcAddress_fn("glEGLImageTargetTexture2DOES");
+        if (!bind_image)
+            return fail("EGL image binding");
+        EGLImage image = create_linear_image(gbm, egl, device, display, width, height,
+                                             &dma_fd);
+        if (image == EGL_NO_IMAGE)
+            return fail("linear GBM DMA-BUF and EGL image");
+        bind_image(GL_TEXTURE_2D, (GLeglImageOES)image);
+        eglDestroyImage_fn(display, image);
+    } else {
+        glTexStorage2D_fn(GL_TEXTURE_2D, 1, GL_RGBA8, width, height);
+    }
     glGenFramebuffers_fn(1, &framebuffer);
     glBindFramebuffer_fn(GL_FRAMEBUFFER, framebuffer);
     glFramebufferTexture2D_fn(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
@@ -177,14 +279,14 @@ int main(int argc, char **argv)
         return fail("shader link");
 
     glUseProgram_fn(program);
-    glViewport_fn(0, 0, 16, 16);
+    glViewport_fn(0, 0, width, height);
     glClearColor_fn(0, 0, 1, 1);
     glClear_fn(GL_COLOR_BUFFER_BIT);
     glDrawArrays_fn(GL_TRIANGLES, 0, 3);
     fprintf(stderr, "Panfrost probe: reading rendered pixels\n");
     GLubyte center[4] = {0}, corner[4] = {0};
-    glReadPixels_fn(8, 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, center);
-    glReadPixels_fn(0, 15, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, corner);
+    glReadPixels_fn(width / 2, height / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, center);
+    glReadPixels_fn(0, height - 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, corner);
     GLenum gl_error = glGetError_fn();
     if (gl_error != GL_NO_ERROR ||
         memcmp(center, (GLubyte[]){255, 0, 0, 255}, sizeof(center)) ||
@@ -193,6 +295,13 @@ int main(int argc, char **argv)
                 gl_error, center[0], center[1], center[2], center[3],
                 corner[0], corner[1], corner[2], corner[3]);
         return fail("GPU pixel verification");
+    }
+    if (linear) {
+        int ret = verify_prime_import(argv[1], dma_fd);
+        close(dma_fd);
+        if (ret)
+            return ret;
+        puts("Panfrost linear DMA-BUF render, readback and PRIME reimport verified");
     }
     printf("Panfrost GPU draw and readback verified: %s\n", renderer);
     return 0;

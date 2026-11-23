@@ -3102,3 +3102,31 @@ DTB. No rail was switched during this test.
   Mali-G71. The check renders to an off-screen buffer. DECON scanout,
   stock GNOME Wayland, screen rotation, suspend/resume, audio and
   Wi-Fi still require their own 6.18 tests.
+
+### R45–R48 persistent Ubuntu and display buffer qualification
+
+- R45 reached `multi-user.target` from the installed ext4 root in
+  7.069 seconds (1.643 kernel, 5.426 userspace). No USB command was
+  needed to start UFS. The Mac USB console accepted an Ubuntu login
+  and remained available with the kernel running. R45 rebooted into
+  the preserved TWRP on request from that console.
+- R46 rendered the test shader on Mali-G71 into a native-size 1440×2960
+  linear ARGB8888 buffer at pitch 5760. Expected foreground and
+  background pixels were read back and the exported DMA-BUF was
+  imported through an independent Panfrost DRM file. The scanout
+  target remained the firmware framebuffer during this check.
+- R46's display snapshot showed the 1440×2960 frame on DECON0 window 5
+  with hardware channel selector 5. The Samsung channel routing table
+  maps selector 5 to G0. The revised snapshot uses that mapping and
+  records both the latched and programmed DMA addresses.
+- R48 confirmed the G0 IDMA register bank at 0x128b1000. Its latched
+  and programmed base addresses both matched the inherited framebuffer
+  at 0xcc000000. The source and active image were both 1440×2960.
+  The linear DMA-BUF test passed again. The installed Ubuntu reached
+  `multi-user.target` in 8.287 seconds and Mac USB console login worked.
+  The handset was left booted on 6.18 with no timed recovery.
+- R48 still used simpledrm for panel output. The CPU feature variation
+  messages and the missing native Mali regulator remained. There was no
+  ALSA card, sleep interface or WLAN PHY. Native DECON PRIME scanout,
+  GNOME Wayland login and rotation, suspend/resume, audio and Wi-Fi
+  remain open for 6.18.

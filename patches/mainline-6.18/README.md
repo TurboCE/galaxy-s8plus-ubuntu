@@ -132,6 +132,14 @@ experimental driver after the host acknowledges receipt of the early
 USB log. Add `g955n.ufs_read_diag=1` to time an 8 MiB direct read from
 USERDATA without changing the contents.
 
+For an interactive bring-up boot, replace the acknowledged module trial
+with `g955n.ufs_hs_boot=1`. This loads the same module without waiting
+for the host. Use `g955n.ufs_boot=1 systemd.unit=multi-user.target
+g955n.usb_login=1` and omit `g955n.ubuntu_return=1` to keep Ubuntu
+running with its authenticated USB serial login. Keep the recovery on
+initramfs failure enabled with `g955n.ufs_return=1`. The serial login
+does not require the early diagnostic command reader.
+
 For the G3D power snapshot, also apply proposal 0063 to uniLoader and
 reserve five cells under `/chosen` in the embedded DTB. Use
 `samsung,g955n-g3d-power-snapshot` with each cell initialized to
@@ -165,6 +173,22 @@ builds without runtime PM. R44 reported
 installed Ubuntu's Mesa. The display path requires a separate DRM/KMS
 test of a DMA-BUF imported into the primary DECON plane, including
 fence handling and a completed page flip.
+
+Add `g955n.panfrost_linear_dmabuf=1` with `g955n.panfrost_diag=1`
+to draw into a single-plane, linear 1440×2960 ARGB8888 GBM buffer.
+The probe exports it as a DMA-BUF, binds that storage to an EGL image
+and uses a separate DRM file to check PRIME reimport. That file opens
+the Mali render node, so the test isolates the GPU side of the handoff.
+
+Proposal 0072 adds a read-only view of the firmware's active DECON0
+route to the same uniLoader build. Add `samsung,g955n-decon-snapshot`
+under `/chosen` with fifteen cells initialized to `0xffffffff`.
+Read the property as big-endian cells. In order, they record the DPU0
+power state, DECON global control and trigger, the window and channel
+masks, the live window and DMA channel, the window start and end, and
+the DMA input format, source size, source offset, image size, latched
+base address and programmed base address. A cell of `0xffffffff` indicates unavailable data. The snapshot
+does not take control of the framebuffer.
 
 ## Reading the warm boot trace
 

@@ -1896,3 +1896,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   drop-in during the Ubuntu trial.
 - Enable Panfrost MMU interrupts at probe so shader jobs can recover
   from growable tiler heap faults before any runtime resume.
+
+## 2026-11-23 — Persistent Linux 6.18 boot and display DMA-BUF diagnostics
+
+- Add an opt-in high-speed UFS boot with no USB acknowledgement and an
+  authenticated USB serial login independent of the recovery timer.
+- Render to a panel-sized linear GBM DMA-BUF and verify export and PRIME
+  reimport during the 6.18 GPU probe.
+- Record the inherited DECON0 window and IDMA route from uniLoader.
