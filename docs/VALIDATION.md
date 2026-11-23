@@ -3399,3 +3399,19 @@ MCLK2 input and ABOX PCM path remain unverified and ALSA lists no sound
 card. Stock boot evidence reported Android board revision 10. The
 BCM4773 wake request still timed out with the revision 10 configuration,
 so IIO measurements and GNSS from this hub were not available.
+
+### R68 desktop measurements
+
+R68 repeated the strict official archive update and real APT upgrade
+over the Wi-Fi default route. There were no pending upgrades, and
+`dpkg --audit` produced no output. GDM and NetworkManager remained
+active. The GNOME Xorg session listed the stmfts input device.
+
+In the same session, a 720×720 `glxgears` workload with vblank limiting
+disabled measured 724 frames/s and 55% client CPU with Panfrost. Forcing
+llvmpipe for the test client yielded 115 frames/s and 255% client CPU.
+These figures measure the test client, without desktop drag latency
+or physical refresh rate. The kernel logged `DATA_INVALID_FAULT` and
+`TILE_RANGE_FAULT` after starting the user GNOME session. The session
+remained reachable and the later rendering test completed. The
+faulting client and trigger have not been isolated.

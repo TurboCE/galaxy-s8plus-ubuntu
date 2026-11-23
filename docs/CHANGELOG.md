@@ -1977,3 +1977,5 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Enable and read back the S2MPS17 RTC output control used by the
   Samsung kernel. Add a BCM4773 power and wake diagnostic for the
   board-specific SPI pins and verified revision 10 power enable.
+
+- Record R68 desktop rendering measurements and post-login GPU faults.
