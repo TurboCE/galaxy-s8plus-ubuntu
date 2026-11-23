@@ -3562,3 +3562,39 @@ R78 CMAC allocation error. BlueZ started an eight-second
 discovery session and reported eight nearby adapters or devices.
 No pairing or profile connection was attempted. Wi-Fi reconnected
 and GDM used the active 1440×2960 DECON CRTC on that boot.
+
+### R80 codec clock and GTK 4 rendering
+
+The R80 handset reported S2MPS17 RTCBUF status `0x45`, and the
+CS47L93 Madera driver identified silicon revision 1 without the
+previous missing-MCLK2 warning. The new clock provider identifies the
+enabled output as 32.768 kHz. No physical frequency measurement or
+ALSA PCM verification was performed. The device still lists no ALSA
+card, so ABOX playback and capture remain outstanding.
+
+System Monitor and Files showed faint or missing text with GTK 4.14's
+default NGL renderer on the Ubuntu Mesa 25.2.8 Panfrost stack. An
+independent GTK 4 fixture reproduced the result with opaque CSS
+colors and explicit black text. Its title sample contained zero dark
+text pixels with the default backend and about 520 with either
+llvmpipe or Cairo. The pane rendered correctly when the same fixture
+used the legacy GL renderer on Panfrost. Removing the global Mesa
+driver-name override, forcing GLES, and testing Panfrost sync,
+linear textures, nofp16 and nocrc did not fix the default renderer.
+The kernel reported Panfrost job faults during the diagnostic
+interval. The specific shader or blend state responsible is not
+identified.
+
+System Monitor, Settings and Files all drew readable windows with
+legacy GL and held the Panfrost render node open. The manually
+qualified session policy is `GSK_RENDERER=gl` under the desktop user's
+`environment.d`. It also updates the current D-Bus and systemd user
+activation environment. A process that already inherited the old
+environment needs to be reopened from the new session environment.
+The System Monitor-only Cairo launcher was removed. The graph interval
+read back as 100 ms.
+
+The previous Terminal font name, Ubuntu Sans Mono, resolved to
+proportional DejaVu Sans on the handset. The default Terminal profile
+now uses installed DejaVu Sans Mono 10 and opens at 64 columns.
+A real new Terminal window showed the narrower geometry and font.

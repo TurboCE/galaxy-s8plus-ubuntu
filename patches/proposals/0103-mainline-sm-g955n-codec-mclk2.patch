@@ -1,0 +1,108 @@
+Subject: [PATCH] clk: supply SM-G955N CS47L93 MCLK2 from S2MPS17 RTCBUF
+
+Register the PMIC's always-on 32.768 kHz output only after the
+ACPM transaction confirms the enable bit. Describe the codec
+connection in the SM-G955N device tree so Madera can acquire it.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -158,9 +158,10 @@
+ 		samsung,pmu = <&pmu_system_controller>;
+ 	};
+ 
+-	acpm-layout@16500000 {
++	acpm_layout: acpm-layout@16500000 {
+ 		compatible = "samsung,exynos8895-acpm-layout";
+ 		reg = <0x16500000 0xb400>, <0x16440000 0x1000>;
++		#clock-cells = <0>;
+ 
+ 		regulators {
+ 			g955n_codec_1v8: ldo32 {
+@@ -451,6 +452,8 @@
+ 		spi-max-frequency = <25000000>;
+ 		interrupts-extended = <&gpa2 6 IRQ_TYPE_LEVEL_LOW>;
+ 		reset-gpios = <&gpe7 0 GPIO_ACTIVE_LOW>;
++		clocks = <&acpm_layout>;
++		clock-names = "mclk2";
+ 
+ 		AVDD-supply = <&g955n_codec_1v8>;
+ 		DBVDD1-supply = <&g955n_codec_1v8>;
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ #include <linux/bitfield.h>
++#include <linux/clk-provider.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+ #include <linux/module.h>
+@@ -213,9 +214,19 @@
+ 			return PTR_ERR(rdev);
+ 	}
+ 
++	return 0;
++}
++
++static int exynos8895_enable_rtcbuf(struct device *dev,
++				   struct exynos8895_acpm_layout *layout)
++{
++	struct clk_hw *hw;
++	u8 control;
++	int ret;
++
+ 	/*
+-	 * Match the board's Samsung S2MPS17 setup. Its regulator driver
+-	 * enables RTCBUF bit 2 on the PMIC page after registering the LDOs.
++	 * Samsung leaves this shared 32.768 kHz output on. Publish its
++	 * fixed rate after enabling it and confirming the PMIC state.
+ 	 */
+ 	mutex_lock(&layout->lock);
+ 	ret = exynos8895_acpm_pmic_transfer(layout, 1, S2MPS17_RTCBUF,
+@@ -223,9 +234,21 @@
+ 					  FIELD_PREP(ACPM_PMIC_VALUE, S2MPS17_RTCBUF_OUT) |
+ 					  FIELD_PREP(ACPM_PMIC_MASK, S2MPS17_RTCBUF_OUT),
+ 					  NULL);
++	if (!ret)
++		ret = exynos8895_acpm_pmic_read(layout, 1, S2MPS17_RTCBUF, &control);
+ 	mutex_unlock(&layout->lock);
+-
+-	return ret;
++	if (ret)
++		return ret;
++	if (!(control & S2MPS17_RTCBUF_OUT))
++		return -EIO;
++	if (!of_property_present(dev->of_node, "#clock-cells"))
++		return 0;
++
++	hw = devm_clk_hw_register_fixed_rate(dev, "s2mps17-rtcbuf", NULL, 0, 32768);
++	if (IS_ERR(hw))
++		return PTR_ERR(hw);
++
++	return devm_of_clk_add_hw_provider(dev, of_clk_hw_simple_get, hw);
+ }
+ 
+ static ssize_t peripheral_rails_show(struct device *dev,
+@@ -343,6 +366,9 @@
+ 		ret = exynos8895_register_ldos(dev, layout);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret, "S2MPS17 rail registration failed\n");
++		ret = exynos8895_enable_rtcbuf(dev, layout);
++		if (ret)
++			return dev_err_probe(dev, ret, "S2MPS17 RTCBUF setup failed\n");
+ 	}
+ 
+ 	return devm_device_add_group(dev, &exynos8895_acpm_layout_group);
+diff --git a/drivers/soc/samsung/Kconfig b/drivers/soc/samsung/Kconfig
+--- a/drivers/soc/samsung/Kconfig
++++ b/drivers/soc/samsung/Kconfig
+@@ -84,7 +84,7 @@
+ 
+ config EXYNOS8895_ACPM_LAYOUT
+ 	tristate "Exynos8895 ACPM shared-memory layout probe"
+-	depends on ARCH_EXYNOS && OF && REGULATOR
++	depends on ARCH_EXYNOS && OF && REGULATOR && COMMON_CLK
+ 	help
+ 	  Validate the SM-G955N PMIC IPC channel and expose the three
+ 	  board regulators for the audio codec and sensor hub.

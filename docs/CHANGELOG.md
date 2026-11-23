@@ -2016,3 +2016,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   active domain. Keep ABOX and BCM4773 probes opt-in.
 - Report Samsung external-interrupt mux functions as GPIO inputs so
   gpiolib can claim the touchscreen interrupt.
+
+### 2026-11-23 — 6.18 R80 codec clock and GNOME application rendering
+
+- Connect CS47L93 MCLK2 to the S2MPS17 RTCBUF clock after verifying
+  the PMIC enable bit through ACPM.
+- Select the GTK 4.14 legacy OpenGL renderer in the desktop user's
+  shared session environment. Keep ordinary package launchers.
+- Select DejaVu Sans Mono 10 and 64 columns in the default GNOME
+  Terminal profile. Keep the System Monitor graph refresh at 100 ms.
