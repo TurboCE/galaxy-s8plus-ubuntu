@@ -3609,7 +3609,6 @@ had visible text and controls and held the Panfrost render node.
 Two framebuffer captures showed changes inside the System Monitor
 graph area, and its configured sampling interval was still 100 ms.
 The new Terminal's PTY measured 24 rows by 64 columns and the active
-profile still selected DejaVu Sans Mono 10. Two unrelated-to-app
-attribution checks in the same boot were logged as
-`DATA_INVALID_FAULT` from GNOME Shell, so this check does not
-qualify the compositor as fault-free.
+profile still selected DejaVu Sans Mono 10. The kernel also logged
+two Panfrost `DATA_INVALID_FAULT` events attributed to GNOME Shell
+during the same boot.
