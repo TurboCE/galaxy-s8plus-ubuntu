@@ -1,0 +1,63 @@
+Subject: [PATCH] soc: samsung: enable the SM-G955N S2MPS17 RTC buffer
+
+Use the PMIC page and bit mask from the Samsung regulator driver.
+Read back the control byte alongside the peripheral rail states.
+
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -9,6 +9,9 @@
+ #include <linux/platform_device.h>
+ #include <linux/regulator/driver.h>
+ #include <linux/slab.h>
++
++#define S2MPS17_RTCBUF		0x11
++#define S2MPS17_RTCBUF_OUT	BIT(2)
+ 
+ #define ACPM_INITDATA_OFFSET	0x2850
+ #define ACPM_PM_CHANNEL_INDEX	2
+@@ -210,7 +213,19 @@
+ 			return PTR_ERR(rdev);
+ 	}
+ 
+-	return 0;
++	/*
++	 * Match the board's Samsung S2MPS17 setup. Its regulator driver
++	 * enables RTCBUF bit 2 on the PMIC page after registering the LDOs.
++	 */
++	mutex_lock(&layout->lock);
++	ret = exynos8895_acpm_pmic_transfer(layout, 1, S2MPS17_RTCBUF,
++					  ACPM_PMIC_UPDATE |
++					  FIELD_PREP(ACPM_PMIC_VALUE, S2MPS17_RTCBUF_OUT) |
++					  FIELD_PREP(ACPM_PMIC_MASK, S2MPS17_RTCBUF_OUT),
++					  NULL);
++	mutex_unlock(&layout->lock);
++
++	return ret;
+ }
+ 
+ static ssize_t peripheral_rails_show(struct device *dev,
+@@ -218,7 +233,7 @@
+ {
+ 	struct exynos8895_acpm_layout *layout = dev_get_drvdata(dev);
+ 	static const u8 ldo_registers[] = { 0x5d, 0x5e, 0x63 };
+-	u8 id, rails[ARRAY_SIZE(ldo_registers)];
++	u8 id, rtcbuf, rails[ARRAY_SIZE(ldo_registers)];
+ 	int i, ret;
+ 
+ 	mutex_lock(&layout->lock);
+@@ -232,8 +247,12 @@
+ 			goto unlock;
+ 	}
+ 
+-	ret = sysfs_emit(buf, "PMIC_ID=0x%02x LDO32=0x%02x LDO33=0x%02x LDO38=0x%02x\n",
+-			 id, rails[0], rails[1], rails[2]);
++	ret = exynos8895_acpm_pmic_read(layout, 1, S2MPS17_RTCBUF, &rtcbuf);
++	if (ret)
++		goto unlock;
++
++	ret = sysfs_emit(buf, "PMIC_ID=0x%02x LDO32=0x%02x LDO33=0x%02x LDO38=0x%02x RTCBUF=0x%02x\n",
++			 id, rails[0], rails[1], rails[2], rtcbuf);
+ unlock:
+ 	mutex_unlock(&layout->lock);
+ 	return ret;

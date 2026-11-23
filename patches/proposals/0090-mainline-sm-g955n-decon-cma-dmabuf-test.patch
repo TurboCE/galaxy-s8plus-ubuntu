@@ -1,0 +1,262 @@
+Subject: [PATCH] drm: test inherited DECON with a CMA DMA-BUF
+
+Map a contiguous shared buffer directly for the verified G0 route.
+Restore the firmware address before releasing the DMA mapping.
+
+diff --git a/drivers/gpu/drm/tiny/g955n-decon-handoff.c b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+--- a/drivers/gpu/drm/tiny/g955n-decon-handoff.c
++++ b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+@@ -1,15 +1,19 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ #include <linux/bitfield.h>
+ #include <linux/delay.h>
++#include <linux/dma-buf.h>
+ #include <linux/dma-mapping.h>
++#include <linux/dma-resv.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/of_reserved_mem.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
++#include <linux/scatterlist.h>
+ 
+ #define DECON_GLOBAL_CONTROL		0x0000
+ #define DECON_RUNNING			BIT(4)
+@@ -37,6 +41,13 @@
+ #define G0_FORMAT_MASK			GENMASK(15, 11)
+ #define G0_FIRMWARE_FORMAT		0
+ 
++struct g955n_decon_handoff {
++	void __iomem *decon;
++	void __iomem *g0;
++	struct regmap *pmu;
++	struct mutex lock;
++};
++
+ static int g955n_latch_base(void __iomem *decon, void __iomem *g0, u32 addr)
+ {
+ 	u32 active;
+@@ -53,34 +64,18 @@
+ 				  !(active & DECON_WINDOW_5), 250, 250000);
+ }
+ 
+-static int g955n_decon_handoff_probe(struct platform_device *pdev)
+-{
+-	struct device *dev = &pdev->dev;
+-	void __iomem *decon, *g0;
+-	struct regmap *pmu;
+-	dma_addr_t dma;
+-	u32 *pixels;
+-	u32 power, trigger, geometry, i;
+-	int ret, restore;
+-
+-	if (!of_machine_is_compatible("samsung,dream2lteks"))
+-		return -ENODEV;
+-
+-	pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
+-	if (IS_ERR(pmu))
+-		return PTR_ERR(pmu);
+-	ret = regmap_read(pmu, DISP_POWER_STATUS, &power);
++static int g955n_check_firmware_output(struct device *dev,
++				       struct g955n_decon_handoff *handoff)
++{
++	void __iomem *decon = handoff->decon, *g0 = handoff->g0;
++	u32 power, trigger, geometry;
++	int ret;
++
++	ret = regmap_read(handoff->pmu, DISP_POWER_STATUS, &power);
+ 	if (ret)
+ 		return ret;
+ 	if ((power & 0xf) != DISP_POWER_ON)
+ 		return dev_err_probe(dev, -ENODEV, "inherited display domain is off\n");
+-
+-	decon = devm_platform_ioremap_resource(pdev, 0);
+-	if (IS_ERR(decon))
+-		return PTR_ERR(decon);
+-	g0 = devm_platform_ioremap_resource(pdev, 1);
+-	if (IS_ERR(g0))
+-		return PTR_ERR(g0);
+ 
+ 	trigger = readl(decon + DECON_TRIGGER);
+ 	geometry = readl(g0 + G0_SOURCE_SIZE_SHADOW);
+@@ -96,6 +91,131 @@
+ 	    readl(g0 + G0_BASE_SHADOW) != FIRMWARE_FB)
+ 		return dev_err_probe(dev, -EINVAL, "unexpected inherited DECON0 window or G0 buffer\n");
+ 
++	return 0;
++}
++
++/*
++ * The writer owns the exported buffer and cannot modify it while this
++ * synchronous test is scanning it out. Only the built-in CMA heap is
++ * accepted, so there is no external exporter or dynamic attachment.
++ */
++static ssize_t scanout_test_store(struct device *dev,
++				  struct device_attribute *attr,
++				  const char *buf, size_t count)
++{
++	struct g955n_decon_handoff *handoff = dev_get_drvdata(dev);
++	struct dma_buf_attachment *attach;
++	struct sg_table *sgt;
++	struct dma_buf *dmabuf;
++	dma_addr_t addr;
++	long wait;
++	int fd, ret, restore;
++
++	ret = kstrtoint(buf, 10, &fd);
++	if (ret)
++		return ret;
++	dmabuf = dma_buf_get(fd);
++	if (IS_ERR(dmabuf))
++		return PTR_ERR(dmabuf);
++	if (strcmp(dmabuf->exp_name, "default_cma_region") ||
++	    dmabuf->size != PAGE_ALIGN(PANEL_BYTES)) {
++		ret = -EINVAL;
++		goto put_buffer;
++	}
++
++	attach = dma_buf_attach(dmabuf, dev);
++	if (IS_ERR(attach)) {
++		ret = PTR_ERR(attach);
++		goto put_buffer;
++	}
++	sgt = dma_buf_map_attachment(attach, DMA_TO_DEVICE);
++	if (IS_ERR(sgt)) {
++		ret = PTR_ERR(sgt);
++		goto detach_buffer;
++	}
++
++	addr = sg_dma_address(sgt->sgl);
++	if (sgt->nents != 1 || sg_dma_len(sgt->sgl) < PANEL_BYTES ||
++	    !addr || !IS_ALIGNED(addr, 16) || addr > U32_MAX - PANEL_BYTES ||
++	    addr == FIRMWARE_FB) {
++		ret = -EINVAL;
++		goto unmap_buffer;
++	}
++
++	mutex_lock(&handoff->lock);
++	ret = g955n_check_firmware_output(dev, handoff);
++	if (ret)
++		goto unlock;
++	wait = dma_resv_wait_timeout(dmabuf->resv, DMA_RESV_USAGE_WRITE,
++				    true, msecs_to_jiffies(1000));
++	if (wait <= 0) {
++		ret = wait ? wait : -ETIMEDOUT;
++		goto unlock;
++	}
++
++	ret = g955n_latch_base(handoff->decon, handoff->g0, lower_32_bits(addr));
++	if (!ret)
++		msleep(500);
++	restore = g955n_latch_base(handoff->decon, handoff->g0, FIRMWARE_FB);
++	if (restore) {
++		/* The display may still access this mapping. Keep it until reboot. */
++		__module_get(THIS_MODULE);
++		mutex_unlock(&handoff->lock);
++		return dev_err_probe(dev, restore, "DMA-BUF restoration latch failed\n");
++	}
++	/* Let the final read of the old frame finish before unmapping. */
++	msleep(34);
++	if (!ret)
++		dev_info(dev, "direct CMA DMA-BUF scanout and firmware buffer restore verified\n");
++unlock:
++	mutex_unlock(&handoff->lock);
++unmap_buffer:
++	dma_buf_unmap_attachment(attach, sgt, DMA_TO_DEVICE);
++detach_buffer:
++	dma_buf_detach(dmabuf, attach);
++put_buffer:
++	dma_buf_put(dmabuf);
++	return ret ? ret : count;
++}
++static DEVICE_ATTR_WO(scanout_test);
++
++static int g955n_decon_handoff_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct g955n_decon_handoff *handoff;
++	void __iomem *decon, *g0;
++	struct regmap *pmu;
++	dma_addr_t dma;
++	u32 *pixels;
++	u32 i;
++	int ret, restore;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks"))
++		return -ENODEV;
++
++	pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
++	if (IS_ERR(pmu))
++		return PTR_ERR(pmu);
++	decon = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(decon))
++		return PTR_ERR(decon);
++	g0 = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(g0))
++		return PTR_ERR(g0);
++
++	handoff = devm_kzalloc(dev, sizeof(*handoff), GFP_KERNEL);
++	if (!handoff)
++		return -ENOMEM;
++	handoff->decon = decon;
++	handoff->g0 = g0;
++	handoff->pmu = pmu;
++	mutex_init(&handoff->lock);
++	platform_set_drvdata(pdev, handoff);
++
++	ret = g955n_check_firmware_output(dev, handoff);
++	if (ret)
++		return ret;
++
+ 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+ 	if (ret)
+ 		return ret;
+@@ -123,17 +243,26 @@
+ 	restore = g955n_latch_base(decon, g0, FIRMWARE_FB);
+ 
+ 	/*
+-	 * Keep the one-shot allocation pinned until reboot. If software
+-	 * loses the latch, DECON may still be reading it.
++	 * Keep the allocation pinned if DECON may still be reading it.
+ 	 */
+-	if (restore)
++	if (restore) {
++		__module_get(THIS_MODULE);
+ 		dev_err(dev, "firmware buffer restoration could not be confirmed: %d\n", restore);
+-	else if (ret)
++		return 0;
++	} else if (ret)
+ 		dev_err(dev, "DMA latch did not complete: %d; firmware buffer restored\n", ret);
+ 	else
+ 		dev_info(dev, "direct G0 DMA latch and firmware buffer restore verified\n");
+ 
+-	return 0;
++	msleep(34);
++	dma_free_wc(dev, PANEL_BYTES, pixels, dma);
++	of_reserved_mem_device_release(dev);
++	return device_create_file(dev, &dev_attr_scanout_test);
++}
++
++static void g955n_decon_handoff_remove(struct platform_device *pdev)
++{
++	device_remove_file(&pdev->dev, &dev_attr_scanout_test);
+ }
+ 
+ static const struct of_device_id g955n_decon_handoff_of_match[] = {
+@@ -144,6 +273,7 @@
+ 
+ static struct platform_driver g955n_decon_handoff_driver = {
+ 	.probe = g955n_decon_handoff_probe,
++	.remove = g955n_decon_handoff_remove,
+ 	.driver = {
+ 		.name = "g955n-decon-handoff",
+ 		.of_match_table = g955n_decon_handoff_of_match,
+@@ -153,3 +283,4 @@
+ module_platform_driver(g955n_decon_handoff_driver);
+ MODULE_DESCRIPTION("SM-G955N DECON inherited timing direct DMA test");
+ MODULE_LICENSE("GPL");
++MODULE_IMPORT_NS("DMA_BUF");

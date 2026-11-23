@@ -196,23 +196,67 @@ EOF
         /run/systemd/system/multi-user.target.wants/g955n-transport-evidence.service
 }
 
-# Keep the framebuffer session scoped to GDM on the 6.18 boot.
+# Keep the board's Xorg session configuration scoped to GDM.
 prepare_ubuntu_desktop() {
     local desktop=/run/g955n-mainline-desktop
     local units=/run/systemd/system/gdm.service.d
+    local card=
+    local node
 
     [ -c /dev/fb0 ] || {
         log 'Ubuntu desktop fallback unavailable: no framebuffer device'
         return 1
     }
     "$BB" mkdir -p "$desktop" "$units" || return 1
+    case " $("$BB" cat /proc/cmdline) " in
+        *" g955n.desktop_accel=1 "*)
+            if [ -r /newroot/usr/lib/aarch64-linux-gnu/dri/exynos_dri.so ]; then
+                for node in /sys/bus/platform/devices/13900000.gpu/drm/renderD*; do
+                    [ -c "/dev/dri/${node##*/}" ] || continue
+                    for node in /sys/bus/platform/devices/cc000000.framebuffer/drm/card[0-9]*; do
+                        [ -c "/dev/dri/${node##*/}" ] || continue
+                        card="/dev/dri/${node##*/}"
+                        break
+                    done
+                    break
+                done
+            fi
+            if [ -z "$card" ]; then
+                log 'Panfrost Xorg prerequisites unavailable, using the framebuffer fallback'
+            fi
+            ;;
+    esac
     "$BB" cat > "$desktop/gdm.conf" <<'EOF' || return 1
 [daemon]
 WaylandEnable=false
 AutomaticLoginEnable=false
 DefaultSession=ubuntu-xorg.desktop
 EOF
-    "$BB" cat > "$desktop/xorg.conf" <<'EOF' || return 1
+    if [ -n "$card" ]; then
+        # Match the canonical path of the DRM master fd supplied by logind.
+        "$BB" cat > "$desktop/xorg.conf" <<EOF || return 1
+Section "ServerFlags"
+    Option "AutoAddGPU" "false"
+    Option "AutoBindGPU" "false"
+EndSection
+Section "Device"
+    Identifier "SM-G955N KMS"
+    Driver "modesetting"
+    Option "kmsdev" "$card"
+    Option "AccelMethod" "glamor"
+EndSection
+Section "Screen"
+    Identifier "SM-G955N screen"
+    Device "SM-G955N KMS"
+EndSection
+EOF
+        # Ubuntu Mesa's exynos kmsro entry pairs simpledrm with Panfrost.
+        "$BB" cat > "$units/51-g955n-panfrost.conf" <<'EOF' || return 1
+[Service]
+Environment=MESA_LOADER_DRIVER_OVERRIDE=exynos
+EOF
+    else
+        "$BB" cat > "$desktop/xorg.conf" <<'EOF' || return 1
 Section "Device"
     Identifier "SM-G955N framebuffer"
     Driver "fbdev"
@@ -224,6 +268,7 @@ Section "Screen"
     Device "SM-G955N framebuffer"
 EndSection
 EOF
+    fi
     "$BB" cat > "$units/50-g955n-mainline-desktop.conf" <<'EOF' || return 1
 [Service]
 BindReadOnlyPaths=/run/g955n-mainline-desktop/gdm.conf:/etc/gdm3/custom.conf

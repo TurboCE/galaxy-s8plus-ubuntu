@@ -3,6 +3,7 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <linux/dma-heap.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -56,10 +57,41 @@ static int probe_drm(int fd)
     return 0;
 }
 
+static int allocate_scanout_buffer(unsigned int pitch, unsigned int height)
+{
+    int heap = open("/dev/dma_heap/default_cma_region", O_RDWR | O_CLOEXEC);
+    if (heap < 0)
+        return -1;
+    struct dma_heap_allocation_data alloc = {
+        .len = (uint64_t)pitch * height,
+        .fd_flags = O_RDWR | O_CLOEXEC,
+    };
+    int ret = ioctl(heap, DMA_HEAP_IOCTL_ALLOC, &alloc);
+    close(heap);
+    return ret < 0 ? -1 : (int)alloc.fd;
+}
+
+static int present_decon_buffer(int fd)
+{
+    int control = open("/sys/bus/platform/devices/12860000.decon-handoff/scanout_test",
+                       O_WRONLY | O_CLOEXEC);
+    if (control < 0) {
+        perror("DECON scanout test control");
+        return 1;
+    }
+    char arg[32];
+    int len = snprintf(arg, sizeof(arg), "%d\n", fd);
+    ssize_t written = write(control, arg, len);
+    if (written != len)
+        perror("DECON DMA-BUF scanout");
+    close(control);
+    return written != len;
+}
+
 /* Exercise the kind of linear image a separate KMS device can import. */
 static EGLImage create_linear_image(void *gbm, void *egl, struct gbm_device *device,
                                     EGLDisplay display, int width, int height,
-                                    int *out_fd)
+                                    bool cma_scanout, int *out_fd)
 {
     API(gbm_bo_create);
     API(gbm_bo_get_fd);
@@ -84,17 +116,25 @@ static EGLImage create_linear_image(void *gbm, void *egl, struct gbm_device *dev
         !gbm_bo_get_plane_count_fn || !gbm_bo_destroy_fn || !eglCreateImage_fn)
         return EGL_NO_IMAGE;
 
-    struct gbm_bo *bo = gbm_bo_create_fn(device, width, height, GBM_FORMAT_ARGB8888,
-                                         GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
-    if (!bo)
-        return EGL_NO_IMAGE;
-
+    struct gbm_bo *bo = NULL;
     EGLImage image = EGL_NO_IMAGE;
+    unsigned int pitch = width * 4;
+    unsigned int offset = 0;
     int dma_fd = -1;
-    uint64_t modifier = gbm_bo_get_modifier_fn(bo);
-    if (gbm_bo_get_plane_count_fn(bo) != 1 || modifier != DRM_FORMAT_MOD_LINEAR)
-        goto fail;
-    dma_fd = gbm_bo_get_fd_fn(bo);
+    if (cma_scanout) {
+        dma_fd = allocate_scanout_buffer(pitch, height);
+    } else {
+        bo = gbm_bo_create_fn(device, width, height, GBM_FORMAT_ARGB8888,
+                             GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+        if (!bo)
+            return EGL_NO_IMAGE;
+        if (gbm_bo_get_plane_count_fn(bo) != 1 ||
+            gbm_bo_get_modifier_fn(bo) != DRM_FORMAT_MOD_LINEAR)
+            goto fail;
+        dma_fd = gbm_bo_get_fd_fn(bo);
+        pitch = gbm_bo_get_stride_fn(bo);
+        offset = gbm_bo_get_offset_fn(bo, 0);
+    }
     if (dma_fd < 0)
         goto fail;
 
@@ -102,23 +142,25 @@ static EGLImage create_linear_image(void *gbm, void *egl, struct gbm_device *dev
         EGL_WIDTH, width, EGL_HEIGHT, height,
         EGL_LINUX_DRM_FOURCC_EXT, DRM_FORMAT_ARGB8888,
         EGL_DMA_BUF_PLANE0_FD_EXT, dma_fd,
-        EGL_DMA_BUF_PLANE0_OFFSET_EXT, gbm_bo_get_offset_fn(bo, 0),
-        EGL_DMA_BUF_PLANE0_PITCH_EXT, gbm_bo_get_stride_fn(bo), EGL_NONE
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT, offset,
+        EGL_DMA_BUF_PLANE0_PITCH_EXT, pitch, EGL_NONE
     };
     image = eglCreateImage_fn(display, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attrs);
     if (image == EGL_NO_IMAGE)
         goto fail;
 
     fprintf(stderr, "Panfrost DMA-BUF: AR24 %dx%d pitch=%u offset=%u modifier=LINEAR\n",
-            width, height, gbm_bo_get_stride_fn(bo), gbm_bo_get_offset_fn(bo, 0));
+            width, height, pitch, offset);
     *out_fd = dma_fd;
-    gbm_bo_destroy_fn(bo);
+    if (bo)
+        gbm_bo_destroy_fn(bo);
     return image;
 
 fail:
     if (dma_fd >= 0)
         close(dma_fd);
-    gbm_bo_destroy_fn(bo);
+    if (bo)
+        gbm_bo_destroy_fn(bo);
     return EGL_NO_IMAGE;
 }
 
@@ -164,7 +206,8 @@ int main(int argc, char **argv)
     EGLConfig config;
     EGLint count;
 
-    bool linear = argc == 3 && strcmp(argv[2], "--linear-dmabuf") == 0;
+    bool scanout = argc == 3 && strcmp(argv[2], "--decon-dmabuf") == 0;
+    bool linear = scanout || (argc == 3 && strcmp(argv[2], "--linear-dmabuf") == 0);
     if (argc != 2 && !linear)
         return fail("render node argument");
     int width = linear ? 1440 : 16;
@@ -229,6 +272,7 @@ int main(int argc, char **argv)
     GL(glDrawArrays);
     GL(glReadPixels);
     GL(glGetError);
+    GL(glFinish);
 
     const char *renderer = (const char *)glGetString_fn(GL_RENDERER);
     if (!renderer || !strstr(renderer, "Mali-G71"))
@@ -246,7 +290,7 @@ int main(int argc, char **argv)
         if (!bind_image)
             return fail("EGL image binding");
         EGLImage image = create_linear_image(gbm, egl, device, display, width, height,
-                                             &dma_fd);
+                                             scanout, &dma_fd);
         if (image == EGL_NO_IMAGE)
             return fail("linear GBM DMA-BUF and EGL image");
         bind_image(GL_TEXTURE_2D, (GLeglImageOES)image);
@@ -283,6 +327,15 @@ int main(int argc, char **argv)
     glClearColor_fn(0, 0, 1, 1);
     glClear_fn(GL_COLOR_BUFFER_BIT);
     glDrawArrays_fn(GL_TRIANGLES, 0, 3);
+    if (scanout) {
+        glFinish_fn();
+        int ret = glGetError_fn() == GL_NO_ERROR ? present_decon_buffer(dma_fd) : 1;
+        close(dma_fd);
+        if (!ret)
+            printf("Panfrost DMA-BUF drawn and presented on DECON: %s\n", renderer);
+        return ret;
+    }
+
     fprintf(stderr, "Panfrost probe: reading rendered pixels\n");
     GLubyte center[4] = {0}, corner[4] = {0};
     glReadPixels_fn(width / 2, height / 2, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, center);

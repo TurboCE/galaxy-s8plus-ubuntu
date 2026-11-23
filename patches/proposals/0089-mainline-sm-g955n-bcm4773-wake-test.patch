@@ -1,0 +1,177 @@
+Subject: [PATCH] iio: verify the SM-G955N BCM4773 wake handshake
+
+Use the Samsung wake pin settings and bounded request toggles.
+Allow explicitly selected revision 10 power sequencing.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -459,9 +459,40 @@
+ 	status = "okay";
+ };
+ 
++&pinctrl_peric1 {
++	g955n_hub_req: hub-request-pins {
++		samsung,pins = "gpe6-1";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
++		samsung,pin-drv = <3>;
++	};
++};
++
++&pinctrl_fsys0 {
++	g955n_hub_resp: hub-response-pins {
++		samsung,pins = "gpi1-5";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
++		samsung,pin-drv = <3>;
++	};
++};
++
+ &spi_10 {
+ 	cs-gpios = <&gpe2 6 GPIO_ACTIVE_LOW>;
+ 	pinctrl-0 = <&spi10_bus &spi10_cs>;
+ 	status = "okay";
+ 
+-};
++	sensor-hub@0 {
++		compatible = "samsung,g955n-bcm4773-test";
++		reg = <0>;
++		spi-max-frequency = <26000000>;
++		spi-cpol;
++		spi-cpha;
++		pinctrl-names = "default";
++		pinctrl-0 = <&g955n_hub_req &g955n_hub_resp>;
++		vddio-supply = <&g955n_hub_1v8>;
++		rev10-enable-gpios = <&gpa4 6 GPIO_ACTIVE_HIGH>;
++		wake-request-gpios = <&gpe6 1 GPIO_ACTIVE_HIGH>;
++		wake-response-gpios = <&gpi1 5 GPIO_ACTIVE_HIGH>;
++	};
++};
+diff --git a/drivers/iio/common/g955n-bcm4773-wake.c b/drivers/iio/common/g955n-bcm4773-wake.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/iio/common/g955n-bcm4773-wake.c
+@@ -0,0 +1,102 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/iopoll.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/regulator/consumer.h>
++#include <linux/spi/spi.h>
++
++static bool rev10_power;
++module_param(rev10_power, bool, 0400);
++MODULE_PARM_DESC(rev10_power, "Apply the verified rev10 hub enable pin");
++
++/*
++ * Qualify the board power and GPIO handshake before attaching a BBD client.
++ * The diagnostic releases its supply and leaves the MCU request inactive.
++ */
++static int g955n_bcm4773_wake_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct gpio_desc *request, *response;
++	struct gpio_desc *enable = NULL;
++	struct regulator *supply;
++	int ret, level, release, retries;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks") ||
++	    (spi->mode & (SPI_CPOL | SPI_CPHA)) != SPI_MODE_3)
++		return -ENODEV;
++
++	supply = devm_regulator_get(dev, "vddio");
++	if (IS_ERR(supply))
++		return dev_err_probe(dev, PTR_ERR(supply), "cannot obtain VDDIO\n");
++	request = devm_gpiod_get(dev, "wake-request", GPIOD_OUT_LOW);
++	if (IS_ERR(request))
++		return dev_err_probe(dev, PTR_ERR(request), "cannot obtain wake request\n");
++	response = devm_gpiod_get(dev, "wake-response", GPIOD_IN);
++	if (IS_ERR(response))
++		return dev_err_probe(dev, PTR_ERR(response), "cannot obtain wake response\n");
++
++	ret = regulator_enable(supply);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot enable VDDIO\n");
++
++	if (rev10_power) {
++		enable = devm_gpiod_get(dev, "rev10-enable", GPIOD_OUT_HIGH);
++		if (IS_ERR(enable)) {
++			ret = PTR_ERR(enable);
++			goto power_off;
++		}
++	}
++	msleep(120);
++	ret = read_poll_timeout(gpiod_get_value_cansleep, level, level <= 0,
++				1000, 100000, false, response);
++	if (ret || level < 0) {
++		ret = ret ? ret : level;
++		goto power_off;
++	}
++
++	for (retries = 0; retries < 4; retries++) {
++		gpiod_set_value_cansleep(request, 1);
++		ret = read_poll_timeout(gpiod_get_value_cansleep, level, level != 0,
++					1000, 22000, false, response);
++		gpiod_set_value_cansleep(request, 0);
++		if (ret != -ETIMEDOUT)
++			break;
++		usleep_range(1000, 2000);
++	}
++	if (!ret && level < 0)
++		ret = level;
++	if (!ret)
++		dev_info(dev, "BCM4773 VDDIO and wake request/response verified\n");
++
++power_off:
++	release = regulator_disable(supply);
++	if (release)
++		return dev_err_probe(dev, release, "cannot release VDDIO\n");
++	return ret ? dev_err_probe(dev, ret, "BCM4773 GPIO wake handshake failed\n") : 0;
++}
++
++static const struct of_device_id g955n_bcm4773_wake_match[] = {
++	{ .compatible = "samsung,g955n-bcm4773-test" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, g955n_bcm4773_wake_match);
++
++static const struct spi_device_id g955n_bcm4773_wake_ids[] = {
++	{ "g955n-bcm4773-test" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, g955n_bcm4773_wake_ids);
++
++static struct spi_driver g955n_bcm4773_wake_driver = {
++	.id_table = g955n_bcm4773_wake_ids,
++	.probe = g955n_bcm4773_wake_probe,
++	.driver = {
++		.name = "g955n-bcm4773-wake",
++		.of_match_table = g955n_bcm4773_wake_match,
++	},
++};
++module_spi_driver(g955n_bcm4773_wake_driver);
++MODULE_DESCRIPTION("SM-G955N BCM4773 wake handshake diagnostic");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/iio/common/Kconfig b/drivers/iio/common/Kconfig
+--- a/drivers/iio/common/Kconfig
++++ b/drivers/iio/common/Kconfig
+@@ -11,2 +11,9 @@
+ source "drivers/iio/common/ssp_sensors/Kconfig"
+ source "drivers/iio/common/st_sensors/Kconfig"
++
++config G955N_BCM4773_WAKE
++	tristate "Samsung Galaxy S8+ BCM4773 wake diagnostic"
++	depends on ARCH_EXYNOS && SPI_MASTER && GPIOLIB && REGULATOR
++	help
++	  Verify power and the BCM4773 wake handshake on the SM-G955N.
++	  This diagnostic is a prerequisite to the BBD sensor protocol.
+diff --git a/drivers/iio/common/Makefile b/drivers/iio/common/Makefile
+--- a/drivers/iio/common/Makefile
++++ b/drivers/iio/common/Makefile
+@@ -16,2 +16,3 @@
+ obj-y += ssp_sensors/
+ obj-y += st_sensors/
++obj-$(CONFIG_G955N_BCM4773_WAKE) += g955n-bcm4773-wake.o

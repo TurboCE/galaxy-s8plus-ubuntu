@@ -1965,3 +1965,15 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   sequencer required by the Ubuntu snd module setup.
 - Restore the board's SPI MISO feedback phase. R64 binds the physical
   CS47L93 and its ASoC codec component.
+
+### R66 through R68 graphics and peripheral qualification
+
+- Add an opt-in stock Xorg modesetting/glamor path for GDM and GNOME
+  using the distribution Mesa Panfrost driver. Supply the display DRM
+  card path that logind resolves, and retain the fbdev fallback.
+- Validate the inherited DECON G0 path with a model-specific direct DMA
+  latch and restore test. Add an opt-in CMA DMA-BUF scanout diagnostic
+  and an EGL/Panfrost producer for the same linear buffer.
+- Enable and read back the S2MPS17 RTC output control used by the
+  Samsung kernel. Add a BCM4773 power and wake diagnostic for the
+  board-specific SPI pins and verified revision 10 power enable.

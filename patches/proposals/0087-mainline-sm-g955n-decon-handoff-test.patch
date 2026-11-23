@@ -1,0 +1,220 @@
+Subject: [PATCH] drm: test inherited DECON0 DMA handoff on SM-G955N
+
+Verify the inherited route and format before a one-shot DMA
+latch test. Keep the test memory pinned until reboot, including
+when a hardware latch or restoration fails.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -45,6 +45,14 @@
+ 		ranges;
+ 
++		g955n_decon_pool: decon-dma-pool {
++			compatible = "shared-dma-pool";
++			reusable;
++			size = <0x02000000>;
++			alignment = <0 0x00400000>;
++			alloc-ranges = <0 0x80000000 0x3c800000>;
++		};
++
+ 		/* Preserve the vendor 16 KiB dump and 16 KiB pmsg layout. */
+ 		ramoops@92000000 {
+ 			compatible = "ramoops";
+ 			reg = <0 0x92000000 0x8000>;
+@@ -137,6 +145,13 @@
+ };
+ 
+ &{/soc@0} {
++	decon-handoff@12860000 {
++		compatible = "samsung,sm-g955n-decon-handoff-test";
++		reg = <0x12860000 0x8000>, <0x128b1000 0x1000>;
++		memory-region = <&g955n_decon_pool>;
++		samsung,pmu = <&pmu_system_controller>;
++	};
++
+ 	acpm-layout@16500000 {
+ 		compatible = "samsung,exynos8895-acpm-layout";
+ 		reg = <0x16500000 0xb400>, <0x16440000 0x1000>;
+diff --git a/drivers/gpu/drm/tiny/g955n-decon-handoff.c b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+@@ -0,0 +1,155 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/bitfield.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/io.h>
++#include <linux/iopoll.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_reserved_mem.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++#define DECON_GLOBAL_CONTROL		0x0000
++#define DECON_RUNNING			BIT(4)
++#define DECON_SHADOW_UPDATE		0x0060
++#define DECON_TRIGGER			0x0070
++#define DECON_HW_TRIGGER		BIT(0)
++#define DECON_TRIGGER_MASK		BIT(4)
++#define DECON_WINDOWS_SHADOW		0x7214
++#define DECON_CHANNELS_SHADOW		0x7218
++#define DECON_WINDOW_FIELD		GENMASK(23, 20)
++#define DECON_WINDOW_5			BIT(5)
++#define G0_FORMAT_SHADOW		0x0808
++#define G0_SOURCE_SIZE_SHADOW		0x0810
++#define G0_SOURCE_OFFSET_SHADOW		0x0814
++#define G0_IMAGE_SIZE_SHADOW		0x0818
++#define G0_BASE				0x0040
++#define G0_BASE_SHADOW			0x0840
++#define DISP_POWER_STATUS		0x4064
++#define DISP_POWER_ON			0xf
++#define FIRMWARE_FB			0xcc000000
++#define PANEL_WIDTH			1440
++#define PANEL_HEIGHT			2960
++#define PANEL_PITCH			(PANEL_WIDTH * sizeof(u32))
++#define PANEL_BYTES			(PANEL_HEIGHT * PANEL_PITCH)
++#define G0_FORMAT_MASK			GENMASK(15, 11)
++#define G0_FIRMWARE_FORMAT		0
++
++static int g955n_latch_base(void __iomem *decon, void __iomem *g0, u32 addr)
++{
++	u32 active;
++	int ret;
++
++	writel(addr, g0 + G0_BASE);
++	writel(DECON_WINDOW_5, decon + DECON_SHADOW_UPDATE);
++	ret = readl_poll_timeout(g0 + G0_BASE_SHADOW, active, active == addr,
++				 250, 250000);
++	if (ret)
++		return ret;
++
++	return readl_poll_timeout(decon + DECON_SHADOW_UPDATE, active,
++				  !(active & DECON_WINDOW_5), 250, 250000);
++}
++
++static int g955n_decon_handoff_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	void __iomem *decon, *g0;
++	struct regmap *pmu;
++	dma_addr_t dma;
++	u32 *pixels;
++	u32 power, trigger, geometry, i;
++	int ret, restore;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks"))
++		return -ENODEV;
++
++	pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
++	if (IS_ERR(pmu))
++		return PTR_ERR(pmu);
++	ret = regmap_read(pmu, DISP_POWER_STATUS, &power);
++	if (ret)
++		return ret;
++	if ((power & 0xf) != DISP_POWER_ON)
++		return dev_err_probe(dev, -ENODEV, "inherited display domain is off\n");
++
++	decon = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(decon))
++		return PTR_ERR(decon);
++	g0 = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(g0))
++		return PTR_ERR(g0);
++
++	trigger = readl(decon + DECON_TRIGGER);
++	geometry = readl(g0 + G0_SOURCE_SIZE_SHADOW);
++	if (!(readl(decon + DECON_GLOBAL_CONTROL) & DECON_RUNNING) ||
++	    !(trigger & DECON_HW_TRIGGER) || (trigger & DECON_TRIGGER_MASK) ||
++	    (readl(decon + DECON_WINDOWS_SHADOW) & 0x333333) != BIT(20) ||
++	    FIELD_GET(DECON_WINDOW_FIELD, readl(decon + DECON_CHANNELS_SHADOW)) != 5 ||
++	    FIELD_GET(G0_FORMAT_MASK, readl(g0 + G0_FORMAT_SHADOW)) != G0_FIRMWARE_FORMAT ||
++	    geometry != (PANEL_HEIGHT << 16 | PANEL_WIDTH) ||
++	    readl(g0 + G0_IMAGE_SIZE_SHADOW) != geometry ||
++	    readl(g0 + G0_SOURCE_OFFSET_SHADOW) != 0 ||
++	    readl(g0 + G0_BASE) != FIRMWARE_FB ||
++	    readl(g0 + G0_BASE_SHADOW) != FIRMWARE_FB)
++		return dev_err_probe(dev, -EINVAL, "unexpected inherited DECON0 window or G0 buffer\n");
++
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++	ret = of_reserved_mem_device_init(dev);
++	if (ret)
++		return ret;
++	pixels = dma_alloc_wc(dev, PANEL_BYTES, &dma, GFP_KERNEL);
++	if (!pixels) {
++		of_reserved_mem_device_release(dev);
++		return -ENOMEM;
++	}
++	if (!dma || !IS_ALIGNED(dma, 16) || dma > U32_MAX - PANEL_BYTES) {
++		dma_free_wc(dev, PANEL_BYTES, pixels, dma);
++		of_reserved_mem_device_release(dev);
++		return -ERANGE;
++	}
++
++	for (i = 0; i < PANEL_WIDTH * PANEL_HEIGHT; i++)
++		pixels[i] = i < PANEL_WIDTH * (PANEL_HEIGHT / 2) ? 0xff804020 : 0xff208040;
++	dma_wmb();
++
++	ret = g955n_latch_base(decon, g0, lower_32_bits(dma));
++	if (!ret)
++		msleep(500);
++	restore = g955n_latch_base(decon, g0, FIRMWARE_FB);
++
++	/*
++	 * Keep the one-shot allocation pinned until reboot. If software
++	 * loses the latch, DECON may still be reading it.
++	 */
++	if (restore)
++		dev_err(dev, "firmware buffer restoration could not be confirmed: %d\n", restore);
++	else if (ret)
++		dev_err(dev, "DMA latch did not complete: %d; firmware buffer restored\n", ret);
++	else
++		dev_info(dev, "direct G0 DMA latch and firmware buffer restore verified\n");
++
++	return 0;
++}
++
++static const struct of_device_id g955n_decon_handoff_of_match[] = {
++	{ .compatible = "samsung,sm-g955n-decon-handoff-test" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, g955n_decon_handoff_of_match);
++
++static struct platform_driver g955n_decon_handoff_driver = {
++	.probe = g955n_decon_handoff_probe,
++	.driver = {
++		.name = "g955n-decon-handoff",
++		.of_match_table = g955n_decon_handoff_of_match,
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(g955n_decon_handoff_driver);
++MODULE_DESCRIPTION("SM-G955N DECON inherited timing direct DMA test");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/gpu/drm/tiny/Kconfig b/drivers/gpu/drm/tiny/Kconfig
+--- a/drivers/gpu/drm/tiny/Kconfig
++++ b/drivers/gpu/drm/tiny/Kconfig
+@@ -215,3 +215,10 @@
+ 	  * 4.40" Sharp Memory LCD (LS044Q7DH01)
+ 
+ 	  If M is selected the module will be called sharp_memory.
++
++config DRM_G955N_DECON_HANDOFF
++	tristate "Samsung Galaxy S8+ DECON DMA handoff diagnostic"
++	depends on ARCH_EXYNOS && OF_RESERVED_MEM && DMA_CMA && !MODULE_UNLOAD
++	help
++	  Check a DMA address latch and restore the inherited panel buffer.
++	  The diagnostic keeps its test memory pinned until reboot.
+diff --git a/drivers/gpu/drm/tiny/Makefile b/drivers/gpu/drm/tiny/Makefile
+--- a/drivers/gpu/drm/tiny/Makefile
++++ b/drivers/gpu/drm/tiny/Makefile
+@@ -15,3 +15,4 @@
+ obj-$(CONFIG_TINYDRM_MI0283QT)		+= mi0283qt.o
+ obj-$(CONFIG_TINYDRM_REPAPER)		+= repaper.o
+ obj-$(CONFIG_TINYDRM_SHARP_MEMORY)	+= sharp-memory.o
++obj-$(CONFIG_DRM_G955N_DECON_HANDOFF) += g955n-decon-handoff.o

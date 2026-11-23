@@ -3360,3 +3360,42 @@ GDM, USB Ethernet and Wi-Fi remained active in R64. The codec reported
 a missing MCLK2 32 kHz source. The handset still has no ALSA sound card,
 and the BCM4773 driver and IIO sensor readings remain open. The R64
 test loads ACPM and Madera explicitly during qualification.
+
+### R66 through R68 graphics and peripheral qualification
+
+R64 GDM reported llvmpipe. Ubuntu's stock Xorg modesetting/glamor
+driver and Mesa's Exynos KMS render-only alias selected the Mali-G71
+Panfrost render node after using the canonical DRM device path acquired
+by logind. R66 kept the configuration across boot with
+`g955n.desktop=1 g955n.desktop_accel=1`. The GDM greeter and the GNOME
+Xorg user session both reported `Accelerated: yes` and `Mali-G71
+(Panfrost)`. GNOME Shell held the Panfrost render device open. An
+automated keyboard login reached the desktop. The default display
+still uses simpledrm with a copy into the firmware framebuffer.
+
+R64 and R66 ran `apt-get update` with strict error handling and
+`apt-get --with-new-pkgs upgrade` against the official Noble archives.
+APT found no pending upgrades and `dpkg --audit` reported no issues.
+R64 retained its BOOT hash across the commands. No GNOME, Mesa or Xorg
+packages were replaced or held for this configuration.
+
+R67 reserved the 32 MiB DECON pool after encoding its alignment with
+the reserved-memory address cell count. The on-device probe switched
+the inherited G0 plane to that DMA allocation and confirmed both the
+new address latch and the return to the firmware framebuffer.
+
+R68 allocated a contiguous linear ARGB8888 DMA-BUF from the standard
+CMA heap, rendered to it through EGL on Panfrost, then submitted that
+same FD to the DECON G0 diagnostic. No pixel readback or copy was used
+for this submission. The driver waited for the producer, confirmed the
+new address latch and restored the firmware framebuffer. GDM and the
+GNOME Xorg login still selected Panfrost afterwards. The diagnostic
+does not register a KMS connector and is not part of GNOME's regular
+frame presentation. Native Wayland and desktop zero-copy remain open.
+
+R67 and R68 read S2MPS17 RTCBUF as 0x45 on the correct PMIC page with
+the Samsung bit 2 enabled. The CS47L93 component binds, but the codec
+MCLK2 input and ABOX PCM path remain unverified and ALSA lists no sound
+card. Stock boot evidence reported Android board revision 10. The
+BCM4773 wake request still timed out with the revision 10 configuration,
+so IIO measurements and GNSS from this hub were not available.
