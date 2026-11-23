@@ -3866,3 +3866,34 @@ project suite ran 162 cases with 9 skipped and no failures.
 ALSA still listed no card and there was no playback or capture
 PCM to exercise. R89 has no native ABOX PCM/DMA binding or ASoC
 machine routing.
+
+### R90 ABOX address translation and muted DMA trial
+
+The real ABOX client joined an Exynos System MMU DMA domain. A
+32-bit allocation could reach an exclusive end outside the DMA
+register range. With a 31-bit allocation limit, all pages of an
+allocated 64 KiB trial buffer matched the translated addresses.
+No audio registers were changed by the mapping check.
+
+A separate bounded RDMA0 trial with zero samples and no amplifier
+writes reached the running state but the hardware pointer stayed
+at zero. Applied the SPUS bank fields found in the SM-G955N
+Calliope firmware and repeated the test. The pointer changed in
+all 25 sampled intervals. The trial stopped the engine and restored
+the audio registers.
+
+### R91 native playback qualification
+
+After BOOT verification the SM-G955N booted R91 and the native
+ASoC card exposed the Internal Speaker playback PCM. A one-second
+48 kHz S16 stereo tone completed through ALSA with 44 distinct
+hardware pointer samples. WirePlumber exposed Built-in Audio Stereo
+as its default sink. The same tone completed through PipeWire with
+48 distinct hardware pointer samples. Physical audibility was not
+measured. The ASoC log included a warning about shortening the
+card driver name. ALSA and PipeWire exposed no capture source.
+
+Installed and enabled the model-specific speaker service. A normal
+reboot changed the boot ID, the service started automatically and
+ALSA enumerated the same hardware playback PCM. The project suite
+ran 162 tests with 9 skipped and no failures.

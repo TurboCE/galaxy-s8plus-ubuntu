@@ -1,0 +1,424 @@
+Subject: [PATCH] iommu: connect SM-G955N ABOX to the native Exynos System MMU
+
+Connect the stock audio System MMU and its CMU bus gate. Check
+that the audio DSP and DMA engines are idle before enabling the
+clock. Qualify mappings through the standard DMA API and require
+the entire 32-bit buffer to translate to the allocated pages.
+
+diff --git a/drivers/soc/samsung/g955n-abox-power-test.c b/drivers/soc/samsung/g955n-abox-power-test.c
+--- a/drivers/soc/samsung/g955n-abox-power-test.c
++++ b/drivers/soc/samsung/g955n-abox-power-test.c
+@@ -40,6 +40,10 @@
+ #define ABOX_UAIF0_CTRL		0x0500
+ #define ABOX_UAIF4_CTRL		0x0540
+ #define ABOX_UAIF_ENABLE		GENMASK(1, 0)
++#define ABOX_SYSMMU_GATE	0x20b0
++#define ABOX_RDMA_CTRL(n)	(0x1000 + 0x100 * (n))
++#define ABOX_WDMA_CTRL(n)	(0x2000 + 0x100 * (n))
++#define ABOX_DMA_ENABLE		BIT(0)
+ 
+ static bool probe_uaif_clock;
+ module_param(probe_uaif_clock, bool, 0400);
+@@ -55,6 +59,7 @@
+ 	void __iomem *cmu;
+ 	void __iomem *sfr;
+ 	unsigned int uaif_ctrl;
++	u32 gate_before;
+ 	unsigned int reg;
+ 	unsigned int mask;
+ };
+@@ -199,6 +204,64 @@
+ 		 clk_hw_get_name(hw), actual, previous);
+ 	return 0;
+ }
++
++static int g955n_abox_sysmmu_prepare(struct clk_hw *hw)
++{
++	struct g955n_abox_clk *clock = container_of(hw, struct g955n_abox_clk, hw);
++	const u32 mask = ABOX_GATE_ACTIVE | ABOX_GATE_MANUAL | ABOX_GATE_AUTO;
++	unsigned int status, i;
++	u32 value;
++	int ret;
++
++	ret = regmap_read(clock->pmu, ABOX_STATUS, &status);
++	if (ret || (status & ABOX_LOCAL_PWR) != ABOX_LOCAL_PWR)
++		return ret ?: -EHOSTDOWN;
++
++	ret = regmap_read(clock->pmu, ABOX_CA7_STATUS, &status);
++	if (ret || (status & ABOX_CA7_RUNNING))
++		return ret ?: -EBUSY;
++
++	value = readl(clock->cmu + ABOX_ACLK_GATE);
++	if ((value & ABOX_GATE_MANUAL ? !(value & ABOX_GATE_ACTIVE) :
++	     (value & ABOX_GATE_AUTO)) ||
++	    readl(clock->sfr + ABOX_IP_INDEX) != ABOX_HW_ID)
++		return -ENODEV;
++
++	/* The System MMU can only be taken over while the DMA engines are idle. */
++	for (i = 0; i < 8; i++)
++		if (readl(clock->sfr + ABOX_RDMA_CTRL(i)) & ABOX_DMA_ENABLE)
++			return -EBUSY;
++	for (i = 0; i < 5; i++)
++		if (readl(clock->sfr + ABOX_WDMA_CTRL(i)) & ABOX_DMA_ENABLE)
++			return -EBUSY;
++
++	value = readl(clock->cmu + ABOX_SYSMMU_GATE);
++	clock->gate_before = value & mask;
++	writel((value & ~mask) | ABOX_GATE_ACTIVE | ABOX_GATE_MANUAL,
++	       clock->cmu + ABOX_SYSMMU_GATE);
++
++	return 0;
++}
++
++static void g955n_abox_sysmmu_unprepare(struct clk_hw *hw)
++{
++	struct g955n_abox_clk *clock = container_of(hw, struct g955n_abox_clk, hw);
++	const u32 mask = ABOX_GATE_ACTIVE | ABOX_GATE_MANUAL | ABOX_GATE_AUTO;
++	unsigned int status;
++	u32 value;
++
++	if (regmap_read(clock->pmu, ABOX_STATUS, &status) ||
++	    (status & ABOX_LOCAL_PWR) != ABOX_LOCAL_PWR)
++		return;
++
++	value = readl(clock->cmu + ABOX_SYSMMU_GATE);
++	writel((value & ~mask) | clock->gate_before, clock->cmu + ABOX_SYSMMU_GATE);
++}
++
++static const struct clk_ops g955n_abox_sysmmu_ops = {
++	.prepare = g955n_abox_sysmmu_prepare,
++	.unprepare = g955n_abox_sysmmu_unprepare,
++};
+ 
+ static int g955n_abox_register_clocks(struct device *dev, struct regmap *pmu,
+ 				    void __iomem *cmu, void __iomem *sfr)
+@@ -222,6 +285,7 @@
+ 			"g955n-uaif4-bclk-div", UAIF4_DIV, GENMASK(4, 0),
+ 			G955N_ABOX_CLK_AUDIF, ABOX_UAIF4_CTRL,
+ 		},
++		[G955N_ABOX_CLK_SYSMMU] = { "g955n-abox-sysmmu" },
+ 	};
+ 	const struct clk_parent_data oscillator = { .fw_name = "oscclk" };
+ 	struct clk_hw_onecell_data *data;
+@@ -252,7 +316,11 @@
+ 			init.flags |= CLK_SET_RATE_GATE;
+ 		}
+ 
+-		if (i == G955N_ABOX_CLK_PLL) {
++		if (i == G955N_ABOX_CLK_SYSMMU) {
++			init.ops = &g955n_abox_sysmmu_ops;
++			init.flags = 0;
++			init.num_parents = 0;
++		} else if (i == G955N_ABOX_CLK_PLL) {
+ 			init.parent_data = &oscillator;
+ 		} else {
+ 			parent = data->hws[clocks[i].parent];
+@@ -287,7 +355,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	for (i = 0; i < data->num; i++)
++	for (i = 0; i < G955N_ABOX_CLK_SYSMMU; i++)
+ 		dev_info(dev, "%s rate %lu Hz\n", clocks[i].name,
+ 			 clk_hw_get_rate(data->hws[i]));
+ 
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -7,6 +7,7 @@
+ /dts-v1/;
+ 
+ #include "exynos8895.dtsi"
++#include <dt-bindings/clock/samsung,exynos8895-abox.h>
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
+ #include <dt-bindings/soc/samsung,exynos-usi.h>
+@@ -146,7 +147,7 @@
+ };
+ 
+ &{/soc@0} {
+-	abox-power-test@13e00000 {
++	abox_clocks: abox-power-test@13e00000 {
+ 		compatible = "samsung,sm-g955n-abox-power-test";
+ 		reg = <0x13e00000 0x4000>, <0x13e50000 0x10000>;
+ 		reg-names = "cmu", "sfr";
+@@ -154,6 +155,20 @@
+ 		clock-names = "oscclk";
+ 		#clock-cells = <1>;
+ 		samsung,pmu = <&pmu_system_controller>;
++	};
++
++	abox_sysmmu: iommu@13e30000 {
++		compatible = "samsung,exynos-sysmmu";
++		reg = <0x13e30000 0x3000>;
++		interrupts = <GIC_SPI 445 IRQ_TYPE_LEVEL_HIGH>;
++		clocks = <&abox_clocks G955N_ABOX_CLK_SYSMMU>;
++		clock-names = "sysmmu";
++		#iommu-cells = <0>;
++	};
++
++	abox-dma-probe {
++		compatible = "samsung,sm-g955n-abox-dma-probe";
++		iommus = <&abox_sysmmu>;
+ 	};
+ 
+ 	decon-handoff@12860000 {
+diff --git a/include/dt-bindings/clock/samsung,exynos8895-abox.h b/include/dt-bindings/clock/samsung,exynos8895-abox.h
+--- a/include/dt-bindings/clock/samsung,exynos8895-abox.h
++++ b/include/dt-bindings/clock/samsung,exynos8895-abox.h
+@@ -6,5 +6,6 @@
+ #define G955N_ABOX_CLK_AUDIF	1
+ #define G955N_ABOX_CLK_UAIF0	2
+ #define G955N_ABOX_CLK_UAIF4	3
++#define G955N_ABOX_CLK_SYSMMU	4
+ 
+ #endif
+diff --git a/drivers/soc/samsung/Kconfig b/drivers/soc/samsung/Kconfig
+--- a/drivers/soc/samsung/Kconfig
++++ b/drivers/soc/samsung/Kconfig
+@@ -82,6 +82,12 @@
+ 	  Qualify the inherited ABOX power state and optionally test the
+ 	  board power sequence before enabling a full audio driver.
+ 
++config G955N_ABOX_DMA_PROBE
++	tristate "Samsung Galaxy S8+ ABOX DMA qualification"
++	depends on ARCH_EXYNOS && EXYNOS_IOMMU && IOMMU_DMA
++	help
++	  Verify that ABOX can allocate a translated 32-bit DMA buffer.
++
+ config EXYNOS8895_ACPM_LAYOUT
+ 	tristate "Exynos8895 ACPM shared-memory layout probe"
+ 	depends on ARCH_EXYNOS && OF && REGULATOR && COMMON_CLK
+diff --git a/drivers/soc/samsung/Makefile b/drivers/soc/samsung/Makefile
+--- a/drivers/soc/samsung/Makefile
++++ b/drivers/soc/samsung/Makefile
+@@ -15,3 +15,4 @@
+ obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= s3c-pm-check.o
+ obj-$(CONFIG_EXYNOS8895_ACPM_LAYOUT) += exynos8895-acpm-layout.o
+ obj-$(CONFIG_G955N_ABOX_POWER_TEST) += g955n-abox-power-test.o
++obj-$(CONFIG_G955N_ABOX_DMA_PROBE) += g955n-abox-dma-probe.o
+diff --git a/drivers/soc/samsung/g955n-abox-dma-probe.c b/drivers/soc/samsung/g955n-abox-dma-probe.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/soc/samsung/g955n-abox-dma-probe.c
+@@ -0,0 +1,80 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/dma-mapping.h>
++#include <linux/iommu.h>
++#include <linux/mm.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/sizes.h>
++
++static int g955n_abox_dma_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct iommu_domain *domain;
++	struct page *pages;
++	dma_addr_t iova;
++	phys_addr_t physical;
++	unsigned long offset;
++	int ret;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks"))
++		return -ENODEV;
++
++	domain = iommu_get_domain_for_dev(dev);
++	if (!domain || !iommu_is_dma_domain(domain))
++		return dev_err_probe(dev, -ENODEV, "ABOX requires a translated DMA domain\n");
++
++	/* Keep the exclusive end of a PCM ring in the 32-bit register. */
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(31));
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot restrict the ABOX DMA aperture\n");
++
++	pages = alloc_pages(GFP_KERNEL | __GFP_ZERO, get_order(SZ_64K));
++	if (!pages)
++		return -ENOMEM;
++
++	iova = dma_map_page(dev, pages, 0, SZ_64K, DMA_BIDIRECTIONAL);
++	if (dma_mapping_error(dev, iova)) {
++		ret = -EIO;
++		goto free;
++	}
++
++	physical = page_to_phys(pages);
++	if ((iova & 15) || iova > U32_MAX - SZ_64K) {
++		ret = -ERANGE;
++		goto unmap;
++	}
++
++	for (offset = 0; offset < SZ_64K; offset += PAGE_SIZE) {
++		if (iommu_iova_to_phys(domain, iova + offset) != physical + offset) {
++			ret = -EIO;
++			goto unmap;
++		}
++	}
++
++	dev_info(dev, "verified 64 KiB of translated 32-bit ABOX DMA addresses\n");
++	ret = 0;
++unmap:
++	dma_unmap_page(dev, iova, SZ_64K, DMA_BIDIRECTIONAL);
++free:
++	__free_pages(pages, get_order(SZ_64K));
++	return ret ? dev_err_probe(dev, ret, "ABOX DMA mapping check failed\n") : 0;
++}
++
++static const struct of_device_id g955n_abox_dma_of_match[] = {
++	{ .compatible = "samsung,sm-g955n-abox-dma-probe" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, g955n_abox_dma_of_match);
++
++static struct platform_driver g955n_abox_dma_driver = {
++	.probe = g955n_abox_dma_probe,
++	.driver = {
++		.name = "g955n-abox-dma-probe",
++		.of_match_table = g955n_abox_dma_of_match,
++	},
++};
++module_platform_driver(g955n_abox_dma_driver);
++
++MODULE_DESCRIPTION("SM-G955N ABOX translated DMA mapping check");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/iommu/exynos-iommu.c b/drivers/iommu/exynos-iommu.c
+--- a/drivers/iommu/exynos-iommu.c
++++ b/drivers/iommu/exynos-iommu.c
+@@ -483,12 +483,16 @@
+ 	__sysmmu_tlb_invalidate(data);
+ }
+ 
+-static void __sysmmu_enable_clocks(struct sysmmu_drvdata *data)
+-{
+-	BUG_ON(clk_prepare_enable(data->clk_master));
+-	BUG_ON(clk_prepare_enable(data->clk));
+-	BUG_ON(clk_prepare_enable(data->pclk));
+-	BUG_ON(clk_prepare_enable(data->aclk));
++static int __sysmmu_enable_clocks(struct sysmmu_drvdata *data)
++{
++	struct clk_bulk_data clocks[] = {
++		{ .clk = data->clk_master },
++		{ .clk = data->clk },
++		{ .clk = data->pclk },
++		{ .clk = data->aclk },
++	};
++
++	return clk_bulk_prepare_enable(ARRAY_SIZE(clocks), clocks);
+ }
+ 
+ static void __sysmmu_disable_clocks(struct sysmmu_drvdata *data)
+@@ -513,11 +517,14 @@
+ 	data->has_vcr = capa1 & CAPA1_VCR_ENABLED;
+ }
+ 
+-static void __sysmmu_get_version(struct sysmmu_drvdata *data)
++static int __sysmmu_get_version(struct sysmmu_drvdata *data)
+ {
+ 	u32 ver;
+-
+-	__sysmmu_enable_clocks(data);
++	int ret;
++
++	ret = __sysmmu_enable_clocks(data);
++	if (ret)
++		return ret;
+ 
+ 	ver = readl(data->sfrbase + REG_MMU_VERSION);
+ 
+@@ -544,6 +551,7 @@
+ 	}
+ 
+ 	__sysmmu_disable_clocks(data);
++	return 0;
+ }
+ 
+ static void show_fault_information(struct sysmmu_drvdata *data,
+@@ -645,11 +653,14 @@
+ 	writel(ctrl, data->sfrbase + REG_V7_CTRL_VM);
+ }
+ 
+-static void __sysmmu_enable(struct sysmmu_drvdata *data)
++static int __sysmmu_enable(struct sysmmu_drvdata *data)
+ {
+ 	unsigned long flags;
+-
+-	__sysmmu_enable_clocks(data);
++	int ret;
++
++	ret = __sysmmu_enable_clocks(data);
++	if (ret)
++		return ret;
+ 
+ 	spin_lock_irqsave(&data->lock, flags);
+ 	writel(CTRL_BLOCK, data->sfrbase + REG_MMU_CTRL);
+@@ -667,6 +678,7 @@
+ 	 * driver to enable it.
+ 	 */
+ 	clk_disable(data->clk_master);
++	return 0;
+ }
+ 
+ static void sysmmu_tlb_invalidate_flpdcache(struct sysmmu_drvdata *data,
+@@ -775,7 +787,9 @@
+ 	data->sysmmu = dev;
+ 	spin_lock_init(&data->lock);
+ 
+-	__sysmmu_get_version(data);
++	ret = __sysmmu_get_version(data);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot clock System MMU\n");
+ 
+ 	ret = iommu_device_sysfs_add(&data->iommu, &pdev->dev, NULL,
+ 				     dev_name(data->sysmmu));
+@@ -846,6 +860,7 @@
+ {
+ 	struct sysmmu_drvdata *data = dev_get_drvdata(dev);
+ 	struct device *master = data->master;
++	int ret = 0;
+ 
+ 	if (master) {
+ 		struct exynos_iommu_owner *owner = dev_iommu_priv_get(master);
+@@ -853,11 +868,11 @@
+ 		mutex_lock(&owner->rpm_lock);
+ 		if (data->domain) {
+ 			dev_dbg(data->sysmmu, "restoring state\n");
+-			__sysmmu_enable(data);
++			ret = __sysmmu_enable(data);
+ 		}
+ 		mutex_unlock(&owner->rpm_lock);
+ 	}
+-	return 0;
++	return ret;
+ }
+ 
+ static const struct dev_pm_ops sysmmu_pm_ops = {
+@@ -1002,7 +1017,7 @@
+ 
+ 	list_for_each_entry(data, &owner->controllers, owner_node) {
+ 		pm_runtime_get_noresume(data->sysmmu);
+-		if (pm_runtime_active(data->sysmmu))
++		if (pm_runtime_active(data->sysmmu) && data->active)
+ 			__sysmmu_disable(data);
+ 		pm_runtime_put(data->sysmmu);
+ 	}
+@@ -1064,11 +1079,18 @@
+ 	list_for_each_entry(data, &owner->controllers, owner_node) {
+ 		pm_runtime_get_noresume(data->sysmmu);
+ 		if (pm_runtime_active(data->sysmmu))
+-			__sysmmu_enable(data);
++			err = __sysmmu_enable(data);
+ 		pm_runtime_put(data->sysmmu);
++		if (err)
++			break;
+ 	}
+ 
+ 	mutex_unlock(&owner->rpm_lock);
++
++	if (err) {
++		exynos_iommu_identity_attach(&exynos_identity_domain, dev);
++		return err;
++	}
+ 
+ 	dev_dbg(dev, "%s: Attached IOMMU with pgtable %pa\n", __func__,
+ 		&pagetable);

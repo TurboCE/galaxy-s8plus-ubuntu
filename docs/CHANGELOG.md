@@ -2088,3 +2088,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   configured through CCF after checking the ABOX power and clock
   state, DSP ownership, and serializer enable bits.
 - Add an opt-in trial that verifies and restores the clock rates.
+
+### 6.18 R90 and R91 native loudspeaker
+
+- Attach the ABOX address space to the Exynos System MMU and limit
+  DMA buffers so the ABOX exclusive end address fits in 32 bits.
+- Connect RDMA0 through SIFS1 and UAIF4 to the MAX98506 speaker.
+  Register a 48 kHz, signed 16-bit stereo ALSA playback PCM and
+  load the board drivers through a model-specific systemd unit.

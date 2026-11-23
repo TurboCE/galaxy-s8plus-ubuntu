@@ -1,0 +1,549 @@
+Subject: [PATCH] ASoC: register the SM-G955N internal speaker PCM
+
+Connect the proven RDMA0/SIFS1/UAIF4 playback route and the MAX98506
+amplifier. Use the native ABOX DMA translation, restrict the trial
+to 48 kHz S16 stereo and stop the DMA before releasing its ring.
+
+diff --git a/sound/soc/samsung/Kconfig b/sound/soc/samsung/Kconfig
+--- a/sound/soc/samsung/Kconfig
++++ b/sound/soc/samsung/Kconfig
+@@ -149,3 +149,9 @@
+ 	  Say Y if you want to add support for SoC audio on the Midas boards.
+ 
+ endif #SND_SOC_SAMSUNG
++
++config SND_SOC_G955N_ABOX_SPEAKER
++	tristate "Galaxy S8+ native ABOX loudspeaker PCM"
++	depends on ARCH_EXYNOS && EXYNOS_IOMMU && IOMMU_DMA
++	help
++	  Register the SM-G955N MAX98506 loudspeaker and its ABOX PCM.
+diff --git a/sound/soc/samsung/Makefile b/sound/soc/samsung/Makefile
+--- a/sound/soc/samsung/Makefile
++++ b/sound/soc/samsung/Makefile
+@@ -42,3 +42,4 @@
+ obj-$(CONFIG_SND_SOC_SAMSUNG_TM2_WM5110) += snd-soc-tm2-wm5110.o
+ obj-$(CONFIG_SND_SOC_SAMSUNG_ARIES_WM8994) += snd-soc-aries-wm8994.o
+ obj-$(CONFIG_SND_SOC_SAMSUNG_MIDAS_WM1811) += snd-soc-midas-wm1811.o
++obj-$(CONFIG_SND_SOC_G955N_ABOX_SPEAKER) += g955n-abox-speaker.o
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -166,9 +166,15 @@
+ 		#iommu-cells = <0>;
+ 	};
+ 
+-	abox-dma-probe {
+-		compatible = "samsung,sm-g955n-abox-dma-probe";
++	abox-speaker {
++		compatible = "samsung,sm-g955n-abox-speaker";
+ 		iommus = <&abox_sysmmu>;
++		audio-codec = <&g955n_speaker_amp>;
++		samsung,abox-cmu = <&abox_clocks>;
++		clocks = <&abox_clocks G955N_ABOX_CLK_UAIF4>;
++		clock-names = "speaker";
++		pinctrl-names = "speaker";
++		pinctrl-0 = <&g955n_abox_speaker_pins>;
+ 	};
+ 
+ 	decon-handoff@12860000 {
+@@ -490,6 +496,14 @@
+ 	};
+ };
+ 
++&pinctrl_abox {
++	g955n_abox_speaker_pins: speaker-bus-pins {
++		samsung,pins = "gph0-5", "gph0-6", "gph0-7";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
++	};
++};
++
+ &usi3 {
+ 	samsung,mode = <USI_MODE_I2C>;
+ 	status = "okay";
+@@ -500,7 +514,7 @@
+ 	#size-cells = <0>;
+ 	status = "okay";
+ 
+-	amplifier@31 {
++	g955n_speaker_amp: amplifier@31 {
+ 		compatible = "maxim,max98506";
+ 		reg = <0x31>;
+ 		#sound-dai-cells = <0>;
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+new file mode 100644
+--- /dev/null
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -0,0 +1,472 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * SM-G955N mono loudspeaker via RDMA0 -> SPUS SIFS1 -> UAIF4.
++ * Samsung's Exynos8895 board and ABOX driver define the route and register
++ * layout. The direct ABOX method is documented by the Galaxy Tab Active3
++ * mainline port. The Exynos8895 sample bank fields were verified against
++ * the handset's Calliope firmware and muted RDMA0 hardware trial.
++ */
++#include <linux/clk.h>
++#include <linux/dma-mapping.h>
++#include <linux/workqueue.h>
++#include <linux/iommu.h>
++#include <linux/iopoll.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/of_address.h>
++#include <linux/pinctrl/consumer.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/regmap.h>
++#include <linux/sizes.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
++#define ABOX_CMU_GATE	0x2034
++#define GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
++#define GATE_ON		(BIT(21) | BIT(20))
++#define ABOX_IP_INDEX	0x0000
++#define ABOX_VERSION	0x0004
++#define SYSPOWER_CTRL	0x0010
++#define SYSPOWER_STATUS	0x0014
++#define ROUTE_CTRL0	0x0040
++#define SPUS_CTRL0	0x0200
++#define SPUS_CTRL1	0x0204
++#define SPUS_CTRL3	0x020c
++#define SPUS_BANK0	0x0220
++#define UAIF4_CTRL0	0x0540
++#define UAIF4_CTRL1	0x0544
++#define RDMA0_CTRL0	0x1000
++#define RDMA0_START	0x1008
++#define RDMA0_END	0x100c
++#define RDMA0_PERIOD	0x1010
++#define RDMA0_POINT	0x1014
++#define RDMA0_VOL	0x1018
++#define RDMA0_STATUS	0x1020
++#define RDMA_ENABLE	BIT(0)
++#define RDMA_PROGRESS	BIT(31)
++#define RING_BYTES	SZ_16K
++#define PERIOD_BYTES	SZ_4K
++#define BCLK_RATE	1536000
++
++static const u32 saved_regs[] = {
++	SYSPOWER_CTRL, ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
++	UAIF4_CTRL0, UAIF4_CTRL1, RDMA0_CTRL0, RDMA0_START, RDMA0_END,
++	RDMA0_PERIOD, RDMA0_POINT, RDMA0_VOL,
++};
++
++struct g955n_speaker {
++	struct device *dev;
++	struct regmap *pmu;
++	struct clk *bclk;
++	void __iomem *sfr;
++	void __iomem *cmu;
++	unsigned int period;
++	struct snd_dma_buffer ring;
++	struct snd_soc_card card;
++	struct snd_soc_dai_link link;
++	struct snd_soc_dai_link_component cpu, codec, platform;
++	struct snd_pcm_substream *stream;
++	struct delayed_work period_work;
++	unsigned long previous_bclk;
++	u32 saved[ARRAY_SIZE(saved_regs)];
++	u32 saved_gate;
++	bool prepared;
++	bool running;
++	bool poisoned;
++};
++
++static void abox_update(void __iomem *base, u32 reg, u32 mask, u32 value)
++{
++	writel((readl(base + reg) & ~mask) | value, base + reg);
++}
++
++static int abox_power_ready(struct g955n_speaker *speaker)
++{
++	unsigned int status, gate;
++	int ret;
++
++	ret = regmap_read(speaker->pmu, 0x4004, &status);
++	if (ret || (status & 15) != 15)
++		return ret ?: -EHOSTDOWN;
++	ret = regmap_read(speaker->pmu, 0x2524, &status);
++	if (ret || (status & BIT(0)))
++		return ret ?: -EBUSY;
++	gate = readl(speaker->cmu + 0x201c);
++	if (gate & BIT(20) ? !(gate & BIT(21)) : (gate & BIT(28)))
++		return -EHOSTDOWN;
++	if (readl(speaker->sfr + ABOX_IP_INDEX) != 0x41424f58 ||
++	    readl(speaker->sfr + ABOX_VERSION) != 0x01000000)
++		return -ENODEV;
++	return 0;
++}
++
++static void speaker_tick(struct work_struct *work)
++{
++	struct g955n_speaker *speaker = container_of(to_delayed_work(work),
++						   struct g955n_speaker, period_work);
++
++	u32 status;
++	unsigned int offset, period;
++
++	if (!READ_ONCE(speaker->running))
++		return;
++	status = readl(speaker->sfr + RDMA0_STATUS);
++	offset = ((status & GENMASK(28, 16)) >> 12) + (status & GENMASK(12, 0));
++	period = offset / PERIOD_BYTES;
++	if (period != speaker->period) {
++		speaker->period = period;
++		snd_pcm_period_elapsed(speaker->stream);
++	}
++	if (READ_ONCE(speaker->running))
++		schedule_delayed_work(&speaker->period_work, msecs_to_jiffies(5));
++}
++
++static const struct snd_pcm_hardware speaker_hw = {
++	.info = SNDRV_PCM_INFO_INTERLEAVED | SNDRV_PCM_INFO_BLOCK_TRANSFER,
++	.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	.rates = SNDRV_PCM_RATE_48000,
++	.rate_min = 48000,
++	.rate_max = 48000,
++	.channels_min = 2,
++	.channels_max = 2,
++	.buffer_bytes_max = RING_BYTES,
++	.period_bytes_min = PERIOD_BYTES,
++	.period_bytes_max = PERIOD_BYTES,
++	.periods_min = 2,
++	.periods_max = 4,
++};
++
++static int speaker_open(struct snd_soc_component *component,
++			struct snd_pcm_substream *stream)
++{
++	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
++	int ret;
++
++	if (speaker->poisoned || speaker->stream)
++		return -EBUSY;
++	ret = pm_runtime_resume_and_get(speaker->dev);
++	if (ret < 0)
++		return ret;
++	snd_soc_set_runtime_hwparams(stream, &speaker_hw);
++	speaker->stream = stream;
++	snd_pcm_set_runtime_buffer(stream, &speaker->ring);
++	return 0;
++}
++
++static int speaker_restore(struct g955n_speaker *speaker)
++{
++	unsigned int i;
++	int ret;
++
++	if (!speaker->prepared)
++		return 0;
++	for (i = ARRAY_SIZE(saved_regs); i > 0; i--)
++		writel(speaker->saved[i - 1], speaker->sfr + saved_regs[i - 1]);
++	writel(speaker->saved_gate, speaker->cmu + ABOX_CMU_GATE);
++	speaker->prepared = false;
++	ret = clk_set_rate(speaker->bclk, speaker->previous_bclk);
++	if (!ret && clk_get_rate(speaker->bclk) != speaker->previous_bclk)
++		ret = -EIO;
++	return ret;
++}
++
++static int speaker_stop(struct g955n_speaker *speaker)
++{
++	u32 status;
++	int ret;
++
++	WRITE_ONCE(speaker->running, false);
++	cancel_delayed_work(&speaker->period_work);
++	if (!speaker->prepared)
++		return 0;
++	abox_update(speaker->sfr, UAIF4_CTRL0, BIT(0), 0);
++	abox_update(speaker->sfr, RDMA0_CTRL0, RDMA_ENABLE, 0);
++	ret = readl_poll_timeout(speaker->sfr + RDMA0_STATUS, status,
++				 !(status & RDMA_PROGRESS), 10, 40000);
++	if (ret) {
++		speaker->poisoned = true;
++		dev_err(speaker->dev, "RDMA0 did not stop; retaining ring and DMA domain until reboot\n");
++	}
++	return ret;
++}
++
++static int speaker_close(struct snd_soc_component *component,
++			 struct snd_pcm_substream *stream)
++{
++	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
++	int ret = speaker_stop(speaker);
++
++	cancel_delayed_work_sync(&speaker->period_work);
++	snd_pcm_set_runtime_buffer(stream, NULL);
++	speaker->stream = NULL;
++	if (speaker->poisoned)
++		return ret;
++	ret = speaker_restore(speaker);
++	pm_runtime_put_sync(speaker->dev);
++	return ret;
++}
++
++static int speaker_prepare(struct snd_soc_component *component,
++			   struct snd_pcm_substream *stream)
++{
++	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
++	void __iomem *sfr = speaker->sfr;
++	size_t bytes = snd_pcm_lib_buffer_bytes(stream);
++	dma_addr_t addr = speaker->ring.addr;
++	u32 status;
++	unsigned int i;
++	int ret;
++
++	if (speaker->poisoned || !bytes || bytes > RING_BYTES ||
++	    !IS_ALIGNED(bytes, PERIOD_BYTES))
++		return -EINVAL;
++	ret = speaker_stop(speaker);
++	if (ret)
++		return ret;
++	cancel_delayed_work_sync(&speaker->period_work);
++	ret = speaker_restore(speaker);
++	if (ret)
++		return ret;
++	ret = abox_power_ready(speaker);
++	if (ret)
++		return ret;
++	if ((readl(sfr + RDMA0_CTRL0) & RDMA_ENABLE) ||
++	    (readl(sfr + UAIF4_CTRL0) & 3))
++		return -EBUSY;
++
++	speaker->previous_bclk = clk_get_rate(speaker->bclk);
++	if (!speaker->previous_bclk)
++		return -EIO;
++	for (i = 0; i < ARRAY_SIZE(saved_regs); i++)
++		speaker->saved[i] = readl(sfr + saved_regs[i]);
++	speaker->saved_gate = readl(speaker->cmu + ABOX_CMU_GATE);
++	speaker->prepared = true;
++	ret = clk_set_rate(speaker->bclk, BCLK_RATE);
++	if (ret || clk_get_rate(speaker->bclk) != BCLK_RATE) {
++		ret = ret ?: -EIO;
++		goto restore;
++	}
++
++	abox_update(speaker->cmu, ABOX_CMU_GATE, GATE_MASK, GATE_ON);
++	abox_update(sfr, SYSPOWER_CTRL, BIT(0), BIT(0));
++	ret = readl_poll_timeout(sfr + SYSPOWER_STATUS, status, status & BIT(0), 10, 20000);
++	if (ret)
++		goto restore;
++
++	abox_update(sfr, SPUS_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
++	writel(BIT(0), sfr + SPUS_CTRL3);
++	writel(0x800000, sfr + RDMA0_VOL);
++	abox_update(sfr, SPUS_CTRL0, GENMASK(3, 0), 0);
++	abox_update(sfr, SPUS_CTRL1, GENMASK(18, 16), 0);
++	abox_update(sfr, ROUTE_CTRL0, GENMASK(19, 16), 2 << 16);
++	abox_update(sfr, UAIF4_CTRL0, GENMASK(4, 0), BIT(2));
++	abox_update(sfr, UAIF4_CTRL1, GENMASK(28, 0),
++		    (9 << 24) | BIT(23) | (1 << 18) | (15 << 12));
++	writel(lower_32_bits(addr), sfr + RDMA0_START);
++	writel(lower_32_bits(addr) + bytes, sfr + RDMA0_END);
++	writel(PERIOD_BYTES, sfr + RDMA0_PERIOD);
++	writel(lower_32_bits(addr), sfr + RDMA0_POINT);
++	abox_update(sfr, RDMA0_CTRL0, GENMASK(22, 19) | GENMASK(18, 16) |
++		    GENMASK(13, 8) | GENMASK(5, 4) | RDMA_ENABLE,
++		    (8 << 19) | (9 << 8) | BIT(5));
++	return 0;
++
++restore:
++	speaker_restore(speaker);
++	return ret;
++}
++
++static int speaker_trigger(struct snd_soc_component *component,
++			   struct snd_pcm_substream *stream, int cmd)
++{
++	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
++	void __iomem *sfr = speaker->sfr;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++		if (!speaker->prepared || speaker->poisoned)
++			return -EIO;
++		dma_wmb();
++		abox_update(sfr, RDMA0_CTRL0, RDMA_ENABLE, RDMA_ENABLE);
++		abox_update(sfr, UAIF4_CTRL0, BIT(0), BIT(0));
++		speaker->period = 0;
++		WRITE_ONCE(speaker->running, true);
++		schedule_delayed_work(&speaker->period_work, msecs_to_jiffies(5));
++		return 0;
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++		return speaker_stop(speaker);
++	default:
++		return -EINVAL;
++	}
++}
++
++static snd_pcm_uframes_t speaker_pointer(struct snd_soc_component *component,
++				      struct snd_pcm_substream *stream)
++{
++	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
++	u32 status = readl(speaker->sfr + RDMA0_STATUS);
++	unsigned int offset = (status & GENMASK(28, 16)) >> 12;
++	unsigned int count = status & GENMASK(12, 0);
++
++	return bytes_to_frames(stream->runtime,
++		(offset + count) % snd_pcm_lib_buffer_bytes(stream));
++}
++
++static const struct snd_soc_component_driver speaker_component = {
++	.name = "g955n-abox-speaker",
++	.open = speaker_open,
++	.close = speaker_close,
++	.prepare = speaker_prepare,
++	.trigger = speaker_trigger,
++	.pointer = speaker_pointer,
++};
++
++static struct snd_soc_dai_driver speaker_dai = {
++	.name = "g955n-uaif4",
++	.playback = {
++		.stream_name = "ABOX Speaker",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++};
++
++static void speaker_release_node(void *node)
++{
++	of_node_put(node);
++}
++
++static void speaker_release_ring(void *data)
++{
++	struct g955n_speaker *speaker = data;
++
++	if (!speaker->poisoned)
++		dma_free_coherent(speaker->dev, RING_BYTES, speaker->ring.area, speaker->ring.addr);
++}
++
++static int speaker_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct g955n_speaker *speaker;
++	struct device_node *controller, *codec;
++	struct iommu_domain *domain;
++	struct resource cmu, sfr;
++	struct pinctrl *pins;
++	int ret;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks"))
++		return -ENODEV;
++	domain = iommu_get_domain_for_dev(dev);
++	if (!domain || !iommu_is_dma_domain(domain))
++		return -ENODEV;
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(31));
++	if (ret)
++		return ret;
++
++	speaker = devm_kzalloc(dev, sizeof(*speaker), GFP_KERNEL);
++	if (!speaker)
++		return -ENOMEM;
++	speaker->dev = dev;
++
++	controller = of_parse_phandle(dev->of_node, "samsung,abox-cmu", 0);
++	if (!controller)
++		return -EINVAL;
++	ret = of_address_to_resource(controller, 0, &cmu);
++	if (!ret)
++		ret = of_address_to_resource(controller, 1, &sfr);
++	speaker->pmu = syscon_regmap_lookup_by_phandle(controller, "samsung,pmu");
++	of_node_put(controller);
++	if (ret)
++		return ret;
++	if (IS_ERR(speaker->pmu))
++		return PTR_ERR(speaker->pmu);
++
++	/* CMU and SFR are shared with the clock provider on this board. */
++	speaker->cmu = devm_ioremap(dev, cmu.start, resource_size(&cmu));
++	speaker->sfr = devm_ioremap(dev, sfr.start, resource_size(&sfr));
++	if (!speaker->cmu || !speaker->sfr)
++		return -ENOMEM;
++	speaker->bclk = devm_clk_get(dev, "speaker");
++	if (IS_ERR(speaker->bclk))
++		return PTR_ERR(speaker->bclk);
++	ret = abox_power_ready(speaker);
++	if (ret)
++		return ret;
++
++	pins = devm_pinctrl_get_select(dev, "speaker");
++	if (IS_ERR(pins))
++		return PTR_ERR(pins);
++
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++	speaker->ring.dev.type = SNDRV_DMA_TYPE_DEV;
++	speaker->ring.dev.dev = dev;
++	speaker->ring.bytes = RING_BYTES;
++	speaker->ring.area = dma_alloc_coherent(dev, RING_BYTES, &speaker->ring.addr, GFP_KERNEL);
++	if (!speaker->ring.area)
++		return -ENOMEM;
++	ret = devm_add_action_or_reset(dev, speaker_release_ring, speaker);
++	if (ret)
++		return ret;
++	if (!IS_ALIGNED(speaker->ring.addr, 16) ||
++	    speaker->ring.addr > U32_MAX - RING_BYTES)
++		return -ERANGE;
++
++	INIT_DELAYED_WORK(&speaker->period_work, speaker_tick);
++	codec = of_parse_phandle(dev->of_node, "audio-codec", 0);
++	if (!codec)
++		return -EINVAL;
++	ret = devm_add_action_or_reset(dev, speaker_release_node, codec);
++	if (ret)
++		return ret;
++	speaker->cpu.name = dev_name(dev);
++	speaker->cpu.dai_name = speaker_dai.name;
++	speaker->platform.name = dev_name(dev);
++	speaker->codec.of_node = codec;
++	speaker->codec.dai_name = "max98506-hifi";
++	speaker->link = (struct snd_soc_dai_link) {
++		.name = "Internal Speaker",
++		.stream_name = "Internal Speaker",
++		.cpus = &speaker->cpu, .num_cpus = 1,
++		.platforms = &speaker->platform, .num_platforms = 1,
++		.codecs = &speaker->codec, .num_codecs = 1,
++		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
++		.playback_only = 1,
++		.nonatomic = 1,
++	};
++	speaker->card = (struct snd_soc_card) {
++		.name = "SM-G955N Speaker",
++		.owner = THIS_MODULE,
++		.dev = dev,
++		.dai_link = &speaker->link,
++		.num_links = 1,
++	};
++	ret = devm_snd_soc_register_component(dev, &speaker_component, &speaker_dai, 1);
++	if (ret)
++		return ret;
++	return devm_snd_soc_register_card(dev, &speaker->card);
++}
++
++static const struct of_device_id speaker_of_match[] = {
++	{ .compatible = "samsung,sm-g955n-abox-speaker" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, speaker_of_match);
++
++static struct platform_driver speaker_driver = {
++	.probe = speaker_probe,
++	.driver = {
++		.name = "g955n-abox-speaker",
++		.of_match_table = speaker_of_match,
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(speaker_driver);
++
++MODULE_DESCRIPTION("SM-G955N native ABOX speaker PCM");
++MODULE_LICENSE("GPL");

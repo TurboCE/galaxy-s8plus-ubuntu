@@ -1,0 +1,14 @@
+[Unit]
+Description=Initialize the SM-G955N native ABOX speaker
+ConditionPathExists=/sys/firmware/devicetree/base/soc@0/abox-speaker
+After=systemd-modules-load.service
+Before=sound.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/modprobe g955n-abox-power-test
+ExecStart=/usr/sbin/modprobe g955n-abox-speaker
+
+[Install]
+WantedBy=multi-user.target
