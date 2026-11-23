@@ -3818,3 +3818,27 @@ There was still no ALSA card or PCM playback or capture device.
 The native ABOX CPU DAI, DMA and machine routing are required to
 connect these codec endpoints to Ubuntu. No audio signal, sound
 pressure or microphone recording was verified by this trial.
+
+### R88 ABOX clock qualification
+
+The Samsung Exynos8895 CAL source identifies the PLL_1061X and the
+AUDIF, UAIF0 and UAIF4 divider registers and field widths. The SM-G955N
+provider reads these registers after verifying inherited ABOX power.
+It is read-only and leaves rate changes and gates untouched. A host
+test used the driver calculation with both signs of the fractional
+PLL multiplier and verified the divider and unpowered cases.
+
+Built the ARM64 R88 kernel, DTB and module. After BOOT readback
+verification, the SM-G955N booted and the opt-in clock provider
+registered. It reported the PLL at 1179648040 Hz, AUDIF at
+49152001 Hz, and both UAIF divider outputs at 24576000 Hz.
+These are decoded register rates, not measurements of the serial
+pins. At this AUDIF rate a divider of 32 corresponds to the
+1536000 Hz clock for the initial 48 kHz stereo, 16-bit I2S stream.
+The divider was not changed in this trial.
+
+The MAX98506 and CS47L93 still bound to their drivers. ALSA still
+listed no card, so speaker playback and microphone capture cannot
+be started on this kernel. Native ABOX PCM/DMA and clock/serializer
+configuration remain necessary. The project suite ran 162 cases
+with 9 skipped and no failures.

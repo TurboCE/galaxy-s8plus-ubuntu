@@ -2075,3 +2075,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   and register a native ASoC I2S playback codec after revision detection.
 - Describe the CS47L93 AIF and digital microphone bias references in
   the SM-G955N device tree.
+
+### 6.18 R88 inherited ABOX clocks
+
+- Expose the Samsung-programmed ABOX PLL, AUDIF and both codec
+  serializer divider rates through the Common Clock Framework.
+- Keep clock register reads behind the ABOX power-state check.
