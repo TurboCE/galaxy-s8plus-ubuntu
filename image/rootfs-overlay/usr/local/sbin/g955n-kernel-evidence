@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import platform
 import re
 import subprocess
 import tempfile
@@ -12,7 +11,8 @@ import time
 
 
 def main():
-    if (os.geteuid() or 'g955n-ubuntu' not in platform.release()
+    release = os.uname().release
+    if (os.geteuid() or '-g955n-' not in release
             or 'SM-G955N' not in Path('/proc/device-tree/model').read_text()):
         raise SystemExit('Requires native SM-G955N Ubuntu')
     boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
@@ -34,7 +34,7 @@ def main():
     # Publish the directory only after a complete manifest exists. An interrupted
     # capture cannot masquerade as the completed capture for a subsequent run.
     destination = Path(tempfile.mkdtemp(prefix='.' + boot + '.partial-', dir=parent))
-    report = dict(target='SM-G955N', kernel=platform.release(),
+    report = dict(target='SM-G955N', kernel=release,
                   capture_uptime_seconds=round(time.monotonic(), 3),
                   kernel_taint_at_capture=int(Path('/proc/sys/kernel/tainted').read_text()),
                   initial_capture_only=True, clean_boot_qualified=False, sources={})

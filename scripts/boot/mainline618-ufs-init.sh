@@ -11,6 +11,13 @@ log() {
     printf '<6>g955n-ufs: %s\n' "$*" > /dev/kmsg
 }
 
+boot_timing() {
+    local uptime
+
+    read -r uptime _ < /proc/uptime
+    log "SM-G955N BOOT TIME $1 $uptime seconds"
+}
+
 log_g3d_snapshot() {
     local snapshot="/proc/device-tree/chosen/samsung,g955n-g3d-$1-snapshot"
     local value
@@ -62,6 +69,11 @@ usb_diagnostics() {
                 "$BB" dmesg
                 printf 'SM-G955N LOG END\n'
                 ;;
+            continue)
+                if [ -e /run/g955n-usb-handoff.wait ]; then
+                    "$BB" mv /run/g955n-usb-handoff.wait /run/g955n-usb-handoff.ready
+                fi
+                ;;
             recovery)
                 printf 'SM-G955N RECOVERY REQUESTED\n'
                 "$BB" sync
@@ -69,6 +81,26 @@ usb_diagnostics() {
                 ;;
         esac
     done
+}
+
+wait_for_usb_handoff() {
+    local attempt=0
+    local result=0
+
+    case " $("$BB" cat /proc/cmdline) " in
+        *" g955n.usb_handoff=1 "*)
+            while [ ! -e /run/g955n-usb-handoff.ready ] && [ "$attempt" -lt 120 ]; do
+                "$BB" sleep 0.1
+                attempt=$((attempt + 1))
+            done
+            [ -e /run/g955n-usb-handoff.ready ] || result=1
+            ;;
+        *)
+            "$BB" sleep 12
+            ;;
+    esac
+    "$BB" rm -f /run/g955n-usb-handoff.wait /run/g955n-usb-handoff.ready
+    return "$result"
 }
 
 usb_gadget_state() {
@@ -104,6 +136,11 @@ start_usb_gadget() {
 
 prepare_ubuntu_trial_return() {
     "$BB" mkdir -p /run/systemd/system/timers.target.wants /run/g955n-trial || return 1
+    if [ -x /bin/g955n-kernel-evidence ] && [ -r /bin/g955n-kernel-evidence.service ]; then
+        "$BB" cp /bin/g955n-kernel-evidence /run/g955n-trial/kernel-evidence || return 1
+        "$BB" sed 's|/usr/local/sbin/g955n-kernel-evidence|/run/g955n-trial/kernel-evidence|' \
+            /bin/g955n-kernel-evidence.service > /run/systemd/system/g955n-kernel-evidence.service || return 1
+    fi
     "$BB" cat > /run/g955n-trial/check <<'EOF' || return 1
 #!/bin/sh
 state=$(systemctl is-system-running 2>/dev/null)
@@ -227,13 +264,26 @@ probe_panfrost_render() (
         "$BB" mount --bind "/$dir" "/newroot/$dir" || exit 1
         mounts="$dir $mounts"
     done
+    set -- /run/g955n-panfrost-render "$render"
+    if [ -x /bin/g955n-strace ]; then
+        "$BB" cp /bin/g955n-strace /run/g955n-strace || exit 1
+        set -- /run/g955n-strace --kill-on-exit -f -tt -T \
+            -e trace=openat,mmap,ioctl,futex,poll,ppoll \
+            -o /run/g955n-panfrost.strace "$@"
+    fi
     result=0
     "$BB" timeout -s KILL 90 "$BB" chroot /newroot /usr/bin/env \
         MESA_SHADER_CACHE_DISABLE=true \
         __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
-        /run/g955n-panfrost-render "$render" > /run/g955n-panfrost-render.log 2>&1 || result=$?
+        "$@" > /run/g955n-panfrost-render.log 2>&1 || result=$?
     while IFS= read -r output; do log "$output"; done < /run/g955n-panfrost-render.log
-    [ "$result" -eq 0 ] || log "Panfrost probe exit status $result"
+    if [ "$result" -ne 0 ]; then
+        log "Panfrost probe exit status $result"
+        if [ -s /run/g955n-panfrost.strace ]; then
+            "$BB" tail -n 16 /run/g955n-panfrost.strace |
+                while IFS= read -r output; do log "Panfrost trace: $output"; done
+        fi
+    fi
     return "$result"
 )
 
@@ -244,12 +294,18 @@ probe_panfrost_render() (
 [ "$("$BB" tr -d '\000' < /proc/device-tree/model)" = 'Samsung Galaxy S8+ (SM-G955N)' ] ||
     stop 'Unexpected board model'
 log 'SM-G955N UFS INIT'
+boot_timing initramfs
 log_g3d_snapshot power 'BUCK6_CTRL OUT1 OUT2 LDO9_CTRL PMU_STATUS'
 log_g3d_snapshot clock 'REF_MUX SWITCH_MUX PLL_CTRL PLL_OPTIONS BUSD_MUX BUSP_DIV AGPU_GATE'
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.usb_diag=1 "*)
         if start_usb_gadget; then
             log 'USB ACM gadget bound'
+            case " $("$BB" cat /proc/cmdline) " in
+                *" g955n.usb_handoff=1 "*)
+                    : > /run/g955n-usb-handoff.wait
+                    ;;
+            esac
             usb_diagnostics &
             diag_pid=$!
         else
@@ -261,6 +317,22 @@ case " $("$BB" cat /proc/cmdline) " in
             usb_gadget_state
         } > /run/g955n-trial/usb-start.log
         while IFS= read -r line; do log "USB: $line"; done < /run/g955n-trial/usb-start.log
+        ;;
+esac
+
+case " $("$BB" cat /proc/cmdline) " in
+    *" g955n.ufs_module_hs_trial=1 "*)
+        [ -n "$diag_pid" ] || stop 'UFS module trial requires USB diagnostics'
+        [ -r /bin/ufs-exynos.ko ] || stop 'UFS trial module unavailable'
+        [ -e /run/g955n-usb-handoff.wait ] || [ -e /run/g955n-usb-handoff.ready ] ||
+            stop 'UFS module trial requires USB handoff'
+        wait_for_usb_handoff || stop 'UFS module trial did not receive host acknowledgement'
+        (
+            log 'Starting UFS HS module with USB diagnostics active'
+            if ! "$BB" insmod /bin/ufs-exynos.ko exynos8895_hs_trial=1; then
+                log 'UFS HS module load failed'
+            fi
+        ) &
         ;;
 esac
 
@@ -283,6 +355,19 @@ log "USERDATA capacity: $sectors sectors"
     stop 'Unexpected root filesystem'
 [ -x /newroot/sbin/init ] || stop 'Ubuntu init missing'
 log 'SM-G955N UFS UBUNTU ROOT OK (read-only)'
+boot_timing root-verified
+
+case " $("$BB" cat /proc/cmdline) " in
+    *" g955n.ufs_read_diag=1 "*)
+        boot_timing ufs-read-start
+        if "$BB" timeout -s KILL 35 "$BB" dd if="$rootdev" of=/dev/null \
+            bs=1M count=8 iflag=direct 2>/dev/null; then
+            boot_timing ufs-read-8MiB-complete
+        else
+            log 'UFS direct read diagnostic failed'
+        fi
+        ;;
+esac
 
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.panfrost_diag=1 "*) probe_panfrost_render || true ;;
@@ -293,7 +378,7 @@ case " $("$BB" cat /proc/cmdline) " in
     *) stop 'Read-only check complete' ;;
 esac
 if [ -n "$diag_pid" ]; then
-    "$BB" sleep 12
+    wait_for_usb_handoff || true
     kill "$diag_pid" 2>/dev/null || true
 fi
 
@@ -311,6 +396,7 @@ case " $("$BB" cat /proc/cmdline) " in
     *" g955n.ubuntu_return=1 "*) prepare_ubuntu_trial_return || stop 'Cannot stage Ubuntu return timer' ;;
 esac
 log 'Handing PID 1 to Ubuntu systemd'
+boot_timing switch-root
 for dir in proc sys run dev; do
     "$BB" mount --move "/$dir" "/newroot/$dir" ||
         stop "Cannot move $dir to Ubuntu root"

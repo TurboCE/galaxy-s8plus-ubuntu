@@ -1878,3 +1878,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   loader checks that the power domain is on before reading clocks.
 - Add the opt-in SM-G955N G3D clock and Mali device-tree proposal.
 - Add a read-only Mesa shader rendering and pixel readback diagnostic.
+
+## 2026-11-23 — Linux 6.18 boot timing and recovery diagnostics
+
+- Allow the host to acknowledge receipt of the early USB log and end
+  the fixed initramfs wait. Record boot handoff times.
+- Start the kernel evidence collector asynchronously and support native
+  SM-G955N 6.18 releases.
+- Add the opt-in HS-B UFS calibration, acknowledged module load and
+  direct read timing. Support a bounded syscall trace of the Mesa probe.

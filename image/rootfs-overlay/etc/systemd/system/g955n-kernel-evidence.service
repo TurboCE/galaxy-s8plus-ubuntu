@@ -5,14 +5,14 @@ Before=display-manager.service
 ConditionPathExists=/proc/device-tree/model
 
 [Service]
-Type=oneshot
+Type=exec
 ExecStart=/usr/local/sbin/g955n-kernel-evidence
 StateDirectory=g955n/kernel-evidence
 StateDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=full
-TimeoutStartSec=30
+RuntimeMaxSec=120
 
 [Install]
 WantedBy=multi-user.target

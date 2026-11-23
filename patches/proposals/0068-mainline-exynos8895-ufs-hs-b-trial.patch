@@ -1,0 +1,261 @@
+Subject: [PATCH] Exynos8895: trial the board's HS-B UFS calibration
+
+Port the board device-tree series B gear 1, two-lane tuning into the
+host and PHY. Require both power-change callbacks to succeed for this
+trial. Preserve PWM mode unless ufs_exynos.exynos8895_hs_trial=1 is
+passed on the kernel command line.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -859,6 +859,9 @@
+ 			return ret;
+ 	}
+ 
++	if (hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE)
++		return 0;
++
+ 	if (ufshcd_is_hs_mode(dev_req_params)) {
+ 		exynos_ufs_config_sync_pattern_mask(ufs, dev_req_params);
+ 
+@@ -889,6 +892,7 @@
+ 	int gear = max_t(u32, pwr_req->gear_rx, pwr_req->gear_tx);
+ 	int lanes = max_t(u32, pwr_req->lane_rx, pwr_req->lane_tx);
+ 	char pwr_str[PWR_MODE_STR_LEN] = "";
++	int ret;
+ 
+ 	/* let default be PWM Gear 1, Lane 1 */
+ 	if (!gear)
+@@ -897,16 +901,17 @@
+ 	if (!lanes)
+ 		lanes = 1;
+ 
+-	if (ufs->drv_data->post_pwr_change)
+-		ufs->drv_data->post_pwr_change(ufs, pwr_req);
+-
+-	if ((ufshcd_is_hs_mode(pwr_req))) {
+-		switch (pwr_req->hs_rate) {
+-		case PA_HS_MODE_A:
+-		case PA_HS_MODE_B:
++	if (ufs->drv_data->post_pwr_change) {
++		ret = ufs->drv_data->post_pwr_change(ufs, pwr_req);
++		if (ret && (hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE))
++			return ret;
++	}
++
++	if (ufshcd_is_hs_mode(pwr_req)) {
++		if (!(hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE) &&
++		    (pwr_req->hs_rate == PA_HS_MODE_A ||
++		     pwr_req->hs_rate == PA_HS_MODE_B))
+ 			phy_calibrate(generic_phy);
+-			break;
+-		}
+ 
+ 		snprintf(pwr_str, PWR_MODE_STR_LEN, "%s series_%s G_%d L_%d",
+ 			"FAST",	pwr_req->hs_rate == PA_HS_MODE_A ? "A" : "B",
+@@ -2246,6 +2251,10 @@
+ 	{ }
+ };
+ 
++static bool exynos8895_hs_trial;
++module_param_named(exynos8895_hs_trial, exynos8895_hs_trial, bool, 0444);
++MODULE_PARM_DESC(exynos8895_hs_trial, "Use the Exynos8895 HS-B G1 trial mode");
++
+ static int exynos8895_ufs_init(struct exynos_ufs *ufs)
+ {
+ 	struct regmap *pmu;
+@@ -2264,6 +2273,9 @@
+ 
+ 	if (!ufs->sysreg)
+ 		return -ENODEV;
++	if (exynos8895_hs_trial)
++		ufs->hba->quirks |= UFSHCD_QUIRK_STRICT_PWR_CHANGE;
++
+ 	ret = regmap_update_bits(ufs->sysreg, 0x1150, BIT(0), BIT(0));
+ 	if (ret)
+ 		return ret;
+@@ -2323,11 +2335,65 @@
+ static int exynos8895_ufs_initial_power_mode(struct exynos_ufs *ufs,
+ 					    struct ufs_pa_layer_attr *pwr)
+ {
+-	/* Keep the first port at PWM G1 until high-speed calibration is tested. */
++	/* Exynos8895 device-tree series B attributes for the two-lane link. */
++	static const struct exynos8895_ufs_attr hs_attrs[] = {
++		{ 0x1569, 1, EXYNOS8895_MIB },
++		{ 0x1584, 1, EXYNOS8895_MIB },
++		{ DL_FC0PROTTIMEOUTVAL, 8064, EXYNOS8895_MIB },
++		{ DL_TC0REPLAYTIMEOUTVAL, 28224, EXYNOS8895_MIB },
++		{ DL_AFC0REQTIMEOUTVAL, 20160, EXYNOS8895_MIB },
++		{ PA_PWRMODEUSERDATA0, 12000, EXYNOS8895_MIB },
++		{ PA_PWRMODEUSERDATA1, 32000, EXYNOS8895_MIB },
++		{ PA_PWRMODEUSERDATA2, 16000, EXYNOS8895_MIB },
++	};
++	int ret;
++
++	if (exynos8895_hs_trial) {
++		if (!ufshcd_is_hs_mode(pwr) || pwr->lane_rx < 2 || pwr->lane_tx < 2)
++			return -EOPNOTSUPP;
++
++		ret = exynos8895_ufs_write_attrs(ufs, hs_attrs, ARRAY_SIZE(hs_attrs));
++		if (ret)
++			return ret;
++
++		unipro_writel(ufs, 8064, 0x7888);
++		unipro_writel(ufs, 28224, 0x788c);
++		unipro_writel(ufs, 20160, 0x7890);
++		unipro_writel(ufs, 12000, 0x78b8);
++		unipro_writel(ufs, 32000, 0x78bc);
++		unipro_writel(ufs, 16000, 0x78c0);
++
++		ret = phy_calibrate(ufs->phy);
++		if (ret)
++			return dev_err_probe(ufs->hba->dev, ret, "UFS HS PHY setup failed\n");
++
++		pwr->gear_rx = pwr->gear_tx = UFS_HS_G1;
++		pwr->lane_rx = pwr->lane_tx = 2;
++		pwr->pwr_rx = pwr->pwr_tx = FAST_MODE;
++		pwr->hs_rate = PA_HS_MODE_B;
++		return 0;
++	}
++
+ 	pwr->gear_rx = pwr->gear_tx = UFS_PWM_G1;
+ 	pwr->lane_rx = pwr->lane_tx = 1;
+ 	pwr->pwr_rx = pwr->pwr_tx = SLOWAUTO_MODE;
+ 	pwr->hs_rate = 0;
++	return 0;
++}
++
++static int exynos8895_ufs_post_power_mode(struct exynos_ufs *ufs,
++					 const struct ufs_pa_layer_attr *pwr)
++{
++	int ret;
++
++	if (!exynos8895_hs_trial)
++		return 0;
++
++	ret = phy_calibrate(ufs->phy);
++	if (ret)
++		return dev_err_probe(ufs->hba->dev, ret, "UFS HS PHY CDR lock failed\n");
++
++	dev_info(ufs->hba->dev, "UFS HS PHY calibrated and locked\n");
+ 	return 0;
+ }
+ 
+@@ -2352,6 +2418,7 @@
+ 	.init_link_phy = exynos8895_ufs_init_link_phy,
+ 	.post_link = exynos8895_ufs_post_link,
+ 	.pre_pwr_change = exynos8895_ufs_initial_power_mode,
++	.post_pwr_change = exynos8895_ufs_post_power_mode,
+ };
+ 
+ static struct exynos_ufs_uic_attr exynos7_uic_attr = {
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -4788,16 +4788,19 @@
+ 	ret = ufshcd_vops_pwr_change_notify(hba, PRE_CHANGE,
+ 					desired_pwr_mode, &final_params);
+ 
++	if (ret) {
++		if (hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE)
++			return ret;
++		memcpy(&final_params, desired_pwr_mode, sizeof(final_params));
++	}
++
++	ret = ufshcd_change_power_mode(hba, &final_params);
+ 	if (ret)
+-		memcpy(&final_params, desired_pwr_mode, sizeof(final_params));
+-
+-	ret = ufshcd_change_power_mode(hba, &final_params);
+-
+-	if (!ret)
+-		ufshcd_vops_pwr_change_notify(hba, POST_CHANGE, NULL,
+-					&final_params);
+-
+-	return ret;
++		return ret;
++
++	ret = ufshcd_vops_pwr_change_notify(hba, POST_CHANGE, NULL,
++					  &final_params);
++	return hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE ? ret : 0;
+ }
+ EXPORT_SYMBOL_GPL(ufshcd_config_pwr_mode);
+ 
+diff --git a/include/ufs/ufshcd.h b/include/ufs/ufshcd.h
+--- a/include/ufs/ufshcd.h
++++ b/include/ufs/ufshcd.h
+@@ -698,6 +698,9 @@
+ 	 * because it causes link startup to become unreliable.
+ 	 */
+ 	UFSHCD_QUIRK_PERFORM_LINK_STARTUP_ONCE		= 1 << 26,
++
++	/* A failed variant power-change callback invalidates the link. */
++	UFSHCD_QUIRK_STRICT_PWR_CHANGE			= 1 << 27,
+ };
+ 
+ enum ufshcd_caps {
+diff --git a/drivers/phy/samsung/phy-exynos8895-ufs.c b/drivers/phy/samsung/phy-exynos8895-ufs.c
+--- a/drivers/phy/samsung/phy-exynos8895-ufs.c
++++ b/drivers/phy/samsung/phy-exynos8895-ufs.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /* Exynos8895 PMA calibration from the Samsung Exynos8895 device tree. */
+ #include <linux/delay.h>
++#include <linux/iopoll.h>
+ #include "phy-samsung-ufs.h"
+ 
+ #define EXYNOS8895_LANE_STRIDE 0x140
+@@ -25,6 +26,37 @@
+ 	END_UFS_PHY_CFG,
+ };
+ 
++/* Series B gear 1 tuning from the Samsung board DTS. */
++#define EXYNOS8895_HS_TRSV(reg, val) \
++	PHY_TRSV_REG_CFG_OFFSET((reg) / 4, (val), PWR_MODE_HS_G1_SER_B, \
++				EXYNOS8895_LANE_STRIDE / 4)
++
++static const struct samsung_ufs_phy_cfg exynos8895_pre_hs[] = {
++	EXYNOS8895_HS_TRSV(0x0c8, 0xbc),
++	EXYNOS8895_HS_TRSV(0x0f0, 0x7f),
++	EXYNOS8895_HS_TRSV(0x120, 0xc0),
++	EXYNOS8895_HS_TRSV(0x128, 0x08),
++	EXYNOS8895_HS_TRSV(0x12c, 0x00),
++	EXYNOS8895_HS_TRSV(0x134, 0xd3),
++	EXYNOS8895_HS_TRSV(0x108, 0x5d),
++	EXYNOS8895_HS_TRSV(0x10c, 0x90),
++	END_UFS_PHY_CFG,
++};
++
++static const struct samsung_ufs_phy_cfg exynos8895_post_hs[] = {
++	END_UFS_PHY_CFG,
++};
++
++static int exynos8895_wait_for_cdr(struct phy *phy, u8 lane)
++{
++	struct samsung_ufs_phy *ufs_phy = get_samsung_ufs_phy(phy);
++	u32 status;
++
++	return readl_poll_timeout(ufs_phy->reg_pma + 0x1fc +
++				  lane * EXYNOS8895_LANE_STRIDE,
++				  status, status & BIT(0), 10, 100000);
++}
++
+ static int exynos8895_wait_for_calibration(struct phy *phy, u8 lane)
+ {
+ 	/* This M-PHY requires 200 us after releasing PMA reset. */
+@@ -35,6 +67,8 @@
+ 
+ static const struct samsung_ufs_phy_cfg *exynos8895_ufs_cfgs[CFG_TAG_MAX] = {
+ 	[CFG_PRE_INIT] = exynos8895_pre_init,
++	[CFG_PRE_PWR_HS] = exynos8895_pre_hs,
++	[CFG_POST_PWR_HS] = exynos8895_post_hs,
+ };
+ 
+ static const char * const exynos8895_ufs_clocks[] = { "ref_clk" };
+@@ -49,5 +83,6 @@
+ 	.clk_list = exynos8895_ufs_clocks,
+ 	.num_clks = ARRAY_SIZE(exynos8895_ufs_clocks),
+ 	.wait_for_cal = exynos8895_wait_for_calibration,
++	.wait_for_cdr = exynos8895_wait_for_cdr,
+ 	.defer_init_calibration = true,
+ };

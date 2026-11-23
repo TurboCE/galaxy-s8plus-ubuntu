@@ -3052,3 +3052,23 @@ DTB. No rail was switched during this test.
   the DRM ioctl, and allocated and released a GEM buffer. It loaded
   EGL and GBM but timed out before gbm_create_device returned. The
   Mesa shader and pixel check therefore remains unqualified.
+
+### R37 boot timing and R38 high-speed trial
+
+- The working #58 measured 3.460 seconds in the kernel and 6.334 in
+  userspace, with a 9.794 second total. It reached graphical.target at
+  6.050 seconds in userspace. Its UFS link used HS-B gear 3, two lanes.
+- The previous 6.18 R29 reached multi-user.target with 35.900 seconds
+  in the kernel and 158.651 in userspace. It used PWM gear 1, one lane.
+  R37 kept that link mode, used quieter console output and enabled the
+  USB host acknowledgement. The 6.18 kernel stage dropped to 23.797
+  seconds and userspace took 159.195 seconds, totaling 182.993 seconds.
+  Mac USB diagnostics, the ttyGS0 login prompt, the private namespace
+  check and automatic TWRP return all passed in R37.
+- R38 tested board HS-B gear 1 tuning in a read-only image. It did not
+  expose USB, so neither speed nor the cause of the failed boot could
+  be measured. The default mode remains PWM. The module trial starts
+  USB diagnostics before invoking the experimental UFS calibration.
+- The asynchronous kernel evidence unit passed systemd-analyze verify.
+  Its on-device boot timing and the optional Mesa syscall trace are
+  qualified separately.

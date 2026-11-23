@@ -90,6 +90,10 @@ kernel release, `log` streams the kernel log, and `recovery` requests
 a recovery reboot. The interface is available during the read-only
 UFS test and exits before handing over to the installed system. The
 timed Ubuntu trial records the early USB diagnostics in its journal.
+Add `g955n.usb_handoff=1` to let the host send `continue` after reading
+the early log. The normal Ubuntu boot proceeds after the bounded wait
+if the host is absent. Initramfs logs include the monotonic time of
+entry, root verification and handoff to systemd.
 For a timed trial, add `g955n.usb_login=1` to start an Ubuntu login prompt
 on ttyGS0 after initramfs exits. Authentication uses the installed
 Ubuntu accounts. Add `g955n.netns_diag=1` to exercise a systemd unit
@@ -119,6 +123,15 @@ and the host clock state when shutting down. Apply them in that order
 for the combined trial. Keep using the timed recovery return while
 testing.
 
+Proposal 0068 adds the experimental Exynos8895 two-lane HS-B gear 1
+tuning. Use a read-only trial when applying it. For diagnosis, build
+`CONFIG_SCSI_UFS_EXYNOS=m` and place `ufs-exynos.ko` at
+`/bin/ufs-exynos.ko` in the initramfs. Boot with `g955n.ufs_module_hs_trial=1`,
+`g955n.usb_diag=1` and `g955n.usb_handoff=1`. The initramfs loads the
+experimental driver after the host acknowledges receipt of the early
+USB log. Add `g955n.ufs_read_diag=1` to time an 8 MiB direct read from
+USERDATA without changing the contents.
+
 For the G3D power snapshot, also apply proposal 0063 to uniLoader and
 reserve five cells under `/chosen` in the embedded DTB. Use
 `samsung,g955n-g3d-power-snapshot` with each cell initialized to
@@ -141,6 +154,9 @@ initramfs at `/bin/g955n-panfrost-render` and add
 `g955n.panfrost_diag=1` to the boot arguments. The test uses the installed
 Mesa libraries from the read-only Ubuntu mount. It verifies shader
 rendering and pixel readback through Panfrost without exercising DECON.
+An optional Ubuntu AArch64 `strace` executable at `/bin/g955n-strace`
+enables a bounded syscall trace. The initramfs logs the last entries if
+the rendering probe fails.
 
 ## Reading the warm boot trace
 
