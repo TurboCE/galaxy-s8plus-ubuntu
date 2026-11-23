@@ -3130,3 +3130,42 @@ DTB. No rail was switched during this test.
   ALSA card, sleep interface or WLAN PHY. Native DECON PRIME scanout,
   GNOME Wayland login and rotation, suspend/resume, audio and Wi-Fi
   remain open for 6.18.
+
+### R49–R50 native hardware services and Ubuntu package maintenance
+
+- Linux 6.18 R49 exposed USB CDC Ethernet and the authenticated ACM
+  serial console together. On the installed Ubuntu, systemd-networkd
+  configured the USB link and the Mac authenticated over SSH.
+- The Exynos8895 RTC registered as `/dev/rtc0`. Its initial calendar
+  was invalid. After initializing the UTC date through the standard
+  RTC ioctl, the sysfs date and time matched and `rtcwake -m on`
+  observed an alarm interrupt while the system was awake. The RTC
+  retained its UTC time over the warm boot after the upgrade.
+- Ubuntu udev tagged STMFTS as a touchscreen and tagged the GPIO keys
+  device for logind's power-switch handling. PipeWire and WirePlumber
+  ran with the stock plugin path. The session had only a dummy sink,
+  since R49 did not publish an ALSA card.
+- The modified package-owned Clutter library was restored from the
+  version-matched Ubuntu stock backup. `dpkg --verify` passed for
+  `libmutter-14-0:arm64`. The installed 6.18 kernel evidence service
+  completed, and the vendor hardware service condition skipped on 6.18.
+- APT refreshed the signed Ubuntu Noble, Noble Updates and Noble
+  Security repositories through USB Ethernet and a temporary TLS
+  relay. The real upgrade completed with 52 packages updated, zero
+  installed and zero removed. The BOOT partition hash matched before
+  and after the upgrade and the normal reboot. Subsequent
+  `apt-get check`, `dpkg --audit`, Clutter package verification and
+  a repeat upgrade simulation passed. No updates remained in the
+  tested indexes. The graphics and audio daemon packages did not
+  receive new versions in this batch.
+- R50 registered the MAX77865 battery through the standard power
+  supply class. The USB-powered sample showed presence, 99 percent
+  charge and 4.345781 V. UPower reported the corresponding battery
+  and matched the capacity and voltage. This qualifies battery
+  telemetry. Charger control and charging-state reporting are
+  separate; the driver reports an unknown charger state.
+- R50 retained the updated Ubuntu packages, passed the authenticated
+  USB console and Ethernet checks, and repeated the Panfrost linear
+  DMA-BUF render/reimport test. Native DECON, GNOME Wayland,
+  suspend/resume, the onboard WLAN and LTE, IIO sensors and actual
+  speaker/microphone PCM still need 6.18 integration and tests.

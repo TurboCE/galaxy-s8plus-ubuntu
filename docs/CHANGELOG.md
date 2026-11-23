@@ -1904,3 +1904,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Render to a panel-sized linear GBM DMA-BUF and verify export and PRIME
   reimport during the 6.18 GPU probe.
 - Record the inherited DECON0 window and IDMA route from uniLoader.
+
+## 2026-11-23 — Linux 6.18 standard RTC and Ubuntu package maintenance
+
+- Expose the Exynos8895 always-on RTC through the Linux RTC class.
+- Report MAX77865 battery capacity and voltage through Linux power supply and UPower.
+- Add optional USB CDC Ethernet alongside the authenticated ACM console.
+- Keep the Ubuntu Clutter library package-owned. Use standard PipeWire
+  and WirePlumber plugin lookup on 6.18 and apply the Samsung BSP
+  services only on the vendor kernel.

@@ -1,0 +1,186 @@
+Subject: [PATCH] power: supply: report MAX77865 battery telemetry
+
+Expose the SM-G955N fuel gauge at the PMIC's I2C address 0x36 through
+the Linux power supply class. Use the presence, reported SOC and cell
+voltage register conversions from Samsung's MAX77865 driver. This
+does not program the charger or write fuel gauge settings.
+
+Apply after the SM-G955N MAX77865 USB switch patch.
+
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -447,6 +447,14 @@
+ 	  max17055, max77693, max77849.
+ 
+ 	  Driver can be build as a module (max17042_battery).
++
++config BATTERY_MAX77865
++	tristate "MAX77865 battery fuel gauge telemetry"
++	depends on I2C
++	help
++	  Report the MAX77865 fuel gauge state of charge and cell voltage
++	  through the power supply class. Charging and fuel gauge calibration
++	  remain under the existing firmware configuration.
+ 
+ config BATTERY_MAX1720X
+ 	tristate "Maxim MAX17201/MAX17205 Fuel Gauge"
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -57,6 +57,7 @@
+ obj-$(CONFIG_BATTERY_DA9150)	+= da9150-fg.o
+ obj-$(CONFIG_BATTERY_MAX17040)	+= max17040_battery.o
+ obj-$(CONFIG_BATTERY_MAX17042)	+= max17042_battery.o
++obj-$(CONFIG_BATTERY_MAX77865)	+= max77865_battery.o
+ obj-$(CONFIG_BATTERY_MAX1720X)	+= max1720x_battery.o
+ obj-$(CONFIG_BATTERY_MAX1721X)	+= max1721x_battery.o
+ obj-$(CONFIG_BATTERY_RT5033)	+= rt5033_battery.o
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -281,6 +281,11 @@
+ 		compatible = "maxim,max77865-usb2-switch";
+ 		reg = <0x25>;
+ 	};
++
++	fuel-gauge@36 {
++		compatible = "maxim,max77865-fuel-gauge";
++		reg = <0x36>;
++	};
+ };
+ 
+ / {
+diff --git a/drivers/power/supply/max77865_battery.c b/drivers/power/supply/max77865_battery.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/power/supply/max77865_battery.c
+@@ -0,0 +1,101 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/* Read-only MAX77865 battery telemetry, based on Samsung's fuel gauge. */
++
++#include <linux/bitops.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/power_supply.h>
++
++#define MAX77865_FG_STATUS	0x00
++#define MAX77865_FG_REPSOC	0x06
++#define MAX77865_FG_VCELL	0x09
++#define MAX77865_FG_BAT_ABSENT	BIT(3)
++
++static enum power_supply_property max77865_battery_properties[] = {
++	POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_STATUS,
++	POWER_SUPPLY_PROP_CAPACITY,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++};
++
++static int max77865_battery_get_property(struct power_supply *psy,
++					enum power_supply_property prop,
++					union power_supply_propval *value)
++{
++	struct i2c_client *client = power_supply_get_drvdata(psy);
++	int word;
++
++	switch (prop) {
++	case POWER_SUPPLY_PROP_PRESENT:
++		word = i2c_smbus_read_word_data(client, MAX77865_FG_STATUS);
++		if (word < 0)
++			return word;
++		value->intval = !(word & MAX77865_FG_BAT_ABSENT);
++		return 0;
++	case POWER_SUPPLY_PROP_STATUS:
++		/* The separate charger tracks charging and termination. */
++		value->intval = POWER_SUPPLY_STATUS_UNKNOWN;
++		return 0;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		word = i2c_smbus_read_word_data(client, MAX77865_FG_REPSOC);
++		if (word < 0)
++			return word;
++		value->intval = min(word >> 8, 100);
++		return 0;
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++		word = i2c_smbus_read_word_data(client, MAX77865_FG_VCELL);
++		if (word < 0)
++			return word;
++		/* The register uses 78.125 microvolts per count. */
++		value->intval = DIV_ROUND_CLOSEST(word * 625, 8);
++		return 0;
++	default:
++		return -EINVAL;
++	}
++}
++
++static const struct power_supply_desc max77865_battery_desc = {
++	.name = "max77865-battery",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = max77865_battery_properties,
++	.num_properties = ARRAY_SIZE(max77865_battery_properties),
++	.get_property = max77865_battery_get_property,
++};
++
++static int max77865_battery_probe(struct i2c_client *client)
++{
++	struct power_supply_config config = {
++		.drv_data = client,
++		.fwnode = dev_fwnode(&client->dev),
++	};
++	struct power_supply *psy;
++	int ret;
++
++	if (!i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_WORD_DATA))
++		return -EOPNOTSUPP;
++
++	ret = i2c_smbus_read_word_data(client, MAX77865_FG_STATUS);
++	if (ret < 0)
++		return dev_err_probe(&client->dev, ret, "cannot read fuel gauge status\n");
++
++	psy = devm_power_supply_register(&client->dev, &max77865_battery_desc, &config);
++	return PTR_ERR_OR_ZERO(psy);
++}
++
++static const struct of_device_id max77865_battery_of_match[] = {
++	{ .compatible = "maxim,max77865-fuel-gauge" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, max77865_battery_of_match);
++
++static struct i2c_driver max77865_battery_driver = {
++	.driver = {
++		.name = "max77865-battery",
++		.of_match_table = max77865_battery_of_match,
++	},
++	.probe = max77865_battery_probe,
++};
++module_i2c_driver(max77865_battery_driver);
++
++MODULE_DESCRIPTION("MAX77865 battery fuel gauge telemetry");
++MODULE_LICENSE("GPL");
+diff --git a/Documentation/devicetree/bindings/power/supply/maxim,max77865-fuel-gauge.yaml b/Documentation/devicetree/bindings/power/supply/maxim,max77865-fuel-gauge.yaml
+new file mode 100644
+--- /dev/null
++++ b/Documentation/devicetree/bindings/power/supply/maxim,max77865-fuel-gauge.yaml
+@@ -0,0 +1,22 @@
++# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
++%YAML 1.2
++---
++$id: http://devicetree.org/schemas/power/supply/maxim,max77865-fuel-gauge.yaml#
++$schema: http://devicetree.org/meta-schemas/core.yaml#
++
++title: Maxim MAX77865 fuel gauge
++
++maintainers:
++  - Yongseok <yongseok@MacBookPro.mizzy.kr>
++
++properties:
++  compatible:
++    const: maxim,max77865-fuel-gauge
++  reg:
++    maxItems: 1
++
++required:
++  - compatible
++  - reg
++
++additionalProperties: false

@@ -131,8 +131,27 @@ start_usb_gadget() {
         printf 'G955N618\n' > "$gadget/strings/0x409/serialnumber" &&
         printf 'SM-G955N Ubuntu diagnostic\n' > "$gadget/strings/0x409/product" &&
         "$BB" mkdir "$gadget/functions/acm.g955n" &&
-        "$BB" ln -s "$gadget/functions/acm.g955n" "$gadget/configs/c.1/" &&
-        printf '%s\n' "$udc" > "$gadget/UDC"
+        "$BB" ln -s "$gadget/functions/acm.g955n" "$gadget/configs/c.1/" || return 1
+
+    case " $("$BB" cat /proc/cmdline) " in
+        *" g955n.usb_ether=1 "*)
+            if "$BB" mkdir "$gadget/functions/ecm.g955n" &&
+                printf '%s\n' 02:55:00:00:00:02 > "$gadget/functions/ecm.g955n/dev_addr" &&
+                printf '%s\n' 02:55:00:00:00:01 > "$gadget/functions/ecm.g955n/host_addr" &&
+                "$BB" ln -s "$gadget/functions/ecm.g955n" "$gadget/configs/c.1/"; then
+                if printf '%s\n' "$udc" > "$gadget/UDC"; then
+                    log 'USB ACM and CDC Ethernet bound'
+                    return 0
+                fi
+                "$BB" rm "$gadget/configs/c.1/ecm.g955n" || return 1
+            fi
+            if [ -d "$gadget/functions/ecm.g955n" ]; then
+                "$BB" rmdir "$gadget/functions/ecm.g955n" || return 1
+            fi
+            log 'USB CDC Ethernet unavailable, trying ACM'
+            ;;
+    esac
+    printf '%s\n' "$udc" > "$gadget/UDC"
 }
 
 prepare_ubuntu_services() {

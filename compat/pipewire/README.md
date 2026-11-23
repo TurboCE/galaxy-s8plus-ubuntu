@@ -420,3 +420,9 @@ policy hashes are still checked. Without a valid receipt, the existing
 private-plugin checks apply.
 Install and enable this unit only after the Ubuntu stock playback and
 capture trial has passed on the target kernel.
+
+On the native SM-G955N Linux 6.18 boot, the launcher runs the installed
+Ubuntu PipeWire and WirePlumber binaries with the default SPA search
+path. This permits Ubuntu package updates independently of the
+vendor-kernel PCM guard. Speaker and microphone qualification still
+requires an ALSA card exposed by the 6.18 audio drivers.

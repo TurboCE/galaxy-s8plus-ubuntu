@@ -1,5 +1,6 @@
 [Unit]
 Description=SM-G955N Samsung BSP runtime paths
+ConditionKernelVersion=4.4.*-g955n-ubuntu*
 After=systemd-udev-trigger.service
 Before=NetworkManager.service
 

@@ -1,5 +1,6 @@
 [Unit]
 Description=SM-G955N original Broadcom location and sensor hub
+ConditionKernelVersion=4.4.*-g955n-ubuntu*
 After=local-fs.target systemd-udev-trigger.service g955n-hardware.service
 Requires=g955n-hardware.service
 StartLimitIntervalSec=120

@@ -154,8 +154,18 @@ def main():
         program = '/usr/bin/pipewire'
         arguments = arguments[1:]
     try:
-        plugin_root = check()
         trusted_regular(Path(program))
+        release = platform.release()
+        if (platform.machine() == 'aarch64' and release.startswith('6.18.')
+                and '-g955n-' in release
+                and 'SM-G955N' in Path('/proc/device-tree/model').read_text()):
+            if arguments == ['--check']:
+                print('Ubuntu audio daemon and standard plugin paths on SM-G955N Linux 6.18')
+                return 0
+            environment = dict(os.environ)
+            environment.pop('SPA_PLUGIN_DIR', None)
+            os.execve(program, [program, *arguments], environment)
+        plugin_root = check()
     except Exception as error:
         print('G955N audio guard refused startup: ' + str(error), file=sys.stderr)
         return 78

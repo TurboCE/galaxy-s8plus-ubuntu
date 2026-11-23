@@ -1,5 +1,6 @@
 [Unit]
 Description=SM-G955N built-in Bluetooth ROM UART
+ConditionKernelVersion=4.4.*-g955n-ubuntu*
 Requires=g955n-hardware.service
 After=g955n-hardware.service
 Before=bluetooth.service

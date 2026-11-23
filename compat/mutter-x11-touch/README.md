@@ -31,11 +31,11 @@ python3 tests/check_mutter_x11_touch.py UNMODIFIED_UBUNTU_SOURCE_TREE
 The fixture exercises the original and patched conditions for a repick with
 no input event, real input, native touch, and a completed press.
 
-The deployment helper expects the matching stock library on the SM-G955N.
-It verifies the current package/version, source library hash and exported
-ELF interface, keeps a stock backup and uses atomic replacement. Use the
-candidate's reviewed SHA256 with `install.py --install LIBRARY --sha256 HASH`.
-The next normal graphical session loads the candidate. Use
-`install.py --restore --sha256 HASH` to restore the saved stock library.
-Mutter package upgrades may replace this local patch. The installer requires
-review for a new package version, and the repository does not ship binaries.
+The patch and fixture document the vendor-kernel X11 issue. For the
+updateable Ubuntu installation, keep the package-owned Clutter library
+under dpkg control. The recovery helper restores the matching Ubuntu
+library from a previous deployment's root-owned stock backup with
+`install.py --restore --sha256 HASH`, where `HASH` is the installed
+reviewed patch's SHA256. It verifies the package version and both
+contents before replacing the file. If APT has already installed a
+newer version, use that package's own files.

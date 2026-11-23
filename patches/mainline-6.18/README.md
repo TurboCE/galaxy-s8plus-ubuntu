@@ -100,6 +100,30 @@ Ubuntu accounts. Add `g955n.netns_diag=1` to exercise a systemd unit
 with `PrivateNetwork=yes` and check that the private network namespace
 has a loopback interface.
 
+Add `g955n.usb_ether=1` alongside `g955n.usb_login=1` to expose a
+standard CDC Ethernet interface as well as the authenticated serial
+console. The gadget uses the Ethernet MAC addresses already matched by
+the installed Ubuntu USB network profile. An Ethernet bind failure
+falls back to ACM. The interface can carry SSH and Ubuntu mirror
+traffic through a connected host during bring-up.
+
+## Real-time clock
+
+Apply proposal 0073 and append `config/mainline618-rtc.fragment`.
+The Samsung always-on clock is exposed through the Linux RTC class as
+`/dev/rtc0`. The trial leaves RTC-to-system-clock initialization disabled
+so an invalid firmware RTC date cannot override the Ubuntu clock.
+Read the RTC and exercise its alarm on an active system before relying
+on it for suspend wakeup.
+
+## Battery telemetry
+
+Apply proposal 0074 and append `config/mainline618-battery.fragment`.
+The SM-G955N MAX77865 fuel gauge reports battery presence, state of
+charge and cell voltage through the standard Linux power supply class.
+The driver reads the gauge's telemetry registers. Control of charging
+and charge state are provided by a separate charger driver.
+
 ## Storage command responses and touchscreen trial
 
 Apply patch 0014 for the Exynos8895 UFS controller's command response
