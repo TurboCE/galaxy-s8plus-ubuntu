@@ -1,0 +1,32 @@
+Subject: [PATCH] drm/panfrost: retain job slot context in fault reports
+
+Report the raw status, hardware job slot configuration, submitted
+chain and full head and tail addresses at the existing fault report.
+This adds context to intermittent failures without dumping GPU buffer
+contents or changing submission.
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.c b/drivers/gpu/drm/panfrost/panfrost_job.c
+--- a/drivers/gpu/drm/panfrost/panfrost_job.c
++++ b/drivers/gpu/drm/panfrost/panfrost_job.c
+@@ -443,10 +443,17 @@
+ 			job_read(pfdev, JS_HEAD_LO(js)),
+ 			job_read(pfdev, JS_TAIL_LO(js)));
+ 	} else {
+-		dev_err(pfdev->dev, "js fault, js=%d, status=%s, submitter=%s, head=0x%x, tail=0x%x",
+-			js, exception_name, job->submitter,
+-			job_read(pfdev, JS_HEAD_LO(js)),
+-			job_read(pfdev, JS_TAIL_LO(js)));
++		u32 config = job_read(pfdev, JS_CONFIG(js));
++		u32 head_lo = job_read(pfdev, JS_HEAD_LO(js));
++		u32 head_hi = job_read(pfdev, JS_HEAD_HI(js));
++		u32 tail_lo = job_read(pfdev, JS_TAIL_LO(js));
++		u32 tail_hi = job_read(pfdev, JS_TAIL_HI(js));
++
++		dev_err(pfdev->dev,
++			"js fault, js=%d, status=%s (%#x), submitter=%s, config=%#x, submitted=%#llx, head=%#llx, tail=%#llx",
++			js, exception_name, js_status, job->submitter, config,
++			job->jc, ((u64)head_hi << 32) | head_lo,
++			((u64)tail_hi << 32) | tail_lo);
+ 	}
+ 
+ 	if (js_status == DRM_PANFROST_EXCEPTION_STOPPED) {

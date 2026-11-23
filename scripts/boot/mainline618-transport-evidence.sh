@@ -21,10 +21,14 @@ gnome_state() {
 exec 3>/dev/pmsg0
 printf 'G955N TRANSPORT BEGIN kernel=%s\n' "$(uname -r)" >&3
 
-# Stay within the verified 16 KiB pmsg region, including the loader markers.
+# Bound the retained records and count suspended time against the sampling
+# window. Relative sleeps only advance while the CPU runs.
+read -r uptime _ < /proc/uptime
+deadline=$((${uptime%%.*} + 300))
 sample=0
 while [ "$sample" -lt 60 ]; do
     read -r uptime _ < /proc/uptime
+    [ "${uptime%%.*}" -lt "$deadline" ] || break
     # Write the scheduler heartbeat first so that a blocked driver read can
     # be distinguished from a failure to schedule the observer.
     printf 'G955N TRANSPORT HEARTBEAT uptime=%s\n' "$uptime" >&3
@@ -36,3 +40,5 @@ while [ "$sample" -lt 60 ]; do
     sample=$((sample + 1))
     sleep 5
 done
+
+printf 'G955N TRANSPORT END samples=%s\n' "$sample" >&3

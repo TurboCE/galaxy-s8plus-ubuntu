@@ -3755,3 +3755,44 @@ returned, the explicit display wake command lit the panel and a
 strict APT update succeeded via Wi-Fi. The host wake-hook test
 matched both power-key labels and ignored volume and RTC labels.
 Physical power-button wake still needs a separate test.
+
+### R86 transport recorder and GNOME keyring
+
+The R85 transport recorder exceeded its service runtime limit after
+a suspend and ended in failed state. The R86 sampler counts suspend
+time against its five-minute window. Host tests checked both the
+normal 60-sample limit and a simulated suspend that crosses the
+deadline.
+
+On R85 the CS47L93 SPI device was bound to Madera and its codec
+platform child was bound, while ALSA still listed no card. The ABOX
+read-only diagnostic again found inherited power and clock state.
+The BCM4773 diagnostic reached the host request wait with the board
+power options enabled and observed no pending data. No IIO device
+was present.
+
+R86 booted after verified BOOT readback, exposed USB serial and
+rejoined the saved Wi-Fi network. The running recorder matched the
+build source hash. Strict APT refresh succeeded over the Wi-Fi
+default route, package audit reported no outstanding issues and the
+upgrade simulation reported no pending changes. BlueZ started an
+eight-second discovery and reported six peers. Pairing and traffic
+were outside this run.
+
+The GDM journal showed the PAM keyring module missing even though
+the keyring service package was installed. Installed the Ubuntu
+libpam-gnome-keyring package. A new touch and screen keyboard login
+opened the normal Wayland session. GNOME Shell held the DECON DRM
+card and Panfrost render node.
+
+An injected short power key press entered s2idle during the recording
+window. The RTC resumed the same boot after about 28 seconds; USB
+serial and Wi-Fi returned. The recorder exited successfully about
+303 seconds after it started, with no service timeout. The resumed
+screen keyboard first appeared after toggling it in Accessibility.
+The touch entry unlocked Wayland, and the prior Accessibility
+preference was restored. Physical power-button wake was not tested.
+
+The R86 tested login and resume interval contained no Panfrost job
+fault, so the new register fields were not exercised by a real
+fault. The intermittent GPU fault remains open.

@@ -2060,3 +2060,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Expose the kernel wake IRQ and recognize the mainline gpio-keys
   label so the sleep hook can request display wake after a power-key
   resume even if the key was released before evdev delivered it.
+
+### 6.18 R86 transport recording and login dependencies
+
+- End retained transport recording after a five-minute boot-time
+  window, including time spent suspended, and write a completion marker.
+- Record full Panfrost job addresses, raw status and slot configuration
+  when a GPU job faults.
+- Install the stock GNOME keyring PAM module in the Ubuntu rootfs.
