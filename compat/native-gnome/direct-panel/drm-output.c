@@ -79,7 +79,7 @@ void g955n_kms_close(struct g955n_kms *output)
     free(output);
 }
 
-int g955n_kms_open(struct g955n_kms **result)
+static int kms_open(struct g955n_kms **result, int min_minor)
 {
     if (!result)
         return -EINVAL;
@@ -94,7 +94,7 @@ int g955n_kms_open(struct g955n_kms **result)
         bool matches = version && version->name &&
                        version->name_len == strlen("g955n-decon") &&
                        !memcmp(version->name, "g955n-decon", version->name_len) &&
-                       version->version_major == 1 && version->version_minor >= 1;
+                       version->version_major == 1 && version->version_minor >= min_minor;
         drmFreeVersion(version);
         uint64_t prime = 0;
         if (!matches || drmGetCap(fd, DRM_CAP_PRIME, &prime) ||
@@ -166,6 +166,16 @@ int g955n_kms_open(struct g955n_kms **result)
         return 0;
     }
     return -ENODEV;
+}
+
+int g955n_kms_open(struct g955n_kms **result)
+{
+    return kms_open(result, 1);
+}
+
+int g955n_kms_open_inherited_trial(struct g955n_kms **result)
+{
+    return kms_open(result, 0);
 }
 
 int g955n_kms_fd(const struct g955n_kms *output)

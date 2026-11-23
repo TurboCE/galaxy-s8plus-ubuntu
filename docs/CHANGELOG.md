@@ -1979,3 +1979,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   board-specific SPI pins and verified revision 10 power enable.
 
 - Record R68 desktop rendering measurements and post-login GPU faults.
+
+### R69 DECON DRM/KMS and audio prerequisites
+
+- Expose the inherited SM-G955N DECON primary plane as an opt-in
+  standard DRM/KMS connector with linear DMA GEM and PRIME support.
+- Identify the task submitting a failed Panfrost job in the kernel log
+  and exercise native KMS with Mesa's render-only GBM buffer path.
+- Provision the matched ABOX firmware from the handset's read-only
+  Samsung SYSTEM partition into Ubuntu's standard firmware directory.

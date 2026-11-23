@@ -1,0 +1,322 @@
+Subject: [PATCH] drm: expose the inherited SM-G955N DECON primary plane
+
+diff --git a/drivers/gpu/drm/tiny/g955n-decon-handoff.c b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+--- a/drivers/gpu/drm/tiny/g955n-decon-handoff.c
++++ b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+@@ -14,6 +14,23 @@
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/scatterlist.h>
++
++#include <drm/drm_atomic_helper.h>
++#include <drm/drm_connector.h>
++#include <drm/drm_drv.h>
++#include <drm/drm_fb_dma_helper.h>
++#include <drm/drm_fourcc.h>
++#include <drm/drm_framebuffer.h>
++#include <drm/drm_gem_dma_helper.h>
++#include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_mode_config.h>
++#include <drm/drm_modes.h>
++#include <drm/drm_probe_helper.h>
++#include <drm/drm_simple_kms_helper.h>
++
++static bool native_kms;
++module_param(native_kms, bool, 0400);
++MODULE_PARM_DESC(native_kms, "Expose the inherited panel as an experimental DRM KMS output");
+ 
+ #define DECON_GLOBAL_CONTROL		0x0000
+ #define DECON_RUNNING			BIT(4)
+@@ -41,7 +58,10 @@
+ #define G0_FORMAT_MASK			GENMASK(15, 11)
+ #define G0_FIRMWARE_FORMAT		0
+ 
++struct g955n_decon_kms;
++
+ struct g955n_decon_handoff {
++	struct g955n_decon_kms *kms;
+ 	void __iomem *decon;
+ 	void __iomem *g0;
+ 	struct regmap *pmu;
+@@ -179,6 +199,228 @@
+ }
+ static DEVICE_ATTR_WO(scanout_test);
+ 
++/*
++ * The bootloader owns panel timings and power in this trial. DRM controls
++ * the primary scanout address only, with no shadow buffer.
++ */
++struct g955n_decon_kms {
++	struct drm_device drm;
++	struct drm_connector connector;
++	struct drm_simple_display_pipe pipe;
++	struct g955n_decon_handoff *handoff;
++	struct drm_framebuffer *active;
++	struct drm_framebuffer *uncertain;
++	bool fault;
++};
++
++static const struct drm_display_mode g955n_panel_mode = {
++	DRM_MODE("1440x2960", DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED,
++		 266688, 1440, 1448, 1456, 1480, 0,
++		 2960, 2970, 2980, 3003, 0, 0),
++	.width_mm = 70,
++	.height_mm = 143,
++};
++
++static int g955n_connector_get_modes(struct drm_connector *connector)
++{
++	struct drm_display_mode *mode;
++
++	mode = drm_mode_duplicate(connector->dev, &g955n_panel_mode);
++	if (!mode)
++		return 0;
++	drm_mode_probed_add(connector, mode);
++	return 1;
++}
++
++static const struct drm_connector_helper_funcs g955n_connector_helper = {
++	.get_modes = g955n_connector_get_modes,
++};
++
++static const struct drm_connector_funcs g955n_connector_funcs = {
++	.fill_modes = drm_helper_probe_single_connector_modes,
++	.destroy = drm_connector_cleanup,
++	.reset = drm_atomic_helper_connector_reset,
++	.atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
++	.atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
++};
++
++static enum drm_mode_status
++g955n_pipe_mode_valid(struct drm_simple_display_pipe *pipe,
++		     const struct drm_display_mode *mode)
++{
++	return drm_mode_equal(mode, &g955n_panel_mode) ? MODE_OK : MODE_BAD;
++}
++
++static dma_addr_t g955n_frame_address(struct drm_framebuffer *fb)
++{
++	struct drm_gem_dma_object *obj;
++
++	obj = drm_fb_dma_get_gem_obj(fb, 0);
++	return obj->dma_addr + fb->offsets[0];
++}
++
++static int g955n_pipe_check(struct drm_simple_display_pipe *pipe,
++			     struct drm_plane_state *plane,
++			     struct drm_crtc_state *crtc)
++{
++	struct g955n_decon_kms *kms = container_of(pipe, struct g955n_decon_kms, pipe);
++	struct drm_framebuffer *fb = plane->fb;
++	dma_addr_t addr;
++
++	/* The synchronous shadow latch fences each page flip. */
++	crtc->no_vblank = true;
++	if (!fb)
++		return 0;
++	if (READ_ONCE(kms->fault))
++		return -EIO;
++	if (fb->width != PANEL_WIDTH || fb->height != PANEL_HEIGHT ||
++	    fb->pitches[0] != PANEL_PITCH || fb->modifier != DRM_FORMAT_MOD_LINEAR ||
++	    plane->src_x || plane->src_y ||
++	    plane->src_w != PANEL_WIDTH << 16 ||
++	    plane->src_h != PANEL_HEIGHT << 16)
++		return -EINVAL;
++
++	addr = g955n_frame_address(fb);
++	if (!addr || !IS_ALIGNED(addr, 16) || addr > U32_MAX - PANEL_BYTES ||
++	    addr == FIRMWARE_FB)
++		return -EINVAL;
++
++	return 0;
++}
++
++static void g955n_kms_flip(struct g955n_decon_kms *kms, struct drm_framebuffer *fb)
++{
++	struct g955n_decon_handoff *handoff = kms->handoff;
++	struct drm_framebuffer *previous;
++	dma_addr_t addr = fb ? g955n_frame_address(fb) : FIRMWARE_FB;
++	int ret;
++
++	mutex_lock(&handoff->lock);
++	if (kms->fault || fb == kms->active)
++		goto unlock;
++
++	/*
++	 * Keep a reference independent of the atomic state until the address
++	 * is replaced. On timeout either buffer could still be in use.
++	 */
++	if (fb)
++		drm_framebuffer_get(fb);
++	ret = g955n_latch_base(handoff->decon, handoff->g0, lower_32_bits(addr));
++	if (ret) {
++		kms->uncertain = fb;
++		WRITE_ONCE(kms->fault, true);
++		__module_get(THIS_MODULE);
++		drm_err(&kms->drm, "scanout latch timed out, retaining active DMA buffers\n");
++		goto unlock;
++	}
++
++	previous = kms->active;
++	kms->active = fb;
++	if (previous)
++		drm_framebuffer_put(previous);
++unlock:
++	mutex_unlock(&handoff->lock);
++}
++
++static void g955n_pipe_enable(struct drm_simple_display_pipe *pipe,
++			      struct drm_crtc_state *crtc,
++			      struct drm_plane_state *plane)
++{
++	struct g955n_decon_kms *kms = container_of(pipe, struct g955n_decon_kms, pipe);
++
++	g955n_kms_flip(kms, plane->fb);
++}
++
++static void g955n_pipe_disable(struct drm_simple_display_pipe *pipe)
++{
++	struct g955n_decon_kms *kms = container_of(pipe, struct g955n_decon_kms, pipe);
++
++	g955n_kms_flip(kms, NULL);
++}
++
++static void g955n_pipe_update(struct drm_simple_display_pipe *pipe,
++			      struct drm_plane_state *old_plane)
++{
++	struct g955n_decon_kms *kms = container_of(pipe, struct g955n_decon_kms, pipe);
++
++	if (pipe->crtc.state->active)
++		g955n_kms_flip(kms, pipe->plane.state->fb);
++}
++
++static const struct drm_simple_display_pipe_funcs g955n_pipe_funcs = {
++	.mode_valid = g955n_pipe_mode_valid,
++	.check = g955n_pipe_check,
++	.enable = g955n_pipe_enable,
++	.disable = g955n_pipe_disable,
++	.update = g955n_pipe_update,
++};
++
++static const u32 g955n_kms_formats[] = {
++	DRM_FORMAT_XRGB8888,
++	DRM_FORMAT_ARGB8888,
++};
++
++static const u64 g955n_kms_modifiers[] = {
++	DRM_FORMAT_MOD_LINEAR,
++	DRM_FORMAT_MOD_INVALID,
++};
++
++static const struct drm_mode_config_funcs g955n_mode_config = {
++	.fb_create = drm_gem_fb_create,
++	.atomic_check = drm_atomic_helper_check,
++	.atomic_commit = drm_atomic_helper_commit,
++};
++
++DEFINE_DRM_GEM_FOPS(g955n_kms_fops);
++
++static const struct drm_driver g955n_kms_driver = {
++	.driver_features = DRIVER_MODESET | DRIVER_GEM | DRIVER_ATOMIC,
++	.name = "g955n-decon",
++	.desc = "SM-G955N inherited DECON plane",
++	.major = 1,
++	.fops = &g955n_kms_fops,
++	DRM_GEM_DMA_DRIVER_OPS,
++};
++
++static int g955n_register_kms(struct device *dev,
++			     struct g955n_decon_handoff *handoff)
++{
++	struct g955n_decon_kms *kms;
++	struct drm_device *drm;
++	int ret;
++
++	kms = devm_drm_dev_alloc(dev, &g955n_kms_driver, struct g955n_decon_kms, drm);
++	if (IS_ERR(kms))
++		return PTR_ERR(kms);
++	kms->handoff = handoff;
++	drm = &kms->drm;
++	ret = drmm_mode_config_init(drm);
++	if (ret)
++		return ret;
++	drm->mode_config.funcs = &g955n_mode_config;
++	drm->mode_config.min_width = PANEL_WIDTH;
++	drm->mode_config.max_width = PANEL_WIDTH;
++	drm->mode_config.min_height = PANEL_HEIGHT;
++	drm->mode_config.max_height = PANEL_HEIGHT;
++
++	drm_connector_helper_add(&kms->connector, &g955n_connector_helper);
++	ret = drm_connector_init(drm, &kms->connector, &g955n_connector_funcs,
++				 DRM_MODE_CONNECTOR_DSI);
++	if (ret)
++		return ret;
++	ret = drm_simple_display_pipe_init(drm, &kms->pipe, &g955n_pipe_funcs,
++					   g955n_kms_formats, ARRAY_SIZE(g955n_kms_formats),
++					   g955n_kms_modifiers, &kms->connector);
++	if (ret)
++		return ret;
++
++	drm_mode_config_reset(drm);
++	ret = drm_dev_register(drm, 0);
++	if (!ret)
++		handoff->kms = kms;
++	return ret;
++}
++
+ static int g955n_decon_handoff_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -222,6 +464,12 @@
+ 	ret = of_reserved_mem_device_init(dev);
+ 	if (ret)
+ 		return ret;
++	if (native_kms) {
++		ret = g955n_register_kms(dev, handoff);
++		if (ret)
++			of_reserved_mem_device_release(dev);
++		return ret;
++	}
+ 	pixels = dma_alloc_wc(dev, PANEL_BYTES, &dma, GFP_KERNEL);
+ 	if (!pixels) {
+ 		of_reserved_mem_device_release(dev);
+@@ -262,7 +510,14 @@
+ 
+ static void g955n_decon_handoff_remove(struct platform_device *pdev)
+ {
+-	device_remove_file(&pdev->dev, &dev_attr_scanout_test);
++	struct g955n_decon_handoff *handoff = platform_get_drvdata(pdev);
++
++	if (handoff->kms) {
++		drm_dev_unregister(&handoff->kms->drm);
++		drm_atomic_helper_shutdown(&handoff->kms->drm);
++	} else {
++		device_remove_file(&pdev->dev, &dev_attr_scanout_test);
++	}
+ }
+ 
+ static const struct of_device_id g955n_decon_handoff_of_match[] = {
+diff --git a/drivers/gpu/drm/tiny/Kconfig b/drivers/gpu/drm/tiny/Kconfig
+--- a/drivers/gpu/drm/tiny/Kconfig
++++ b/drivers/gpu/drm/tiny/Kconfig
+@@ -219,6 +219,8 @@
+ config DRM_G955N_DECON_HANDOFF
+ 	tristate "Samsung Galaxy S8+ DECON DMA handoff diagnostic"
+ 	depends on ARCH_EXYNOS && OF_RESERVED_MEM && DMA_CMA && !MODULE_UNLOAD
++	select DRM_KMS_HELPER
++	select DRM_GEM_DMA_HELPER
+ 	help
+ 	  Check a DMA address latch and restore the inherited panel buffer.
+ 	  The diagnostic keeps its test memory pinned until reboot.
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -47,7 +47,7 @@
+ 		g955n_decon_pool: decon-dma-pool {
+ 			compatible = "shared-dma-pool";
+ 			reusable;
+-			size = <0x02000000>;
++			size = <0x06000000>;
+ 			alignment = <0 0x00400000>;
+ 			alloc-ranges = <0 0x80000000 0x3c800000>;
+ 		};

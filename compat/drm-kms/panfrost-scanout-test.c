@@ -137,10 +137,14 @@ static bool present_frames(struct g955n_kms *output, struct slot *slots)
 
 int main(int argc, char **argv)
 {
-    bool kms_gbm = argc == 2 && !strcmp(argv[1], "--check-kms-gbm");
-    bool check = kms_gbm || (argc == 2 && !strcmp(argv[1], "--check"));
-    if (argc != 2 || (!check && strcmp(argv[1], "--present-reviewed-sm-g955n"))) {
-        fprintf(stderr, "Use --check, --check-kms-gbm or --present-reviewed-sm-g955n after vacating the panel\n");
+    bool check_kms = argc == 2 && !strcmp(argv[1], "--check-kms-gbm");
+    bool present_kms = argc == 2 && !strcmp(argv[1], "--present-kms-gbm");
+    bool kms_gbm = check_kms || present_kms;
+    bool check = check_kms || (argc == 2 && !strcmp(argv[1], "--check"));
+    if (argc != 2 ||
+        (!check && !present_kms && strcmp(argv[1], "--present-reviewed-sm-g955n"))) {
+        fprintf(stderr, "Use --check, --check-kms-gbm, --present-kms-gbm or "
+                        "--present-reviewed-sm-g955n after vacating the panel\n");
         return 2;
     }
     if (!correct_device()) {
@@ -150,7 +154,8 @@ int main(int argc, char **argv)
 
     int result = 1;
     struct g955n_kms *output = NULL;
-    const int kms_error = g955n_kms_open(&output);
+    const int kms_error = present_kms ? g955n_kms_open_inherited_trial(&output)
+                                      : g955n_kms_open(&output);
     if (kms_error) {
         fprintf(stderr, "DECON KMS preflight failed: %d\n", kms_error);
         return 1;
@@ -219,7 +224,7 @@ int main(int argc, char **argv)
         ready = build_slot(&slots[i], gbm, usage, dpy, create_image, image_texture) &&
                 paint_slot(&slots[i], i);
     if (ready && (check || present_frames(output, slots))) {
-        puts(kms_gbm ? "DECON GBM selected Panfrost and rendered to linear scanout buffers" :
+        puts(check_kms ? "DECON GBM selected Panfrost and rendered to linear scanout buffers" :
              check ? "Panfrost GBM allocation and DMA-BUF EGL rendering ready" :
                      "12 Mesa/Panfrost DECON presentations completed");
         result = 0;

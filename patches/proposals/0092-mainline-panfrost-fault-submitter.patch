@@ -1,0 +1,38 @@
+Subject: [PATCH] drm/panfrost: identify the submitting task on a GPU job fault
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.h b/drivers/gpu/drm/panfrost/panfrost_job.h
+--- a/drivers/gpu/drm/panfrost/panfrost_job.h
++++ b/drivers/gpu/drm/panfrost/panfrost_job.h
+@@ -13,6 +13,7 @@
+ 
+ struct panfrost_job {
+ 	struct drm_sched_job base;
++	char submitter[TASK_COMM_LEN];
+ 
+ 	struct kref refcount;
+ 
+diff --git a/drivers/gpu/drm/panfrost/panfrost_drv.c b/drivers/gpu/drm/panfrost/panfrost_drv.c
+--- a/drivers/gpu/drm/panfrost/panfrost_drv.c
++++ b/drivers/gpu/drm/panfrost/panfrost_drv.c
+@@ -301,6 +301,7 @@
+ 	}
+ 
+ 	kref_init(&job->refcount);
++	get_task_comm(job->submitter, current);
+ 
+ 	job->pfdev = pfdev;
+ 	job->jc = args->jc;
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.c b/drivers/gpu/drm/panfrost/panfrost_job.c
+--- a/drivers/gpu/drm/panfrost/panfrost_job.c
++++ b/drivers/gpu/drm/panfrost/panfrost_job.c
+@@ -443,8 +443,8 @@
+ 			job_read(pfdev, JS_HEAD_LO(js)),
+ 			job_read(pfdev, JS_TAIL_LO(js)));
+ 	} else {
+-		dev_err(pfdev->dev, "js fault, js=%d, status=%s, head=0x%x, tail=0x%x",
+-			js, exception_name,
++		dev_err(pfdev->dev, "js fault, js=%d, status=%s, submitter=%s, head=0x%x, tail=0x%x",
++			js, exception_name, job->submitter,
+ 			job_read(pfdev, JS_HEAD_LO(js)),
+ 			job_read(pfdev, JS_TAIL_LO(js)));
+ 	}

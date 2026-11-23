@@ -3415,3 +3415,29 @@ or physical refresh rate. The kernel logged `DATA_INVALID_FAULT` and
 `TILE_RANGE_FAULT` after starting the user GNOME session. The session
 remained reachable and the later rendering test completed. The
 faulting client and trigger have not been isolated.
+
+### R69 native DRM/KMS and fault attribution
+
+The SM-G955N exposed a connected DSI-1 DRM output at 1440×2960.
+A Mesa GBM test selected Mali-G71 Panfrost, rendered into linear DMA
+buffers allocated through the DECON DRM card, and completed 12 page
+flips without a CPU pixel transfer. The driver preserves inherited
+panel timings and acknowledges page flips after the address latch.
+Native panel power and periodic hardware vblank remain separate work.
+
+The unmodified Ubuntu GDM Wayland session displayed the user chooser
+on this output. GNOME Shell opened both the DECON KMS card and the
+Panfrost render node, and a read-only snapshot of the active KMS
+framebuffer matched the greeter. The user's saved Xorg session
+selection was still active at this checkpoint.
+
+The Panfrost fault log identified both Xorg and GNOME Shell as
+submitters. Errors included `DATA_INVALID_FAULT`, `TILE_RANGE_FAULT`
+on R68 and `JOB_BUS_FAULT` on R69. Submitting tasks were identified
+without attributing the hardware fault to a particular Mesa feature.
+
+R69 found all three matching Calliope firmware files in the handset's
+read-only SYSTEM partition, staged them in Ubuntu's firmware directory
+and compared each file against its source. No ALSA card was exposed.
+The BCM4773 revision 10 electrical wake test again timed out, with
+no IIO measurements available.
