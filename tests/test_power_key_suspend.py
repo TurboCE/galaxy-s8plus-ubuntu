@@ -46,10 +46,12 @@ class PowerKeySuspendTests(unittest.TestCase):
     def test_wake_resets_idle_before_powering_panel(self):
         calls=[]
         with patch.object(m,'display_environment',return_value=['DISPLAY=:1']), \
-             patch.object(m,'read_command',side_effect=lambda *a:calls.append(a)):
+             patch.object(m,'read_command',side_effect=lambda *a:calls.append(a)), \
+             patch.object(m,'SLEEP_MARKER') as marker:
             m.wake_display(('c4','x11',['user']))
         self.assertEqual(calls[0][-3:],('/usr/bin/xset','s','reset'))
         self.assertEqual(calls[1][-4:],('/usr/bin/xset','dpms','force','on'))
+        marker.unlink.assert_called_once_with(missing_ok=True)
 
     def test_x11_blanks_before_requesting_sleep(self):
         calls=[]
@@ -109,6 +111,30 @@ class PowerKeySuspendTests(unittest.TestCase):
              patch.object(m,'session_locked',return_value=True):
             m.lock_before_sleep(('c4','x11',['user']))
         self.assertEqual(command.call_count,2)
+
+    def test_lock_request_repeats_until_gnome_reports_locked(self):
+        with patch.object(m, 'read_command', side_effect=['true', 'false', '', '']) as command, \
+             patch.object(m, 'session_locked', side_effect=[False, False, False, True]), \
+             patch.object(m.time, 'monotonic', side_effect=[0, 0.1, 1.1]), \
+             patch.object(m.time, 'sleep'):
+            m.lock_before_sleep(('c4', 'wayland', ['user']))
+        requests = [call.args for call in command.call_args_list
+                    if call.args[0] == '/usr/bin/loginctl']
+        self.assertEqual(requests, [('/usr/bin/loginctl', 'lock-session', 'c4')] * 2)
+
+    def test_locked_wayland_resume_uses_first_short_press_to_wake(self):
+        session = ('c4', 'wayland', ['user'])
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / 'resume'
+            marker.write_text('42\n')
+            with patch.object(m, 'SLEEP_MARKER', marker), \
+                 patch.object(m, 'session_locked', side_effect=[True, False]), \
+                 patch.object(m, 'read_command'):
+                self.assertFalse(m.should_suspend(session, True))
+                self.assertTrue(m.should_suspend(session, True))
+                m.wake_display(session)
+                self.assertTrue(m.should_suspend(session, True))
+                self.assertFalse(m.should_suspend(session, False))
 
 
 if __name__=='__main__':unittest.main()

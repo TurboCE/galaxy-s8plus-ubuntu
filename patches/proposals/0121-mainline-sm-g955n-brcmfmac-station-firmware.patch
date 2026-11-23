@@ -1,0 +1,54 @@
+Subject: [PATCH] wifi: brcmfmac: select host roaming for SM-G955N BCM4361
+
+The SM-G955N PCIe firmware accepts station connections but returns
+an error for the firmware roam trigger and does not emit IF_ADD
+when asked to create a P2P discovery interface. Let the supplicant
+handle roaming and avoid advertising the unusable discovery interface
+on this board. Do not program firmware roam thresholds when firmware
+roaming has been turned off.
+
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/common.c
+@@ -8,6 +8,8 @@
+ #include <linux/netdevice.h>
+ #include <linux/module.h>
+ #include <linux/firmware.h>
++#include <linux/of.h>
++#include <brcm_hw_ids.h>
+ #include <brcmu_wifi.h>
+ #include <brcmu_utils.h>
+ #include "core.h"
+@@ -20,6 +22,7 @@
+ #include "of.h"
+ #include "firmware.h"
+ #include "chip.h"
++#include "feature.h"
+ 
+ MODULE_AUTHOR("Broadcom Corporation");
+ MODULE_DESCRIPTION("Broadcom 802.11 wireless LAN fullmac driver.");
+@@ -531,6 +534,11 @@
+ 	settings->fcmode = brcmf_fcmode;
+ 	settings->roamoff = !!brcmf_roamoff;
+ 	settings->iapp = !!brcmf_iapp_enable;
++	if (bus_type == BRCMF_BUSTYPE_PCIE && chip == BRCM_CC_4361_CHIP_ID &&
++	    of_machine_is_compatible("samsung,dream2lteks")) {
++		settings->roamoff = true;
++		settings->feature_disable |= BIT(BRCMF_FEAT_P2P);
++	}
+ #ifdef DEBUG
+ 	settings->ignore_probe_fail = !!brcmf_ignore_probe_fail;
+ #endif
+diff --git a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+--- a/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
++++ b/drivers/net/wireless/broadcom/brcm80211/brcmfmac/cfg80211.c
+@@ -6918,6 +6918,9 @@
+ 		goto roam_setup_done;
+ 	}
+ 
++	if (drvr->settings->roamoff)
++		return 0;
++
+ 	roamtrigger[0] = cpu_to_le32(WL_ROAM_TRIGGER_LEVEL);
+ 	roamtrigger[1] = cpu_to_le32(BRCM_BAND_ALL);
+ 	err = brcmf_fil_cmd_data_set(ifp, BRCMF_C_SET_ROAM_TRIGGER,

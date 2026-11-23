@@ -15,6 +15,8 @@ INPUT_EVENT = struct.Struct('@llHHi')
 EVIOCSCLOCKID = 0x400445A0
 POWER_KEY = (1, 116)  # EV_KEY, KEY_POWER
 LONG_PRESS = 1.4
+LOCK_TIMEOUT = 5
+LOCK_RETRY_INTERVAL = 1
 GPIO_KEYS = (
     Path('/dev/input/by-path/platform-gpio-keys-event'),
     Path('/dev/input/by-path/platform-gpio_keys-event'),
@@ -75,6 +77,7 @@ def wake_display(session):
     else:
         read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
                      MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '0')
+    SLEEP_MARKER.unlink(missing_ok=True)
     print('Power key requested display wake', flush=True)
 
 
@@ -95,10 +98,18 @@ def lock_before_sleep(session):
     if session_locked(session):
         return
     read_command('/usr/bin/loginctl', 'lock-session', session[0])
-    deadline = time.monotonic() + 3
+    started = time.monotonic()
+    next_request = started + LOCK_RETRY_INTERVAL
+    deadline = started + LOCK_TIMEOUT
     while not session_locked(session):
-        if time.monotonic() >= deadline:
+        now = time.monotonic()
+        if now >= deadline:
             raise RuntimeError('Screen lock did not complete; suspend was not requested')
+        if now >= next_request:
+            # A lock signal can arrive before the new GNOME session listens
+            # to logind. Repeat it while waiting for that session to confirm.
+            read_command('/usr/bin/loginctl', 'lock-session', session[0])
+            next_request = now + LOCK_RETRY_INTERVAL
         time.sleep(.05)
 
 
@@ -173,6 +184,16 @@ def is_resume_press(pressed_at):
     return pressed_at <= float(marker) + 1.5
 
 
+def should_suspend(session, panel_was_on):
+    if not panel_was_on:
+        return False
+    if session[1] == 'wayland' and SLEEP_MARKER.is_file():
+        # The DRM connector may already be enabled after resume while GNOME's
+        # lock screen remains blank. The first short press should request wake.
+        return not session_locked(session)
+    return True
+
+
 def main():
     if b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise SystemExit('Unexpected device model')
@@ -240,12 +261,14 @@ def watch_keys(key):
                 elif sec + usec / 1_000_000 - pressed_at >= LONG_PRESS:
                     pending_dialog = open_power_dialog(session)
                     dialog_seat = session[0]
-                elif before:
+                elif should_suspend(session, before):
                     print('Power key requested system suspend', flush=True)
                     suspend_session(session)
                 else:
                     wake_display(session)
-            except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+            except RuntimeError as error:
+                print(f'Power key action unavailable: {error}', flush=True)
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
                 print(f'Power key action unavailable ({type(error).__name__})', flush=True)
 
 

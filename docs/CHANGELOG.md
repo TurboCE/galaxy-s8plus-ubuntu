@@ -2114,3 +2114,16 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   for WirePlumber and GNOME Sound.
 - Add the 2 GiB upper DRAM bank from the Samsung board device tree
   and retain DMA32 for peripherals with low address limits.
+
+### R97 Ubuntu hardware integration
+
+- Restore Samsung's mono output routes on the CS47L93 codec.
+- Use host-managed roaming for the SM-G955N BCM4361. The installed firmware
+  does not complete P2P discovery interface creation, so this configuration
+  advertises managed, AP and IBSS modes.
+- Add a read-only SYSTEM provisioning helper for the qualified Semco E32
+  Bluetooth patchram. The vendor firmware stays on the handset.
+- Retry the logind session lock during GNOME startup before the power key
+  blanks the display and requests suspend.
+- Route the first short power press on a locked Wayland session after
+  resume to display wake even if the DRM connector is marked enabled.

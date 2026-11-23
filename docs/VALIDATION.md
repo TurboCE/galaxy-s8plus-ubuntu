@@ -3970,3 +3970,43 @@ GNOME Shell both used the Panfrost DRM render node. No buffer
 allocation failure was observed. The kernel did report one
 DATA_INVALID_FAULT from a Firefox Renderer job, so this is a
 playback improvement with an open GPU driver issue.
+
+### R97 Ubuntu hardware integration
+
+The SM-G955N booted R97 after automatic recovery and BOOT verification.
+The CS47L93 mono mux warning and the BCM4361 roaming and P2P boot errors
+were absent. NetworkManager connected on its saved 5 GHz profile.
+A strict APT refresh over the Wi-Fi route reached the Ubuntu and Mozilla
+repositories. The package audit was clean and the upgrade simulation found
+no pending upgrades. There was one channel query error during teardown for
+suspend. NetworkManager reconnected after wake.
+
+The Semco E32 Bluetooth patchram from the device's Android SYSTEM
+partition replaced ROM build 0000 with build 0405 during a reversible
+serdev trial. BlueZ reported the controller powered, and the firmware was
+then provisioned from the read-only SYSTEM partition. A normal reboot
+loaded build 0405 again. After the suspend test, an eight-second BlueZ
+scan recorded twelve devices. Pairing was outside this run.
+
+GeoClue returned one city-level location update using the existing Ubuntu
+location settings. The native BCM4773 path exposed no IIO devices or live
+GNSS fix, and ModemManager reported no modem. The display still has no
+native backlight class device. UPower reported the installed battery and
+the Ubuntu audio session exposed the internal speaker and microphone.
+
+An immediate post-login power-key attempt on the previous daemon did not
+receive a screen-lock confirmation. The same daemon worked once GNOME
+finished startup and the handset resumed from 28 seconds of RTC-timed
+s2idle on the same boot. The new daemon repeats a lost logind lock request
+and still requires a confirmed lock before suspend. The updated daemon entered s2idle immediately after login once the lock
+was confirmed. The RTC resumed the same boot after 25.5 seconds and both
+USB serial and Wi-Fi returned. The kernel's error-priority journal had no
+entries at that point.
+
+The screen remained blank after RTC wake. A later injected short power
+press was followed by loss of USB and Wi-Fi, so the journal for that
+press could not be read. The updated guard treats a short press on the
+locked Wayland session with a pending resume marker as display wake.
+This guard passed the host regression test and still needs deployment
+and handset verification. The full host suite ran 164 tests with 9
+skipped and no failures.
