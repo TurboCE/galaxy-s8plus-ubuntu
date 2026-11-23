@@ -1913,3 +1913,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Keep the Ubuntu Clutter library package-owned. Use standard PipeWire
   and WirePlumber plugin lookup on 6.18 and apply the Samsung BSP
   services only on the vendor kernel.
+
+## 2026-11-23 — Ubuntu desktop fallback and WLAN PCIe bring-up
+
+- Expose the Linux 6.18 framebuffer device and give GDM a stock Ubuntu
+  Xorg fallback scoped to the mainline boot.
+- Add an opt-in Exynos8895 WLAN root port with DesignWare enumeration,
+  then add BCM4361 firmware and RAM definitions to brcmfmac.

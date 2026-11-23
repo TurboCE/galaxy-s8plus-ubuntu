@@ -1,0 +1,410 @@
+Subject: [PATCH] PCI: add an Exynos8895 WLAN root-port bring-up driver
+
+Port the channel 0 CAL sequence to the DesignWare core. Describe the
+SM-G955N clock, PERST, WLAN_EN and INTx routing from the Samsung tree.
+Keep enumeration opt-in and separate from Broadcom firmware loading.
+
+diff --git a/drivers/pci/controller/dwc/Kconfig b/drivers/pci/controller/dwc/Kconfig
+--- a/drivers/pci/controller/dwc/Kconfig
++++ b/drivers/pci/controller/dwc/Kconfig
+@@ -366,6 +366,14 @@
+ 	  Enables support for the DesignWare PCIe controller in the
+ 	  Rockchip SoC (except RK3399) to work in endpoint mode.
+ 
++config PCI_EXYNOS8895_WLAN
++	tristate "Samsung Exynos8895 WLAN PCIe root port"
++	depends on ARCH_EXYNOS
++	select PCIE_DW_HOST
++	help
++	  Enable the first DesignWare PCIe root port used for the onboard
++	  WLAN controller on Samsung Exynos8895 devices.
++
+ config PCI_EXYNOS
+ 	tristate "Samsung Exynos PCIe controller"
+ 	depends on ARCH_EXYNOS || COMPILE_TEST
+diff --git a/drivers/pci/controller/dwc/Makefile b/drivers/pci/controller/dwc/Makefile
+--- a/drivers/pci/controller/dwc/Makefile
++++ b/drivers/pci/controller/dwc/Makefile
+@@ -7,6 +7,7 @@
+ obj-$(CONFIG_PCIE_AMD_MDB) += pcie-amd-mdb.o
+ obj-$(CONFIG_PCIE_BT1) += pcie-bt1.o
+ obj-$(CONFIG_PCI_DRA7XX) += pci-dra7xx.o
++obj-$(CONFIG_PCI_EXYNOS8895_WLAN) += pcie-exynos8895.o
+ obj-$(CONFIG_PCI_EXYNOS) += pci-exynos.o
+ obj-$(CONFIG_PCIE_FU740) += pcie-fu740.o
+ obj-$(CONFIG_PCI_IMX6) += pci-imx6.o
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -129,6 +129,50 @@
+ &rtc {
+ 	wakeup-source;
+ 	status = "okay";
++};
++
++&{/soc@0} {
++	pcie_wlan: pcie@116a0000 {
++		compatible = "samsung,exynos8895-pcie-wlan";
++		device_type = "pci";
++		reg = <0x116a0000 0x1000>, <0x11700000 0x1000>,
++		      <0x11bff000 0x1000>, <0x116d0000 0x1000>,
++		      <0x116c0000 0x1fc>;
++		reg-names = "elbi", "dbi", "config", "phy", "pcs";
++		bus-range = <0 1>;
++		#address-cells = <3>;
++		#size-cells = <2>;
++		ranges = <0x02000000 0 0x11800000 0x11800000 0 0x3ff000>;
++		interrupts = <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
++		#interrupt-cells = <1>;
++		interrupt-map-mask = <0 0 0 0>;
++		interrupt-map = <0 0 0 0 &gic GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
++		num-lanes = <1>;
++		max-link-speed = <1>;
++		clocks = <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PHY_REF_CLK_IN>,
++			 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_DBI_ACLK_0>,
++			 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_MSTR_ACLK_0>,
++			 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_SLV_ACLK_0>,
++			 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PCIE_SUB_CTRL_INST_0_I_DRIVER_APB_CLK>,
++			 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_IEEE1500_WRAPPER_FOR_PCIE_PHY_LC_X2_INST_0_I_SCL_APB_PCLK>,
++			 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PIPE2_DIGITAL_X2_WRAP_INST_0_I_APB_PCLK_SCL>;
++		samsung,pmu = <&pmu_system_controller>;
++		samsung,fsys1-sysreg = <&syscon_fsys1>;
++		reset-gpios = <&gpj1 2 GPIO_ACTIVE_LOW>;
++		enable-gpios = <&gpj1 3 GPIO_ACTIVE_HIGH>;
++		pinctrl-names = "default";
++		pinctrl-0 = <&g955n_wlan_clkreq>;
++		status = "disabled";
++	};
++};
++
++&pinctrl_fsys1 {
++	g955n_wlan_clkreq: wlan-clkreq-pins {
++		samsung,pins = "gpj1-0";
++		samsung,pin-function = <2>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
++		samsung,pin-drv = <3>;
++	};
+ };
+ 
+ &hsi2c_16 {
+diff --git a/drivers/pci/controller/dwc/pcie-exynos8895.c b/drivers/pci/controller/dwc/pcie-exynos8895.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/pci/controller/dwc/pcie-exynos8895.c
+@@ -0,0 +1,316 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Exynos8895 WLAN PCIe root port.
++ *
++ * PHY calibration and reset sequence from the Samsung Exynos8895
++ * downstream CAL implementation.
++ * Copyright (C) 2013 Samsung Electronics Co., Ltd.
++ * Original PHY author: Kyoungil Kim <ki0351.kim@samsung.com>
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/interrupt.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/pci.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++#include "pcie-designware.h"
++
++#define EXYNOS8895_PHY_CONTROL		0x071c
++#define EXYNOS8895_FSYS1_PCIE_REF	0x1044
++#define EXYNOS8895_FSYS1_PCIE_LANES	0x1050
++#define EXYNOS8895_ENABLE_LINK0		(BIT(14) | BIT(12))
++
++#define ELBI_IRQ_PULSE			0x000
++#define ELBI_IRQ_EN_PULSE		0x00c
++#define ELBI_INTX			(BIT(0) | BIT(2) | BIT(4) | BIT(6))
++#define ELBI_IRQ_EN_LEVEL		0x010
++#define ELBI_IRQ_EN_SPECIAL		0x014
++#define ELBI_SW_WAKE			0x018
++#define ELBI_LTSSM_ENABLE		0x02c
++#define ELBI_L1_BUG_FIX			0x038
++#define ELBI_LINK_STATE			0x074
++#define ELBI_APP_EXIT_L1_MODE		0x0f4
++#define ELBI_LINKDOWN_RESET		0x1b8
++#define ELBI_SOFT_RESET			0x1d0
++#define ELBI_PCS_RESET			0x288
++#define ELBI_PMA_RESET			0x28c
++#define ELBI_MAC_RESET			0x290
++#define ELBI_QCHANNEL			0x2c8
++#define DBI_AUX_CLK_MHZ			0xb40
++
++struct exynos8895_pcie {
++	struct dw_pcie pci;
++	struct regmap *pmu;
++	struct regmap *sysreg;
++	struct gpio_desc *reset;
++	struct gpio_desc *enable;
++	void __iomem *phy;
++	void __iomem *pcs;
++};
++
++static const u8 common_gen1[] = {
++	0x01, 0xe1, 0x05, 0x00, 0x88, 0x88, 0x88, 0x04,
++	0x31, 0x45, 0x65, 0x24, 0x33, 0x08, 0xa4, 0xfc,
++	0xc6, 0x05, 0xe6, 0x80, 0x00, 0x00, 0x00, 0x00,
++	0x60, 0x11, 0x00, 0x90, 0x10, 0x04, 0x4e, 0x8e,
++	0xc0, 0xff, 0x9b, 0x52, 0x22, 0x73, 0x47, 0x8c,
++	0x40, 0x00, 0x22, 0xff, 0xff, 0xff, 0x00, 0x80,
++};
++
++static const u8 lane0_gen1[] = {
++	0x31, 0x40, 0x37, 0x99, 0x85, 0x00, 0xc0, 0xff,
++	0xff, 0x3f, 0x8c, 0xc8, 0x02, 0x01, 0x88, 0x80,
++	0x06, 0x90, 0x68, 0x66, 0x09, 0x31, 0x42, 0x44,
++	0xc6, 0x18, 0x03, 0x33, 0x58, 0xe7, 0x20, 0x22,
++	0x80, 0x38, 0x05, 0x85, 0x00, 0x00, 0x00, 0x7e,
++	0x00, 0x00, 0x55, 0x15, 0xac, 0xaa, 0x3e, 0x00,
++	0x00, 0x00, 0x00, 0x3f, 0x00, 0xff, 0xff, 0xff,
++	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
++	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
++	0x05, 0x85, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
++};
++
++static void exynos8895_pcie_write_phy(struct exynos8895_pcie *ep)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(common_gen1); i++)
++		writel(common_gen1[i], ep->phy + i * 4);
++	for (i = 0; i < ARRAY_SIZE(lane0_gen1); i++)
++		writel(lane0_gen1[i], ep->phy + (0x30 + i) * 4);
++}
++
++static int exynos8895_pcie_hw_init(struct dw_pcie_rp *pp)
++{
++	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
++	struct exynos8895_pcie *ep = dev_get_drvdata(pci->dev);
++	void __iomem *elbi = pci->elbi_base;
++	int ret;
++
++	ret = regmap_update_bits(ep->sysreg, EXYNOS8895_FSYS1_PCIE_REF, BIT(1), 0);
++	if (ret)
++		return ret;
++
++	/* Select the first link and PCS lane for the WLAN endpoint. */
++	ret = regmap_update_bits(ep->sysreg, EXYNOS8895_FSYS1_PCIE_LANES,
++				 BIT(16) | EXYNOS8895_ENABLE_LINK0 | GENMASK(7, 1),
++				 EXYNOS8895_ENABLE_LINK0 | GENMASK(3, 2));
++	if (ret)
++		return ret;
++
++	writel(0xc0, ep->phy + 0x20 * 4);
++	writel(BIT(3) | readl(ep->pcs + 0xec), ep->pcs + 0xec);
++
++	writel(0, elbi + ELBI_SOFT_RESET);
++	udelay(20);
++	writel(1, elbi + ELBI_SOFT_RESET);
++	gpiod_set_value_cansleep(ep->reset, 0);
++	usleep_range(18000, 20000);
++
++	writel(readl(elbi + ELBI_APP_EXIT_L1_MODE) | BIT(0) | BIT(4),
++	       elbi + ELBI_APP_EXIT_L1_MODE);
++	writel(BIT(1), elbi + ELBI_LINKDOWN_RESET);
++	writel(readl(elbi + ELBI_QCHANNEL) & ~GENMASK(11, 0), elbi + ELBI_QCHANNEL);
++
++	writel(0, elbi + ELBI_MAC_RESET);
++	udelay(10);
++	writel(0, elbi + ELBI_PMA_RESET);
++	udelay(10);
++	writel(1, elbi + ELBI_PCS_RESET);
++	udelay(10);
++	writel(0, elbi + ELBI_PCS_RESET);
++	udelay(10);
++	writel(1, elbi + ELBI_PCS_RESET);
++	udelay(10);
++
++	exynos8895_pcie_write_phy(ep);
++	writel(0x14, ep->phy + 0x5c * 4);
++	writel(0x70, ep->pcs + 0xf8);
++	writel(0x87, ep->pcs + 0x100);
++	writel(0x50, ep->pcs + 0x104);
++	writel((readl(ep->pcs + 0x0c) & ~BIT(1)) | BIT(4), ep->pcs + 0x0c);
++
++	writel(1, elbi + ELBI_MAC_RESET);
++	udelay(10);
++	writel(1, elbi + ELBI_PMA_RESET);
++	udelay(10);
++	exynos8895_pcie_write_phy(ep);
++
++	writel(readl(elbi + ELBI_SW_WAKE) & ~BIT(1), elbi + ELBI_SW_WAKE);
++	writel(1, elbi + ELBI_L1_BUG_FIX);
++	dw_pcie_dbi_ro_wr_en(pci);
++	dw_pcie_writel_dbi(pci, DBI_AUX_CLK_MHZ, 26);
++	dw_pcie_dbi_ro_wr_dis(pci);
++	writel(0, elbi + ELBI_IRQ_EN_LEVEL);
++	writel(0, elbi + ELBI_IRQ_EN_SPECIAL);
++	writel(ELBI_INTX, elbi + ELBI_IRQ_PULSE);
++	writel(ELBI_INTX, elbi + ELBI_IRQ_EN_PULSE);
++	return 0;
++}
++
++static int exynos8895_pcie_start_link(struct dw_pcie *pci)
++{
++	struct exynos8895_pcie *ep = dev_get_drvdata(pci->dev);
++
++	writel(readl(ep->pcs + 0xec) & ~BIT(3), ep->pcs + 0xec);
++	writel(1, pci->elbi_base + ELBI_LTSSM_ENABLE);
++	return 0;
++}
++
++static bool exynos8895_pcie_link_up(struct dw_pcie *pci)
++{
++	u32 state = readl(pci->elbi_base + ELBI_LINK_STATE) & 0x1f;
++
++	return state >= 0x0d && state <= 0x14;
++}
++
++static void exynos8895_pcie_report_link(struct dw_pcie_rp *pp)
++{
++	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
++
++	dev_info(pci->dev, "WLAN LTSSM %#x\n",
++		 readl(pci->elbi_base + ELBI_LINK_STATE) & 0x1f);
++}
++
++static int exynos8895_pcie_legacy_irq(struct dw_pcie_rp *pp)
++{
++	/* Channel 0 uses the shared ELBI INTx interrupt. */
++	return 0;
++}
++
++static void exynos8895_pcie_hw_deinit(struct dw_pcie_rp *pp)
++{
++	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
++
++	writel(0, pci->elbi_base + ELBI_IRQ_EN_PULSE);
++	writel(0, pci->elbi_base + ELBI_LTSSM_ENABLE);
++}
++
++static const struct dw_pcie_host_ops exynos8895_pcie_host_ops = {
++	.init = exynos8895_pcie_hw_init,
++	.deinit = exynos8895_pcie_hw_deinit,
++	.post_init = exynos8895_pcie_report_link,
++	.msi_init = exynos8895_pcie_legacy_irq,
++};
++
++static const struct dw_pcie_ops exynos8895_pcie_ops = {
++	.start_link = exynos8895_pcie_start_link,
++	.link_up = exynos8895_pcie_link_up,
++};
++
++static irqreturn_t exynos8895_pcie_irq(int irq, void *arg)
++{
++	struct exynos8895_pcie *ep = arg;
++	void __iomem *elbi = ep->pci.elbi_base;
++	u32 pending = readl(elbi + ELBI_IRQ_PULSE) & ELBI_INTX;
++
++	if (!pending)
++		return IRQ_NONE;
++
++	writel(pending, elbi + ELBI_IRQ_PULSE);
++	return IRQ_HANDLED;
++}
++
++static void exynos8895_pcie_power_off(void *arg)
++{
++	struct exynos8895_pcie *ep = arg;
++
++	gpiod_set_value_cansleep(ep->reset, 1);
++	gpiod_set_value_cansleep(ep->enable, 0);
++	regmap_clear_bits(ep->pmu, EXYNOS8895_PHY_CONTROL, BIT(0));
++}
++
++static int exynos8895_pcie_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct clk_bulk_data *clocks;
++	struct exynos8895_pcie *ep;
++	int irq, ret;
++
++	ep = devm_kzalloc(dev, sizeof(*ep), GFP_KERNEL);
++	if (!ep)
++		return -ENOMEM;
++
++	ep->pci.dev = dev;
++	ep->pci.ops = &exynos8895_pcie_ops;
++	ep->pci.pp.ops = &exynos8895_pcie_host_ops;
++	ep->pci.elbi_base = devm_platform_ioremap_resource_byname(pdev, "elbi");
++	if (IS_ERR(ep->pci.elbi_base))
++		return PTR_ERR(ep->pci.elbi_base);
++	ep->phy = devm_platform_ioremap_resource_byname(pdev, "phy");
++	if (IS_ERR(ep->phy))
++		return PTR_ERR(ep->phy);
++	ep->pcs = devm_platform_ioremap_resource_byname(pdev, "pcs");
++	if (IS_ERR(ep->pcs))
++		return PTR_ERR(ep->pcs);
++
++	ep->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(ep->reset))
++		return dev_err_probe(dev, PTR_ERR(ep->reset), "cannot get PERST\n");
++	ep->enable = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
++	if (IS_ERR(ep->enable))
++		return dev_err_probe(dev, PTR_ERR(ep->enable), "cannot get WLAN enable\n");
++
++	ep->pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
++	if (IS_ERR(ep->pmu))
++		return PTR_ERR(ep->pmu);
++	ep->sysreg = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,fsys1-sysreg");
++	if (IS_ERR(ep->sysreg))
++		return PTR_ERR(ep->sysreg);
++
++	ret = devm_clk_bulk_get_all_enabled(dev, &clocks);
++	if (ret < 0)
++		return dev_err_probe(dev, ret, "cannot enable PCIe clocks\n");
++	ret = regmap_set_bits(ep->pmu, EXYNOS8895_PHY_CONTROL, BIT(0));
++	if (ret)
++		return ret;
++	ret = devm_add_action_or_reset(dev, exynos8895_pcie_power_off, ep);
++	if (ret)
++		return ret;
++
++	gpiod_set_value_cansleep(ep->enable, 1);
++	msleep(150);
++
++	irq = platform_get_irq(pdev, 0);
++	if (irq < 0)
++		return irq;
++	ret = devm_request_irq(dev, irq, exynos8895_pcie_irq, IRQF_SHARED,
++			       dev_name(dev), ep);
++	if (ret)
++		return ret;
++
++	platform_set_drvdata(pdev, ep);
++	return dw_pcie_host_init(&ep->pci.pp);
++}
++
++static void exynos8895_pcie_remove(struct platform_device *pdev)
++{
++	struct exynos8895_pcie *ep = platform_get_drvdata(pdev);
++
++	dw_pcie_host_deinit(&ep->pci.pp);
++}
++
++static const struct of_device_id exynos8895_pcie_of_match[] = {
++	{ .compatible = "samsung,exynos8895-pcie-wlan" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, exynos8895_pcie_of_match);
++
++static struct platform_driver exynos8895_pcie_driver = {
++	.probe = exynos8895_pcie_probe,
++	.remove = exynos8895_pcie_remove,
++	.driver = {
++		.name = "exynos8895-pcie-wlan",
++		.of_match_table = exynos8895_pcie_of_match,
++		.suppress_bind_attrs = true,
++	},
++};
++module_platform_driver(exynos8895_pcie_driver);
++
++MODULE_DESCRIPTION("Samsung Exynos8895 WLAN PCIe root port");
++MODULE_LICENSE("GPL");

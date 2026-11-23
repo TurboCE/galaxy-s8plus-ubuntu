@@ -156,6 +156,9 @@ start_usb_gadget() {
 
 prepare_ubuntu_services() {
     "$BB" mkdir -p /run/g955n-trial || return 1
+    if [ -r /bin/g955n-pcie-wlan.ko ]; then
+        "$BB" cp /bin/g955n-pcie-wlan.ko /run/g955n-trial/pcie-wlan.ko || return 1
+    fi
     if [ -x /bin/g955n-kernel-evidence ] && [ -r /bin/g955n-kernel-evidence.service ]; then
         "$BB" cp /bin/g955n-kernel-evidence /run/g955n-trial/kernel-evidence || return 1
         "$BB" mkdir -p /run/systemd/system/g955n-kernel-evidence.service.d || return 1
@@ -175,6 +178,42 @@ prepare_ubuntu_services() {
             fi
             ;;
     esac
+}
+
+# Keep the framebuffer session scoped to GDM on the 6.18 boot.
+prepare_ubuntu_desktop() {
+    local desktop=/run/g955n-mainline-desktop
+    local units=/run/systemd/system/gdm.service.d
+
+    [ -c /dev/fb0 ] || {
+        log 'Ubuntu desktop fallback unavailable: no framebuffer device'
+        return 1
+    }
+    "$BB" mkdir -p "$desktop" "$units" || return 1
+    "$BB" cat > "$desktop/gdm.conf" <<'EOF' || return 1
+[daemon]
+WaylandEnable=false
+AutomaticLoginEnable=false
+DefaultSession=ubuntu-xorg.desktop
+EOF
+    "$BB" cat > "$desktop/xorg.conf" <<'EOF' || return 1
+Section "Device"
+    Identifier "SM-G955N framebuffer"
+    Driver "fbdev"
+    Option "fbdev" "/dev/fb0"
+    Option "ShadowFB" "true"
+EndSection
+Section "Screen"
+    Identifier "SM-G955N screen"
+    Device "SM-G955N framebuffer"
+EndSection
+EOF
+    "$BB" cat > "$units/50-g955n-mainline-desktop.conf" <<'EOF' || return 1
+[Service]
+BindReadOnlyPaths=/run/g955n-mainline-desktop/gdm.conf:/etc/gdm3/custom.conf
+BindReadOnlyPaths=/run/g955n-mainline-desktop/xorg.conf:/etc/X11/xorg.conf.d/10-g955n-fbdev.conf
+BindReadOnlyPaths=-/usr/share/xsessions/ubuntu-xorg.desktop:/usr/share/xsessions/ubuntu-g955n.desktop
+EOF
 }
 
 prepare_ubuntu_trial_return() {
@@ -434,6 +473,9 @@ done
 prepare_ubuntu_services || stop 'Cannot stage Ubuntu services'
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.ubuntu_return=1 "*) prepare_ubuntu_trial_return || stop 'Cannot stage Ubuntu return timer' ;;
+esac
+case " $("$BB" cat /proc/cmdline) " in
+    *" g955n.desktop=1 "*) prepare_ubuntu_desktop || log 'Cannot stage Ubuntu framebuffer desktop' ;;
 esac
 log 'Handing PID 1 to Ubuntu systemd'
 boot_timing switch-root

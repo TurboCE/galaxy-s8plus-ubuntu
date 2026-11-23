@@ -3169,3 +3169,31 @@ DTB. No rail was switched during this test.
   DMA-BUF render/reimport test. Native DECON, GNOME Wayland,
   suspend/resume, the onboard WLAN and LTE, IIO sensors and actual
   speaker/microphone PCM still need 6.18 integration and tests.
+
+### R51 graphical boot and WLAN port preparation
+
+- R50 booted to multi-user by command-line override, and simpledrm
+  had registered a framebuffer console without exposing `/dev/fb0`.
+  R51 enabled the framebuffer character device and selected the
+  graphical target. Two local vendor GDM dependency links were moved
+  to a root backup on the test installation. GDM then ran the Ubuntu
+  Xorg greeter, and its framebuffer showed the password prompt.
+- The test authenticated through GDM and observed the Ubuntu user's
+  active seat0 Xorg session and GNOME Shell process. Mac USB Ethernet
+  and serial disappeared after that observation. Continuous display
+  output and touch login remain unqualified. The Xorg fallback is
+  separate from native DECON and Wayland.
+- The working vendor log selected `bcmdhd_sta.bin_b0` and
+  `nvram.txt_r02j_b0`. The R51 handset's own firmware, calibration
+  and CLM files were staged locally under the brcmfmac B0 names
+  without publishing the bytes.
+- The R52 and R53 ARM64 boot images were built, including the
+  Exynos8895 root-port module. R53 also built cfg80211 and brcmfmac
+  with BCM4361 PCIe support. Neither image was flashed after the
+  handset stopped enumerating on the Mac, including in recovery.
+  PCIe link, BAR assignment, firmware boot, NetworkManager association,
+  reconnect after reboot and Wi-Fi-only APT remain unverified.
+- The Samsung audio path uses ABOX DMA and the CS47L93 codec on SPI.
+  The SM-G955N sensor and GPS path uses a BCM4773 hub in SPI mode 3.
+  The existing Linux SSP driver targets other hubs and sets SPI mode 1;
+  its presence alone does not qualify the Samsung sensor path.

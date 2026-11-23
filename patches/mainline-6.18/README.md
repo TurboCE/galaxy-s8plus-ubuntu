@@ -214,6 +214,42 @@ the DMA input format, source size, source offset, image size, latched
 base address and programmed base address. A cell of `0xffffffff` indicates unavailable data. The snapshot
 does not take control of the framebuffer.
 
+
+## Ubuntu desktop fallback
+
+Append `config/mainline618-desktop.fragment` to expose the inherited
+simpledrm framebuffer to an Xorg fbdev session. Boot with
+`g955n.desktop=1 systemd.unit=graphical.target`. The initramfs binds
+the stock Xorg session and framebuffer configuration inside GDM's
+service namespace. The Ubuntu package files and ordinary GDM
+configuration remain under dpkg control.
+
+On a previous vendor-kernel installation, archive any local
+`display-manager.service.requires/g955n-native-gpu-prepare.service`
+and `g955n-desktop-mif-qos.service` dependency links before using
+the fallback. They are requirements of the older graphics stack.
+The framebuffer path is software display output. Native DECON
+scanout and GNOME Wayland remain separate work.
+
+## WLAN PCIe bring-up
+
+Proposal 0075 adds the SM-G955N channel 0 DesignWare root-port glue,
+clock and GPIO wiring, and the Samsung 26 MHz Gen1 PHY calibration.
+Append `config/mainline618-wlan-pcie.fragment`. The DT node is
+disabled by default. For a bounded hardware trial, enable
+`/soc@0/pcie@116a0000` in the test DTB and include the built
+`pcie-exynos8895.ko` at `/bin/g955n-pcie-wlan.ko` in the initramfs.
+The module is staged in `/run/g955n-trial` for manual loading after
+USB console access is established. First check root port link,
+endpoint ID, BAR allocation and interrupts independently.
+
+Proposal 0076 and `config/mainline618-wlan-brcmfmac.fragment` add
+BCM4361 PCIe definitions and separate B0 and B2 firmware names.
+The original SM-G955N vendor log selected B0 and the r02j B0 board
+calibration. Firmware, calibration and the CLM file are local to
+the tested handset. Check the chip revision, firmware ABI and
+NetworkManager association on hardware before qualifying Wi-Fi.
+
 ## Reading the warm boot trace
 
 Apply patch 0004 to Linux and patch 0005 to uniLoader for the trace build.
