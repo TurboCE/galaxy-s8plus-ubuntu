@@ -4041,3 +4041,10 @@ staged again without copying build-tree symlinks.
 
 The SM-G955N remained unavailable over USB and Wi-Fi in this run.
 No image or service changes were applied to the handset.
+
+The Ubuntu 24.04 ARM64 image built successfully with the exact R98
+module release. The ext4 check and offline profile validation passed.
+The image's module dependency index lists Broadcom Wi-Fi, DECON,
+and the native ABOX modules. The R98 kernel builds Panfrost in.
+The host suite ran 167 tests with 9 skipped and no failures. The
+image and its validation receipt are private build artifacts.
