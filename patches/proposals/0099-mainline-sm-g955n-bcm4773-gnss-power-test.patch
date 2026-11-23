@@ -1,0 +1,87 @@
+Subject: [PATCH] iio: compare BCM4773 SSI with the stock GNSS enable pin
+
+The Samsung revision 10 board exposes a separate GNSS power pin.
+Allow a one-shot SSI comparison using that pin, and restore it.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -514,6 +514,7 @@
+ 		pinctrl-0 = <&g955n_hub_req &g955n_hub_resp>;
+ 		vddio-supply = <&g955n_hub_1v8>;
+ 		rev10-enable-gpios = <&gpa4 6 GPIO_ACTIVE_HIGH>;
++		gnss-enable-gpios = <&gpf0 3 GPIO_ACTIVE_HIGH>;
+ 		wake-request-gpios = <&gpe6 1 GPIO_ACTIVE_HIGH>;
+ 		wake-response-gpios = <&gpi1 5 GPIO_ACTIVE_HIGH>;
+ 	};
+diff --git a/drivers/iio/common/g955n-bcm4773-wake.c b/drivers/iio/common/g955n-bcm4773-wake.c
+--- a/drivers/iio/common/g955n-bcm4773-wake.c
++++ b/drivers/iio/common/g955n-bcm4773-wake.c
+@@ -8,6 +8,10 @@
+ #include <linux/spi/spi.h>
+ 
+ #define BCM4773_SSI_READ_HD 0x20
++
++static bool gnss_power;
++module_param(gnss_power, bool, 0400);
++MODULE_PARM_DESC(gnss_power, "Temporarily enable the Samsung GNSS power pin for the SSI test");
+ 
+ static bool rev10_power;
+ module_param(rev10_power, bool, 0400);
+@@ -47,7 +51,8 @@
+ {
+ 	struct device *dev = &spi->dev;
+ 	struct gpio_desc *request, *response;
+-	struct gpio_desc *enable = NULL;
++	struct gpio_desc *enable = NULL, *gnss = NULL;
++	int gnss_direction = -1, gnss_value = 0;
+ 	struct regulator *supply;
+ 	const char *phase = "revision 10 power-enable";
+ 	int ret, level, release, retries;
+@@ -77,7 +82,31 @@
+ 			goto power_off;
+ 		}
+ 	}
+-	msleep(120);
++	if (gnss_power) {
++		phase = "GNSS power-enable";
++		gnss = devm_gpiod_get(dev, "gnss-enable", GPIOD_ASIS);
++		if (IS_ERR(gnss)) {
++			ret = PTR_ERR(gnss);
++			gnss = NULL;
++			goto power_off;
++		}
++		gnss_direction = gpiod_get_direction(gnss);
++		if (gnss_direction < 0) {
++			ret = gnss_direction;
++			goto power_off;
++		}
++		if (!gnss_direction) {
++			gnss_value = gpiod_get_value_cansleep(gnss);
++			if (gnss_value < 0) {
++				ret = gnss_value;
++				goto power_off;
++			}
++		}
++		ret = gpiod_direction_output(gnss, 1);
++		if (ret)
++			goto restore_gnss;
++	}
++	msleep(200);
+ 	/* Samsung's wake sequence permits a response that is already high. */
+ 	phase = "response to wake request";
+ 	for (retries = 0; retries < 4; retries++) {
+@@ -105,6 +134,13 @@
+ 	if (!ret)
+ 		dev_info(dev, "BCM4773 wake and SSI header received\n");
+ 
++restore_gnss:
++	if (gnss) {
++		release = gnss_direction ? gpiod_direction_input(gnss) :
++			  gpiod_direction_output(gnss, gnss_value);
++		if (release)
++			dev_err(dev, "cannot restore GNSS power-enable pin: %d\n", release);
++	}
+ power_off:
+ 	release = regulator_disable(supply);
+ 	if (release)

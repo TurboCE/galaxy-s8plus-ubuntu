@@ -1,0 +1,47 @@
+Subject: [PATCH] Bluetooth: connect SM-G955N BCM4361 UART
+
+Use the Samsung UART, flow-control pins and power/wake wiring.
+Keep the known ROM transport rate during initial qualification.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -496,3 +496,16 @@
+ 		wake-response-gpios = <&gpi1 5 GPIO_ACTIVE_HIGH>;
+ 	};
+ };
++
++&serial_1 {
++	uart-has-rtscts;
++	status = "okay";
++
++	bluetooth {
++		compatible = "brcm,bcm4361-bt";
++		max-speed = <115200>;
++		shutdown-gpios = <&gpj1 7 GPIO_ACTIVE_HIGH>;
++		device-wakeup-gpios = <&gpj1 4 GPIO_ACTIVE_HIGH>;
++		host-wakeup-gpios = <&gpa2 3 GPIO_ACTIVE_HIGH>;
++	};
++};
+diff --git a/drivers/bluetooth/hci_bcm.c b/drivers/bluetooth/hci_bcm.c
+--- a/drivers/bluetooth/hci_bcm.c
++++ b/drivers/bluetooth/hci_bcm.c
+@@ -1592,6 +1592,7 @@
+ 	{ .compatible = "brcm,bcm4345c5" },
+ 	{ .compatible = "brcm,bcm43430a0-bt" },
+ 	{ .compatible = "brcm,bcm43430a1-bt" },
++	{ .compatible = "brcm,bcm4361-bt" },
+ 	{ .compatible = "brcm,bcm43438-bt", .data = &bcm43438_device_data },
+ 	{ .compatible = "brcm,bcm4349-bt", .data = &bcm43438_device_data },
+ 	{ .compatible = "brcm,bcm43540-bt", .data = &bcm4354_device_data },
+diff --git a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+--- a/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
++++ b/Documentation/devicetree/bindings/net/bluetooth/brcm,bluetooth.yaml
+@@ -26,6 +26,7 @@
+           - brcm,bcm4334-bt
+           - brcm,bcm43430a0-bt
+           - brcm,bcm43430a1-bt
++      - brcm,bcm4361-bt
+           - brcm,bcm43438-bt
+           - brcm,bcm4345c5
+           - brcm,bcm43540-bt

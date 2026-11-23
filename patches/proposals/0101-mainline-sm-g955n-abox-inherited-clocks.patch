@@ -1,0 +1,24 @@
+Subject: [PATCH] soc: samsung: inspect inherited SM-G955N ABOX clocks
+
+The real handset arrives with ABOX powered. Read its clock
+registers without cycling the active domain.
+
+diff --git a/drivers/soc/samsung/g955n-abox-power-test.c b/drivers/soc/samsung/g955n-abox-power-test.c
+--- a/drivers/soc/samsung/g955n-abox-power-test.c
++++ b/drivers/soc/samsung/g955n-abox-power-test.c
+@@ -50,6 +50,15 @@
+ 	if (ret)
+ 		return ret;
+ 	dev_info(dev, "inherited ABOX status %#x, CA7 status %#x\n", status, ca7);
++	if ((status & ABOX_LOCAL_PWR) == ABOX_LOCAL_PWR) {
++		cmu = devm_platform_ioremap_resource(pdev, 0);
++		if (IS_ERR(cmu))
++			return PTR_ERR(cmu);
++		dev_info(dev, "inherited ABOX clocks: PLL=%#x AUDIF=%#x UAIF0=%#x\n",
++			 readl(cmu + AUD_PLL_CON0), readl(cmu + AUDIF_DIV),
++			 readl(cmu + UAIF0_DIV));
++		return 0;
++	}
+ 	if (!probe_power)
+ 		return 0;
+ 	if ((status & ABOX_LOCAL_PWR) || (ca7 & BIT(0)))

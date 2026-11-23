@@ -1,0 +1,156 @@
+Subject: [PATCH] soc: samsung: verify the SM-G955N ABOX power domain
+
+Use the Samsung PMU configuration and completion registers. Keep
+power switching explicit and restore the verified off state.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -145,6 +145,12 @@
+ };
+ 
+ &{/soc@0} {
++	abox-power-test@13e00000 {
++		compatible = "samsung,sm-g955n-abox-power-test";
++		reg = <0x13e00000 0x4000>;
++		samsung,pmu = <&pmu_system_controller>;
++	};
++
+ 	decon-handoff@12860000 {
+ 		compatible = "samsung,sm-g955n-decon-handoff-test";
+ 		reg = <0x12860000 0x8000>, <0x128b1000 0x1000>;
+diff --git a/drivers/soc/samsung/Kconfig b/drivers/soc/samsung/Kconfig
+--- a/drivers/soc/samsung/Kconfig
++++ b/drivers/soc/samsung/Kconfig
+@@ -75,6 +75,13 @@
+ config EXYNOS_REGULATOR_COUPLER
+ 	bool "Exynos SoC Regulator Coupler" if COMPILE_TEST
+ 	depends on ARCH_EXYNOS || COMPILE_TEST
++config G955N_ABOX_POWER_TEST
++	tristate "Samsung Galaxy S8+ ABOX power diagnostic"
++	depends on ARCH_EXYNOS && MFD_SYSCON
++	help
++	  Qualify the inherited ABOX power state and optionally test the
++	  board power sequence before enabling a full audio driver.
++
+ config EXYNOS8895_ACPM_LAYOUT
+ 	tristate "Exynos8895 ACPM shared-memory layout probe"
+ 	depends on ARCH_EXYNOS && OF && REGULATOR
+diff --git a/drivers/soc/samsung/Makefile b/drivers/soc/samsung/Makefile
+--- a/drivers/soc/samsung/Makefile
++++ b/drivers/soc/samsung/Makefile
+@@ -14,3 +14,4 @@
+ 
+ obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= s3c-pm-check.o
+ obj-$(CONFIG_EXYNOS8895_ACPM_LAYOUT) += exynos8895-acpm-layout.o
++obj-$(CONFIG_G955N_ABOX_POWER_TEST) += g955n-abox-power-test.o
+diff --git a/drivers/soc/samsung/g955n-abox-power-test.c b/drivers/soc/samsung/g955n-abox-power-test.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/soc/samsung/g955n-abox-power-test.c
+@@ -0,0 +1,105 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/bitops.h>
++#include <linux/io.h>
++#include <linux/mfd/syscon.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/regmap.h>
++
++#define ABOX_CONFIG		0x4000
++#define ABOX_STATUS		0x4004
++#define ABOX_CA7_STATUS		0x2524
++#define ABOX_CA7_OPTION		0x2528
++#define ABOX_LOCAL_PWR		GENMASK(3, 0)
++#define ABOX_CA7_RETENTION	BIT(16)
++#define AUD_PLL_CON0		0x120
++#define AUDIF_DIV		0x1800
++#define UAIF0_DIV		0x1828
++
++static bool probe_power;
++module_param(probe_power, bool, 0400);
++MODULE_PARM_DESC(probe_power, "Exercise only the SM-G955N ABOX power domain");
++
++static int g955n_abox_wait(struct regmap *pmu, unsigned int target)
++{
++	unsigned int status;
++
++	return regmap_read_poll_timeout(pmu, ABOX_STATUS, status,
++					(status & ABOX_LOCAL_PWR) == target,
++					50, 20000);
++}
++
++static int g955n_abox_power_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	void __iomem *cmu;
++	struct regmap *pmu;
++	unsigned int status, ca7, option;
++	int ret, off;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks"))
++		return -ENODEV;
++	pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
++	if (IS_ERR(pmu))
++		return PTR_ERR(pmu);
++	ret = regmap_read(pmu, ABOX_STATUS, &status);
++	if (ret)
++		return ret;
++	ret = regmap_read(pmu, ABOX_CA7_STATUS, &ca7);
++	if (ret)
++		return ret;
++	dev_info(dev, "inherited ABOX status %#x, CA7 status %#x\n", status, ca7);
++	if (!probe_power)
++		return 0;
++	if ((status & ABOX_LOCAL_PWR) || (ca7 & BIT(0)))
++		return dev_err_probe(dev, -EBUSY, "ABOX is already active\n");
++
++	cmu = devm_platform_ioremap_resource(pdev, 0);
++	if (IS_ERR(cmu))
++		return PTR_ERR(cmu);
++	ret = regmap_read(pmu, ABOX_CA7_OPTION, &option);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(pmu, ABOX_CONFIG, ABOX_LOCAL_PWR, ABOX_LOCAL_PWR);
++	if (ret)
++		return ret;
++	ret = g955n_abox_wait(pmu, ABOX_LOCAL_PWR);
++	if (!ret)
++		dev_info(dev, "ABOX clock registers: PLL=%#x AUDIF=%#x UAIF0=%#x\n",
++			 readl(cmu + AUD_PLL_CON0), readl(cmu + AUDIF_DIV),
++			 readl(cmu + UAIF0_DIV));
++
++	/* Use the Samsung power-off sequence even if the on poll timed out. */
++	off = regmap_set_bits(pmu, ABOX_CA7_OPTION, ABOX_CA7_RETENTION);
++	if (!off)
++		off = regmap_clear_bits(pmu, ABOX_CONFIG, ABOX_LOCAL_PWR);
++	if (!off)
++		off = g955n_abox_wait(pmu, 0);
++	if (off)
++		return dev_err_probe(dev, off, "ABOX domain did not power off\n");
++	off = regmap_update_bits(pmu, ABOX_CA7_OPTION, ABOX_CA7_RETENTION, option);
++	if (off)
++		return off;
++	if (!ret)
++		dev_info(dev, "ABOX power-on and power-off verified\n");
++	return ret;
++}
++
++static const struct of_device_id g955n_abox_matches[] = {
++	{ .compatible = "samsung,sm-g955n-abox-power-test" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, g955n_abox_matches);
++
++static struct platform_driver g955n_abox_driver = {
++	.probe = g955n_abox_power_probe,
++	.driver = {
++		.name = "g955n-abox-power-test",
++		.of_match_table = g955n_abox_matches,
++	},
++};
++module_platform_driver(g955n_abox_driver);
++MODULE_DESCRIPTION("SM-G955N ABOX power and clock diagnostic");
++MODULE_LICENSE("GPL");

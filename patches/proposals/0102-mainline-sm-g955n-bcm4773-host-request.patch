@@ -1,0 +1,103 @@
+Subject: [PATCH] iio: check the SM-G955N hub receive-ready signal
+
+Read an SSI header only after the separate host request GPIO goes high,
+as in the Samsung BCM4773 transport. An idle data line cannot qualify
+the transport or be reported as a malformed response.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -499,6 +499,15 @@
+ 	};
+ };
+ 
++&pinctrl_alive {
++	g955n_hub_host_req: hub-host-request-pins {
++		samsung,pins = "gpa3-4";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_INPUT>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
++		samsung,pin-drv = <3>;
++	};
++};
++
+ &spi_10 {
+ 	cs-gpios = <&gpe2 6 GPIO_ACTIVE_LOW>;
+ 	pinctrl-0 = <&g955n_hub_spi_out &g955n_hub_spi_in &spi10_cs>;
+@@ -511,12 +520,13 @@
+ 		spi-cpol;
+ 		spi-cpha;
+ 		pinctrl-names = "default";
+-		pinctrl-0 = <&g955n_hub_req &g955n_hub_resp>;
++		pinctrl-0 = <&g955n_hub_req &g955n_hub_resp &g955n_hub_host_req>;
+ 		vddio-supply = <&g955n_hub_1v8>;
+ 		rev10-enable-gpios = <&gpa4 6 GPIO_ACTIVE_HIGH>;
+ 		gnss-enable-gpios = <&gpf0 3 GPIO_ACTIVE_HIGH>;
+ 		wake-request-gpios = <&gpe6 1 GPIO_ACTIVE_HIGH>;
+ 		wake-response-gpios = <&gpi1 5 GPIO_ACTIVE_HIGH>;
++		host-request-gpios = <&gpa3 4 GPIO_ACTIVE_HIGH>;
+ 	};
+ };
+ 
+diff --git a/drivers/iio/common/g955n-bcm4773-wake.c b/drivers/iio/common/g955n-bcm4773-wake.c
+--- a/drivers/iio/common/g955n-bcm4773-wake.c
++++ b/drivers/iio/common/g955n-bcm4773-wake.c
+@@ -50,11 +50,12 @@
+ static int g955n_bcm4773_wake_probe(struct spi_device *spi)
+ {
+ 	struct device *dev = &spi->dev;
+-	struct gpio_desc *request, *response;
++	struct gpio_desc *request, *response, *host_request;
+ 	struct gpio_desc *enable = NULL, *gnss = NULL;
+ 	int gnss_direction = -1, gnss_value = 0;
+ 	struct regulator *supply;
+ 	const char *phase = "revision 10 power-enable";
++	bool host_idle = false;
+ 	int ret, level, release, retries;
+ 
+ 	if (!of_machine_is_compatible("samsung,dream2lteks") ||
+@@ -70,6 +71,10 @@
+ 	response = devm_gpiod_get(dev, "wake-response", GPIOD_IN);
+ 	if (IS_ERR(response))
+ 		return dev_err_probe(dev, PTR_ERR(response), "cannot obtain wake response\n");
++
++	host_request = devm_gpiod_get(dev, "host-request", GPIOD_IN);
++	if (IS_ERR(host_request))
++		return dev_err_probe(dev, PTR_ERR(host_request), "cannot obtain host request\n");
+ 
+ 	ret = regulator_enable(supply);
+ 	if (ret)
+@@ -121,9 +126,7 @@
+ 		ret = read_poll_timeout(gpiod_get_value_cansleep, level, level != 0,
+ 					1000, 22000, false, response);
+ 		if (!ret) {
+-			phase = "SSI header";
+-			ret = level < 0 ? level : g955n_bcm4773_read_header(spi);
+-			gpiod_set_value_cansleep(request, 0);
++			ret = level < 0 ? level : 0;
+ 			break;
+ 		}
+ 		gpiod_set_value_cansleep(request, 0);
+@@ -131,8 +134,23 @@
+ 			break;
+ 		usleep_range(1000, 2000);
+ 	}
++	if (!ret) {
++		phase = "host request for pending data";
++		ret = read_poll_timeout(gpiod_get_value_cansleep, level, level != 0,
++					1000, 250000, false, host_request);
++		host_idle = ret == -ETIMEDOUT;
++		if (!ret) {
++			phase = "SSI header";
++			ret = level < 0 ? level : g955n_bcm4773_read_header(spi);
++		}
++	}
++	gpiod_set_value_cansleep(request, 0);
+ 	if (!ret)
+ 		dev_info(dev, "BCM4773 wake and SSI header received\n");
++	else if (host_idle) {
++		dev_info(dev, "BCM4773 did not signal pending SSI data\n");
++		ret = 0;
++	}
+ 
+ restore_gnss:
+ 	if (gnss) {

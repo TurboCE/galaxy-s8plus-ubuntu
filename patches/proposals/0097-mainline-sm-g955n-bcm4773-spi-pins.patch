@@ -1,0 +1,46 @@
+Subject: [PATCH] iio: match SM-G955N hub SPI input bias
+
+Apply the revision 10 Samsung MISO pull-down and bus drive strength.
+Use a low-speed header transfer to diagnose the all-ones response.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -477,9 +477,25 @@
+ 	};
+ };
+ 
++&pinctrl_peric1 {
++	g955n_hub_spi_out: hub-spi-output-pins {
++		samsung,pins = "gpe2-7", "gpe2-5";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
++		samsung,pin-drv = <3>;
++	};
++
++	g955n_hub_spi_in: hub-spi-input-pins {
++		samsung,pins = "gpe2-4";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
++		samsung,pin-drv = <3>;
++	};
++};
++
+ &spi_10 {
+ 	cs-gpios = <&gpe2 6 GPIO_ACTIVE_LOW>;
+-	pinctrl-0 = <&spi10_bus &spi10_cs>;
++	pinctrl-0 = <&g955n_hub_spi_out &g955n_hub_spi_in &spi10_cs>;
+ 	status = "okay";
+ 
+ 	sensor-hub@0 {
+diff --git a/drivers/iio/common/g955n-bcm4773-wake.c b/drivers/iio/common/g955n-bcm4773-wake.c
+--- a/drivers/iio/common/g955n-bcm4773-wake.c
++++ b/drivers/iio/common/g955n-bcm4773-wake.c
+@@ -20,6 +20,6 @@
+ static int g955n_bcm4773_read_header(struct spi_device *spi)
+ {
+ 	struct device *dev = &spi->dev;
+-	struct spi_transfer transfer = { .len = 2, .bits_per_word = 8 };
++	struct spi_transfer transfer = { .len = 2, .bits_per_word = 8, .speed_hz = 1000000 };
+ 	u8 *tx, *rx;
+ 	int ret;

@@ -2004,3 +2004,15 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   NetworkManager can reconnect.
 - Verify stock GDM touch authentication via the bottom-edge keyboard
   gesture and distinguish the BCM4773 GPIO and SSI probe phases.
+
+### 2026-11-23 — 6.18 R73 through R79 peripheral integration
+
+- Connect the SM-G955N Bluetooth UART and wake pins to the stock Linux
+  Broadcom HCI driver. Include RFCOMM, BNEP and AES for LE pairing in the Bluetooth fragment.
+- Match the BCM4773 SPI input bias and check the host request before
+  reading SSI. Exercise the board's optional GNSS power GPIO with
+  readback and restoration of its original direction.
+- Report the inherited ABOX PMU and clock state without cycling its
+  active domain. Keep ABOX and BCM4773 probes opt-in.
+- Report Samsung external-interrupt mux functions as GPIO inputs so
+  gpiolib can claim the touchscreen interrupt.

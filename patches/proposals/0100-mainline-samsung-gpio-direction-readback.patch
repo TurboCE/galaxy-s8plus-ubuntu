@@ -1,0 +1,107 @@
+Subject: [PATCH] pinctrl: samsung: report GPIO input and output direction
+
+Read the same function field used by the direction setter. This
+lets a consumer restore the prior GPIO direction after a test. An
+external-interrupt mux function is an input, including when pinctrl
+set it before gpiolib locks the GPIO as an IRQ.
+
+diff --git a/drivers/pinctrl/samsung/pinctrl-samsung.c b/drivers/pinctrl/samsung/pinctrl-samsung.c
+--- a/drivers/pinctrl/samsung/pinctrl-samsung.c
++++ b/drivers/pinctrl/samsung/pinctrl-samsung.c
+@@ -32,6 +32,7 @@
+ #include <linux/spinlock.h>
+ 
+ #include "../core.h"
++#include "pinctrl-exynos.h"
+ #include "pinctrl-samsung.h"
+ 
+ /* maximum number of the memory resources */
+@@ -620,6 +621,53 @@
+ 	return data;
+ }
+ 
++static void __iomem *samsung_gpio_function_reg(struct samsung_pin_bank *bank,
++					       unsigned int offset,
++					       u32 *mask, u32 *shift)
++{
++	const struct samsung_pin_bank_type *type = bank->type;
++	const unsigned int width = type->fld_width[PINCFG_TYPE_FUNC];
++	void __iomem *reg = bank->pctl_base + bank->pctl_offset +
++			    type->reg_offset[PINCFG_TYPE_FUNC];
++
++	*mask = BIT(width) - 1;
++	*shift = offset * width;
++	if (*shift >= 32) {
++		*shift -= 32;
++		reg += 4;
++	}
++	return reg;
++}
++
++static int samsung_gpio_get_direction(struct gpio_chip *gc, unsigned int offset)
++{
++	struct samsung_pin_bank *bank = gpiochip_get_data(gc);
++	struct samsung_pinctrl_drv_data *drvdata = bank->drvdata;
++	void __iomem *reg;
++	unsigned long flags;
++	u32 val, mask, shift;
++	int ret;
++
++	ret = clk_enable(drvdata->pclk);
++	if (ret)
++		return ret;
++
++	reg = samsung_gpio_function_reg(bank, offset, &mask, &shift);
++	raw_spin_lock_irqsave(&bank->slock, flags);
++	val = (readl(reg) >> shift) & mask;
++	raw_spin_unlock_irqrestore(&bank->slock, flags);
++	clk_disable(drvdata->pclk);
++
++	/* A pin already muxed for an external interrupt is still an input. */
++	if (val == PIN_CON_FUNC_INPUT ||
++	    (bank->eint_type != EINT_TYPE_NONE &&
++	     val == (bank->eint_func ?: EXYNOS_PIN_CON_FUNC_EINT)))
++		return GPIO_LINE_DIRECTION_IN;
++	if (val == PIN_CON_FUNC_OUTPUT)
++		return GPIO_LINE_DIRECTION_OUT;
++	return -EINVAL;
++}
++
+ /*
+  * The samsung_gpio_set_direction() should be called with "bank->slock" held
+  * to avoid race condition.
+@@ -629,24 +677,11 @@
+ static int samsung_gpio_set_direction(struct gpio_chip *gc,
+ 					     unsigned offset, bool input)
+ {
+-	const struct samsung_pin_bank_type *type;
+-	struct samsung_pin_bank *bank;
++	struct samsung_pin_bank *bank = gpiochip_get_data(gc);
+ 	void __iomem *reg;
+ 	u32 data, mask, shift;
+ 
+-	bank = gpiochip_get_data(gc);
+-	type = bank->type;
+-
+-	reg = bank->pctl_base + bank->pctl_offset
+-			+ type->reg_offset[PINCFG_TYPE_FUNC];
+-
+-	mask = (1 << type->fld_width[PINCFG_TYPE_FUNC]) - 1;
+-	shift = offset * type->fld_width[PINCFG_TYPE_FUNC];
+-	if (shift >= 32) {
+-		/* Some banks have two config registers */
+-		shift -= 32;
+-		reg += 4;
+-	}
++	reg = samsung_gpio_function_reg(bank, offset, &mask, &shift);
+ 
+ 	data = readl(reg);
+ 	data &= ~(mask << shift);
+@@ -1069,6 +1104,7 @@
+ 	.free = gpiochip_generic_free,
+ 	.set = samsung_gpio_set,
+ 	.get = samsung_gpio_get,
++	.get_direction = samsung_gpio_get_direction,
+ 	.direction_input = samsung_gpio_direction_input,
+ 	.direction_output = samsung_gpio_direction_output,
+ 	.to_irq = samsung_gpio_to_irq,

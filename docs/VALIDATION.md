@@ -3507,3 +3507,58 @@ read header. The header was `ff ff`, which did not qualify as
 a device response. No IIO sensor data was registered. The three
 Calliope firmware files remained present, and no ALSA audio card
 was exposed.
+
+### R73 through R79 Bluetooth, sensor and audio bring-up
+
+The R73 SM-G955N kernel attached `hci0` on the board's
+`10830000.serial` UART using `hci_uart_bcm`. The controller answered
+with chip ID 131 and ROM build 0000. Ubuntu's BlueZ exposed a powered
+adapter and started discovery, with no peer detected during that
+sample. The same R73 boot completed an RTC-timed 18-second s2idle
+cycle with Bluetooth active. The ROM address differs from the EFS
+factory address. A manual address change worked once, but repeated
+boot-time trials hit an HCI timeout while reconfiguring the
+controller. The candidate uses ROM initialization, without the
+experimental address service or either unqualified HCD variant.
+Pairing and radio traffic still require qualification.
+
+On R75, the BCM4773 responded to the wake sequence. The optional
+GNSS GPIO step reached SSI after GPIO direction readback was added.
+The SSI header changed from `ff ff` on R72 to `00 00` with the
+Samsung MISO pull-down. The R77 diagnostic checked the separate
+hardware receive-ready signal and observed no assertion within
+250 ms. That trial exposed no IIO sensor measurements or GNSS fix.
+
+The R75 and R77 audio diagnostics found ABOX already powered
+(PMU `0x3000f`, CA7 `0x10010000`). The inherited ABOX clock
+registers were PLL `0xa02d0110`, AUDIF `0x17` and UAIF0 `0x1`.
+The CS47L93 driver still reported missing MCLK2, and Linux showed
+no ALSA card. Speaker and microphone operation remain unverified.
+
+On R77 the stock Ubuntu network profile reconnected, the USB
+serial gadget and RFCOMM/BNEP modules were present, and a strict
+APT index refresh reached all three Ubuntu suites over `wlp1s0`.
+The APT upgrade simulation showed no pending changes and
+`dpkg --audit` was clean. The same boot exposed a touchscreen
+regression: GPIO direction readback rejected the preconfigured
+interrupt mux and `stmfts` could not claim its interrupt.
+
+R78 restored the stmfts interrupt. Touchscreen events selected the
+account, opened the stock screen keyboard and authenticated the
+Ubuntu Wayland session. GDM and GNOME Shell each opened the DECON
+KMS card and Panfrost render node. The active mode was 1440×2960.
+macOS read the Ubuntu login prompt over USB serial. An RTC-timed
+s2idle cycle resumed on the same boot after 15.4 seconds, with
+Bluetooth still powered and Wi-Fi returning to connected. The
+screen remained blank until a normal Mutter power-on request.
+After that request, stock GNOME accepted touchscreen keyboard
+input and unlocked the same Wayland session. Boot diagnostics
+still included the reported STMFTS controller error events,
+UFS DME setup warnings and Wi-Fi roaming and P2P failures.
+
+R79 added the AES provider for Bluetooth LE SMP. The running
+kernel exposed `cmac(aes)` and `ecdh-nist-p256`, without the
+R78 CMAC allocation error. BlueZ started an eight-second
+discovery session and reported eight nearby adapters or devices.
+No pairing or profile connection was attempted. Wi-Fi reconnected
+and GDM used the active 1440×2960 DECON CRTC on that boot.
