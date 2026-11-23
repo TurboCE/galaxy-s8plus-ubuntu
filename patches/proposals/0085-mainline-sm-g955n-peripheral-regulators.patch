@@ -1,0 +1,253 @@
+Subject: [PATCH] regulator: enable the SM-G955N peripheral LDOs via ACPM
+
+Expose the codec and sensor hub supplies after validating the
+S2MPS17 ID and the programmed selectors. Change only the LDO
+enable mode bits. Wire the CS47L93 SPI device to these rails.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -140,6 +140,28 @@
+ 	acpm-layout@16500000 {
+ 		compatible = "samsung,exynos8895-acpm-layout";
+ 		reg = <0x16500000 0xb400>, <0x16440000 0x1000>;
++
++		regulators {
++			g955n_codec_1v8: ldo32 {
++				regulator-name = "vdd-codec-1v8";
++				regulator-min-microvolt = <1800000>;
++				regulator-max-microvolt = <1800000>;
++				regulator-always-on;
++			};
++
++			g955n_codec_1v2: ldo33 {
++				regulator-name = "vdd-codec-1v2";
++				regulator-min-microvolt = <1200000>;
++				regulator-max-microvolt = <1200000>;
++				regulator-enable-ramp-delay = <5000>;
++			};
++
++			g955n_hub_1v8: ldo38 {
++				regulator-name = "vdd-mcu-1v8";
++				regulator-min-microvolt = <1800000>;
++				regulator-max-microvolt = <1800000>;
++			};
++		};
+ 	};
+ 
+ 	pcie_wlan: pcie@116a0000 {
+@@ -401,6 +423,20 @@
+ 	cs-gpios = <&gpd1 6 GPIO_ACTIVE_LOW>;
+ 	pinctrl-0 = <&spi3_bus &spi3_cs>;
+ 	status = "okay";
++
++	codec@0 {
++		compatible = "cirrus,cs47l93";
++		reg = <0>;
++		spi-max-frequency = <25000000>;
++		interrupts-extended = <&gpa2 6 IRQ_TYPE_LEVEL_LOW>;
++		reset-gpios = <&gpe7 0 GPIO_ACTIVE_LOW>;
++
++		AVDD-supply = <&g955n_codec_1v8>;
++		DBVDD1-supply = <&g955n_codec_1v8>;
++		CPVDD1-supply = <&g955n_codec_1v8>;
++		CPVDD2-supply = <&g955n_codec_1v2>;
++		DCVDD-supply = <&g955n_codec_1v2>;
++	};
+ };
+ 
+ &usi8 {
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -7,6 +7,7 @@
+ #include <linux/of.h>
+ #include <linux/overflow.h>
+ #include <linux/platform_device.h>
++#include <linux/regulator/driver.h>
+ #include <linux/slab.h>
+ 
+ #define ACPM_INITDATA_OFFSET	0x2850
+@@ -17,6 +18,10 @@
+ #define ACPM_IPC_SEQUENCE	GENMASK(21, 16)
+ #define ACPM_PMIC_ERROR		GENMASK(31, 24)
+ #define ACPM_PMIC_VALUE		GENMASK(15, 8)
++#define ACPM_PMIC_UPDATE	2
++#define ACPM_PMIC_MASK		GENMASK(23, 16)
++#define S2MPS17_LDO_MODE	GENMASK(7, 6)
++#define S2MPS17_LDO_SELECTOR	GENMASK(5, 0)
+ 
+ struct exynos8895_acpm_layout {
+ 	void __iomem *sram;
+@@ -60,11 +65,11 @@
+ 		offset <= size && length <= size - offset;
+ }
+ 
+-/* This diagnostic owns the PMIC channel and only sends register reads.
++/*
+  * A non-empty queue may contain someone else's transaction.
+  */
+-static int exynos8895_acpm_pmic_read(struct exynos8895_acpm_layout *layout,
+-				    u8 slave, u8 reg, u8 *value)
++static int exynos8895_acpm_pmic_transfer(struct exynos8895_acpm_layout *layout,
++					u8 slave, u8 reg, u32 command, u8 *value)
+ {
+ 	struct exynos8895_acpm_channel __iomem *pmic = layout->pmic;
+ 	void __iomem *sram = layout->sram;
+@@ -86,7 +91,7 @@
+ 	slot = sram + readl(&pmic->rx_base) + outgoing * 16;
+ 	writel(FIELD_PREP(ACPM_IPC_SEQUENCE, layout->sequence) |
+ 	       (slave << 8) | reg, slot);
+-	writel(0, slot + 4); /* Firmware FUNC_READ. */
++	writel(command, slot + 4);
+ 	writel(0, slot + 8);
+ 	writel(0, slot + 12);
+ 	writel((outgoing + 1) % layout->entries, send_front);
+@@ -110,7 +115,101 @@
+ 	if (FIELD_GET(ACPM_PMIC_ERROR, response))
+ 		return -EIO;
+ 
+-	*value = FIELD_GET(ACPM_PMIC_VALUE, response);
++	if (value)
++		*value = FIELD_GET(ACPM_PMIC_VALUE, response);
++	return 0;
++}
++
++static int exynos8895_acpm_pmic_read(struct exynos8895_acpm_layout *layout,
++				    u8 slave, u8 reg, u8 *value)
++{
++	return exynos8895_acpm_pmic_transfer(layout, slave, reg, 0, value);
++}
++
++static int exynos8895_ldo_is_enabled(struct regulator_dev *rdev)
++{
++	struct exynos8895_acpm_layout *layout = rdev_get_drvdata(rdev);
++	u8 value;
++	int ret;
++
++	mutex_lock(&layout->lock);
++	ret = exynos8895_acpm_pmic_read(layout, 1, rdev_get_id(rdev), &value);
++	mutex_unlock(&layout->lock);
++	return ret ? ret : !!(value & S2MPS17_LDO_MODE);
++}
++
++static int exynos8895_ldo_set_mode(struct regulator_dev *rdev, u8 mode)
++{
++	struct exynos8895_acpm_layout *layout = rdev_get_drvdata(rdev);
++	u32 command = ACPM_PMIC_UPDATE | FIELD_PREP(ACPM_PMIC_VALUE, mode) |
++		      FIELD_PREP(ACPM_PMIC_MASK, S2MPS17_LDO_MODE);
++	int ret;
++
++	mutex_lock(&layout->lock);
++	ret = exynos8895_acpm_pmic_transfer(layout, 1, rdev_get_id(rdev), command, NULL);
++	mutex_unlock(&layout->lock);
++	return ret;
++}
++
++static int exynos8895_ldo_enable(struct regulator_dev *rdev)
++{
++	return exynos8895_ldo_set_mode(rdev, S2MPS17_LDO_MODE);
++}
++
++static int exynos8895_ldo_disable(struct regulator_dev *rdev)
++{
++	return exynos8895_ldo_set_mode(rdev, 0);
++}
++
++static const struct regulator_ops exynos8895_ldo_ops = {
++	.is_enabled = exynos8895_ldo_is_enabled,
++	.enable = exynos8895_ldo_enable,
++	.disable = exynos8895_ldo_disable,
++};
++
++#define G955N_LDO(_name, _reg, _voltage) {		\
++	.name = _name, .of_match = _name,		\
++	.regulators_node = "regulators", .id = _reg,	\
++	.type = REGULATOR_VOLTAGE, .owner = THIS_MODULE,	\
++	.ops = &exynos8895_ldo_ops, .n_voltages = 1,	\
++	.fixed_uV = _voltage,				\
++}
++
++static const struct regulator_desc exynos8895_ldos[] = {
++	G955N_LDO("ldo32", 0x5d, 1800000),
++	G955N_LDO("ldo33", 0x5e, 1200000),
++	G955N_LDO("ldo38", 0x63, 1800000),
++};
++
++static int exynos8895_register_ldos(struct device *dev, struct exynos8895_acpm_layout *layout)
++{
++	struct regulator_config cfg = { .dev = dev, .driver_data = layout };
++	static const u8 selectors[] = { 0x2c, 0x28, 0x2c };
++	struct regulator_dev *rdev;
++	u8 id, control;
++	int ret, i;
++
++	ret = exynos8895_acpm_pmic_read(layout, 0, 0, &id);
++	if (ret)
++		return ret;
++	if (id != 2)
++		return -ENODEV;
++
++	/* Match the handset's programmed voltages before exposing enables. */
++	for (i = 0; i < ARRAY_SIZE(exynos8895_ldos); i++) {
++		ret = exynos8895_acpm_pmic_read(layout, 1, exynos8895_ldos[i].id, &control);
++		if (ret)
++			return ret;
++		if (FIELD_GET(S2MPS17_LDO_SELECTOR, control) != selectors[i])
++			return -EINVAL;
++	}
++
++	for (i = 0; i < ARRAY_SIZE(exynos8895_ldos); i++) {
++		rdev = devm_regulator_register(dev, &exynos8895_ldos[i], &cfg);
++		if (IS_ERR(rdev))
++			return PTR_ERR(rdev);
++	}
++
+ 	return 0;
+ }
+ 
+@@ -154,11 +253,13 @@
+ 	struct exynos8895_acpm_header __iomem *header;
+ 	struct exynos8895_acpm_channel __iomem *pmic;
+ 	struct exynos8895_acpm_layout *layout;
++	struct device_node *regulators;
+ 	struct device *dev = &pdev->dev;
+ 	struct resource *res;
+ 	resource_size_t size;
+ 	void __iomem *base;
+ 	u32 offset, count, id, entries, message_size, queue_size, polling;
++	int ret;
+ 
+ 	if (!of_machine_is_compatible("samsung,dream2lteks"))
+ 		return -ENODEV;
+@@ -217,6 +318,14 @@
+ 	mutex_init(&layout->lock);
+ 	platform_set_drvdata(pdev, layout);
+ 
++	regulators = of_get_child_by_name(dev->of_node, "regulators");
++	if (regulators) {
++		of_node_put(regulators);
++		ret = exynos8895_register_ldos(dev, layout);
++		if (ret)
++			return dev_err_probe(dev, ret, "S2MPS17 rail registration failed\n");
++	}
++
+ 	return devm_device_add_group(dev, &exynos8895_acpm_layout_group);
+ }
+ 
+diff --git a/drivers/soc/samsung/Kconfig b/drivers/soc/samsung/Kconfig
+--- a/drivers/soc/samsung/Kconfig
++++ b/drivers/soc/samsung/Kconfig
+@@ -77,9 +77,9 @@
+ 	depends on ARCH_EXYNOS || COMPILE_TEST
+ config EXYNOS8895_ACPM_LAYOUT
+ 	tristate "Exynos8895 ACPM shared-memory layout probe"
+-	depends on ARCH_EXYNOS && OF
++	depends on ARCH_EXYNOS && OF && REGULATOR
+ 	help
+-	  Check the firmware's PMIC IPC channel on the SM-G955N without
+-	  sending mailbox commands or changing power management state.
++	  Validate the SM-G955N PMIC IPC channel and expose the three
++	  board regulators for the audio codec and sensor hub.
+ 
+ endif

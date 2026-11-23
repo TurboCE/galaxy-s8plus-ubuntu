@@ -1,0 +1,162 @@
+Subject: [PATCH] soc: samsung: inspect the SM-G955N ACPM PMIC channel
+
+Check the vendor queue layout before adding a PMIC regulator
+transport. This probe reads ACPM SRAM and leaves the mailbox
+and the regulator state untouched.
+
+diff --git a/drivers/soc/samsung/Kconfig b/drivers/soc/samsung/Kconfig
+--- a/drivers/soc/samsung/Kconfig
++++ b/drivers/soc/samsung/Kconfig
+@@ -75,4 +75,11 @@
+ config EXYNOS_REGULATOR_COUPLER
+ 	bool "Exynos SoC Regulator Coupler" if COMPILE_TEST
+ 	depends on ARCH_EXYNOS || COMPILE_TEST
++config EXYNOS8895_ACPM_LAYOUT
++	tristate "Exynos8895 ACPM shared-memory layout probe"
++	depends on ARCH_EXYNOS && OF
++	help
++	  Check the firmware's PMIC IPC channel on the SM-G955N without
++	  sending mailbox commands or changing power management state.
++
+ endif
+diff --git a/drivers/soc/samsung/Makefile b/drivers/soc/samsung/Makefile
+--- a/drivers/soc/samsung/Makefile
++++ b/drivers/soc/samsung/Makefile
+@@ -13,3 +13,4 @@
+ obj-$(CONFIG_EXYNOS_REGULATOR_COUPLER) += exynos-regulator-coupler.o
+ 
+ obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= s3c-pm-check.o
++obj-$(CONFIG_EXYNOS8895_ACPM_LAYOUT) += exynos8895-acpm-layout.o
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+new file mode 100644
+--- /dev/null
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -0,0 +1,113 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/overflow.h>
++#include <linux/platform_device.h>
++
++#define ACPM_INITDATA_OFFSET	0x2850
++#define ACPM_PM_CHANNEL_INDEX	2
++#define ACPM_MAX_AP_CHANNELS	16
++
++/* The Exynos8895 firmware stores these fields as little-endian u32 words. */
++struct exynos8895_acpm_header {
++	u32 plugins[2];
++	u32 channels;
++	u32 reserved[3];
++	u32 ap_channels;
++};
++
++struct exynos8895_acpm_channel {
++	u32 id;
++	u32 field;
++	u32 owner;
++	u32 type;
++	u32 rx_rear;
++	u32 rx_front;
++	u32 rx_base;
++	u32 indirect[3];
++	u32 tx_rear;
++	u32 tx_front;
++	u32 tx_base;
++	u32 entries;
++	u32 message_size;
++	u32 reserved[2];
++	u32 polling;
++};
++
++static bool exynos8895_acpm_range(resource_size_t size, u32 offset, u32 length)
++{
++	return IS_ALIGNED(offset, sizeof(u32)) && length &&
++		offset <= size && length <= size - offset;
++}
++
++static int exynos8895_acpm_layout_probe(struct platform_device *pdev)
++{
++	struct exynos8895_acpm_header __iomem *header;
++	struct exynos8895_acpm_channel __iomem *pmic;
++	struct device *dev = &pdev->dev;
++	struct resource *res;
++	resource_size_t size;
++	void __iomem *base;
++	u32 offset, count, id, entries, message_size, queue_size, polling;
++
++	if (!of_machine_is_compatible("samsung,dream2lteks"))
++		return -ENODEV;
++
++	base = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
++	if (IS_ERR(base))
++		return PTR_ERR(base);
++
++	size = resource_size(res);
++	if (!exynos8895_acpm_range(size, ACPM_INITDATA_OFFSET, sizeof(*header)))
++		return -EINVAL;
++
++	header = base + ACPM_INITDATA_OFFSET;
++	offset = readl(&header->channels);
++	count = readl(&header->ap_channels);
++	if (count <= ACPM_PM_CHANNEL_INDEX || count > ACPM_MAX_AP_CHANNELS ||
++	    !exynos8895_acpm_range(size, offset, count * sizeof(*pmic)))
++		return dev_err_probe(dev, -EINVAL,
++				     "invalid AP channel table: offset %#x, count %u\n",
++				     offset, count);
++
++	pmic = base + offset + ACPM_PM_CHANNEL_INDEX * sizeof(*pmic);
++	id = readl(&pmic->id);
++	entries = readl(&pmic->entries);
++	message_size = readl(&pmic->message_size);
++	polling = readl(&pmic->polling);
++	if (id >= ACPM_MAX_AP_CHANNELS || entries < 2 ||
++	    message_size != 4 * sizeof(u32) || polling > 1 ||
++	    check_mul_overflow(entries, message_size, &queue_size) ||
++	    !exynos8895_acpm_range(size, readl(&pmic->rx_base), queue_size) ||
++	    !exynos8895_acpm_range(size, readl(&pmic->tx_base), queue_size) ||
++	    !exynos8895_acpm_range(size, readl(&pmic->rx_front), sizeof(u32)) ||
++	    !exynos8895_acpm_range(size, readl(&pmic->rx_rear), sizeof(u32)) ||
++	    !exynos8895_acpm_range(size, readl(&pmic->tx_front), sizeof(u32)) ||
++	    !exynos8895_acpm_range(size, readl(&pmic->tx_rear), sizeof(u32)))
++		return dev_err_probe(dev, -EINVAL,
++				     "invalid PMIC channel: id %u, slots %u, msg %u, polling %u\n",
++				     id, entries, message_size, polling);
++
++	dev_info(dev, "ACPM AP channels %u at %#x, PMIC channel %u, %u x %u-byte slots, polling %u\n",
++		 count, offset, id, entries, message_size, polling);
++	return 0;
++}
++
++static const struct of_device_id exynos8895_acpm_layout_of_match[] = {
++	{ .compatible = "samsung,exynos8895-acpm-layout" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, exynos8895_acpm_layout_of_match);
++
++static struct platform_driver exynos8895_acpm_layout_driver = {
++	.probe = exynos8895_acpm_layout_probe,
++	.driver = {
++		.name = "exynos8895-acpm-layout",
++		.of_match_table = exynos8895_acpm_layout_of_match,
++	},
++};
++module_platform_driver(exynos8895_acpm_layout_driver);
++
++MODULE_DESCRIPTION("SM-G955N read-only ACPM shared-memory layout probe");
++MODULE_LICENSE("GPL");
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -137,6 +137,11 @@
+ };
+ 
+ &{/soc@0} {
++	acpm-layout@16500000 {
++		compatible = "samsung,exynos8895-acpm-layout";
++		reg = <0x16500000 0xb400>;
++	};
++
+ 	pcie_wlan: pcie@116a0000 {
+ 		compatible = "samsung,exynos8895-pcie-wlan";
+ 		device_type = "pci";

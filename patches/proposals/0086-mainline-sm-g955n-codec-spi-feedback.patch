@@ -1,0 +1,18 @@
+Subject: [PATCH] arm64: dts: restore SM-G955N codec SPI feedback delay
+
+Carry over the codec MISO sampling phase from the Samsung
+SM-G955N tree. Linux 6.18 interprets this peripheral property
+inside the same controller-data node.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -437,4 +437,8 @@
+ 		CPVDD2-supply = <&g955n_codec_1v2>;
+ 		DCVDD-supply = <&g955n_codec_1v2>;
++
++		controller-data {
++			samsung,spi-feedback-delay = <1>;
++		};
+ 	};
+ };

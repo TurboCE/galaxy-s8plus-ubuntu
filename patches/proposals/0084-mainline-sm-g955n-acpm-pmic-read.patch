@@ -1,0 +1,181 @@
+Subject: [PATCH] soc: samsung: read SM-G955N peripheral PMIC rails
+
+Use the Exynos8895 mailbox direction and request only the
+S2MPS17 chip ID and peripheral LDO control bytes. Verify the
+firmware queues before attaching the root-only diagnostic.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -139,7 +139,7 @@
+ &{/soc@0} {
+ 	acpm-layout@16500000 {
+ 		compatible = "samsung,exynos8895-acpm-layout";
+-		reg = <0x16500000 0xb400>;
++		reg = <0x16500000 0xb400>, <0x16440000 0x1000>;
+ 	};
+ 
+ 	pcie_wlan: pcie@116a0000 {
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -1,13 +1,32 @@
+ // SPDX-License-Identifier: GPL-2.0-only
++#include <linux/bitfield.h>
+ #include <linux/io.h>
++#include <linux/iopoll.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/overflow.h>
+ #include <linux/platform_device.h>
++#include <linux/slab.h>
+ 
+ #define ACPM_INITDATA_OFFSET	0x2850
+ #define ACPM_PM_CHANNEL_INDEX	2
+ #define ACPM_MAX_AP_CHANNELS	16
++#define ACPM_INTGR0		0x08
++#define ACPM_INTCR1		0x20
++#define ACPM_IPC_SEQUENCE	GENMASK(21, 16)
++#define ACPM_PMIC_ERROR		GENMASK(31, 24)
++#define ACPM_PMIC_VALUE		GENMASK(15, 8)
++
++struct exynos8895_acpm_layout {
++	void __iomem *sram;
++	void __iomem *mailbox;
++	struct exynos8895_acpm_channel __iomem *pmic;
++	struct mutex lock;
++	u32 entries;
++	u32 id;
++	u32 sequence;
++};
+ 
+ /* The Exynos8895 firmware stores these fields as little-endian u32 words. */
+ struct exynos8895_acpm_header {
+@@ -41,10 +60,100 @@
+ 		offset <= size && length <= size - offset;
+ }
+ 
++/* This diagnostic owns the PMIC channel and only sends register reads.
++ * A non-empty queue may contain someone else's transaction.
++ */
++static int exynos8895_acpm_pmic_read(struct exynos8895_acpm_layout *layout,
++				    u8 slave, u8 reg, u8 *value)
++{
++	struct exynos8895_acpm_channel __iomem *pmic = layout->pmic;
++	void __iomem *sram = layout->sram;
++	void __iomem *send_front = sram + readl(&pmic->rx_front);
++	void __iomem *send_rear = sram + readl(&pmic->rx_rear);
++	void __iomem *recv_front = sram + readl(&pmic->tx_front);
++	void __iomem *recv_rear = sram + readl(&pmic->tx_rear);
++	u32 outgoing = readl(send_front);
++	u32 incoming = readl(recv_rear);
++	u32 response, next;
++	void __iomem *slot;
++	int ret;
++
++	if (outgoing >= layout->entries || incoming >= layout->entries ||
++	    outgoing != readl(send_rear) || incoming != readl(recv_front))
++		return -EBUSY;
++
++	layout->sequence = (layout->sequence % FIELD_MAX(ACPM_IPC_SEQUENCE)) + 1;
++	slot = sram + readl(&pmic->rx_base) + outgoing * 16;
++	writel(FIELD_PREP(ACPM_IPC_SEQUENCE, layout->sequence) |
++	       (slave << 8) | reg, slot);
++	writel(0, slot + 4); /* Firmware FUNC_READ. */
++	writel(0, slot + 8);
++	writel(0, slot + 12);
++	writel((outgoing + 1) % layout->entries, send_front);
++	writel(BIT(layout->id + 16), layout->mailbox + ACPM_INTGR0);
++
++	ret = readl_poll_timeout(recv_front, response, response != incoming, 50, 200000);
++	if (ret)
++		return ret;
++
++	next = (incoming + 1) % layout->entries;
++	slot = sram + readl(&pmic->tx_base) + incoming * 16;
++	if (response != next ||
++	    FIELD_GET(ACPM_IPC_SEQUENCE, readl(slot)) != layout->sequence)
++		return -EIO;
++
++	response = readl(slot + 4);
++	writel(next, recv_rear);
++	if (readl(recv_front) == next)
++		writel(BIT(layout->id), layout->mailbox + ACPM_INTCR1);
++
++	if (FIELD_GET(ACPM_PMIC_ERROR, response))
++		return -EIO;
++
++	*value = FIELD_GET(ACPM_PMIC_VALUE, response);
++	return 0;
++}
++
++static ssize_t peripheral_rails_show(struct device *dev,
++				     struct device_attribute *attr, char *buf)
++{
++	struct exynos8895_acpm_layout *layout = dev_get_drvdata(dev);
++	static const u8 ldo_registers[] = { 0x5d, 0x5e, 0x63 };
++	u8 id, rails[ARRAY_SIZE(ldo_registers)];
++	int i, ret;
++
++	mutex_lock(&layout->lock);
++	ret = exynos8895_acpm_pmic_read(layout, 0, 0, &id);
++	if (ret)
++		goto unlock;
++
++	for (i = 0; i < ARRAY_SIZE(ldo_registers); i++) {
++		ret = exynos8895_acpm_pmic_read(layout, 1, ldo_registers[i], &rails[i]);
++		if (ret)
++			goto unlock;
++	}
++
++	ret = sysfs_emit(buf, "PMIC_ID=0x%02x LDO32=0x%02x LDO33=0x%02x LDO38=0x%02x\n",
++			 id, rails[0], rails[1], rails[2]);
++unlock:
++	mutex_unlock(&layout->lock);
++	return ret;
++}
++static DEVICE_ATTR_ADMIN_RO(peripheral_rails);
++
++static struct attribute *exynos8895_acpm_layout_attrs[] = {
++	&dev_attr_peripheral_rails.attr,
++	NULL,
++};
++static const struct attribute_group exynos8895_acpm_layout_group = {
++	.attrs = exynos8895_acpm_layout_attrs,
++};
++
+ static int exynos8895_acpm_layout_probe(struct platform_device *pdev)
+ {
+ 	struct exynos8895_acpm_header __iomem *header;
+ 	struct exynos8895_acpm_channel __iomem *pmic;
++	struct exynos8895_acpm_layout *layout;
+ 	struct device *dev = &pdev->dev;
+ 	struct resource *res;
+ 	resource_size_t size;
+@@ -91,7 +198,24 @@
+ 
+ 	dev_info(dev, "ACPM AP channels %u at %#x, PMIC channel %u, %u x %u-byte slots, polling %u\n",
+ 		 count, offset, id, entries, message_size, polling);
+-	return 0;
++	if (!polling || readl(&pmic->type) != 1)
++		return 0;
++
++	layout = devm_kzalloc(dev, sizeof(*layout), GFP_KERNEL);
++	if (!layout)
++		return -ENOMEM;
++	layout->mailbox = devm_platform_ioremap_resource(pdev, 1);
++	if (IS_ERR(layout->mailbox))
++		return PTR_ERR(layout->mailbox);
++
++	layout->sram = base;
++	layout->pmic = pmic;
++	layout->entries = entries;
++	layout->id = id;
++	mutex_init(&layout->lock);
++	platform_set_drvdata(pdev, layout);
++
++	return devm_device_add_group(dev, &exynos8895_acpm_layout_group);
+ }
+ 
+ static const struct of_device_id exynos8895_acpm_layout_of_match[] = {

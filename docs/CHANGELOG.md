@@ -1952,3 +1952,16 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Reserve the Samsung secure camera carveout in the SM-G955N device tree.
   The recovered R58 panic interrupted page initialization within that region.
+
+### R60 transport soak and R61 peripheral preparation
+
+- Record paired same-boot USB and Wi-Fi checks during desktop use and
+  concurrent data transfers on the installed R60 image.
+- Build the native Cirrus Madera/CS47L92 codec and IIO cores. Add a
+  model-specific ACPM diagnostic that validates the firmware queue
+  layout and can read the S2MPS17 chip ID and peripheral rail registers.
+- Add S2MPS17 regulator controls for the verified codec and hub rails,
+  wire the CS47L93 SPI device to its suppliers, and build the ALSA
+  sequencer required by the Ubuntu snd module setup.
+- Restore the board's SPI MISO feedback phase. R64 binds the physical
+  CS47L93 and its ASoC codec component.

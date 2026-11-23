@@ -3307,3 +3307,56 @@ test completed with all sampled pages intact. Eight paired SSH samples
 over USB Ethernet and Wi-Fi spanned approximately 59 seconds after login.
 The kernel journal contained no SError or panic during that test.
 APT then succeeded over Wi-Fi with the USB data gadget unbound.
+
+### R60 transport soak
+
+Paired authenticated SSH checks confirmed the same boot ID, configured USB
+UDC and active NetworkManager Wi-Fi client. The handset associated on
+5745 MHz, and the GNOME session locked normally while both transports
+remained accessible. The test included a 512 MiB anonymous-memory hold
+and simultaneous 64 MiB transfers with matching SHA-256 over both links.
+The test ran for 20 minutes and 6 seconds, with 58 successful samples
+per link. Independent link-event observers recorded no interface
+changes during the final approximately 15 minutes. NetworkManager
+recorded no post-association state transition for wlp1s0. No
+SError, panic or lockup signature appeared in the end-of-run log.
+
+### R61 audio and sensor prerequisites
+
+The R60 Ubuntu packages include PipeWire, WirePlumber, ALSA UCM and
+iio-sensor-proxy. The running kernel has no ALSA sound card or IIO
+devices, so PipeWire offered Dummy Output. R61 builds the standard
+Madera SPI and CS47L92/93 codec modules and the native IIO core.
+
+Samsung supplies the CS47L93 codec from S2MPS17 LDO32 and LDO33. The
+BCM4773 hub uses LDO38 on the Korean board. The trial validates the
+Exynos8895 ACPM AP channel layout before enabling a root-only read of
+the S2MPS17 revision and those rail control bytes. The query submits
+firmware register reads and respects both queue bounds and ownership.
+
+On R61 the handset returned seven ACPM AP channels and a three-slot,
+16-byte polling PMIC channel. S2MPS17 reported revision 2. LDO32 was
+enabled at its 1.8 V selector. LDO33 and LDO38 retained their 1.2 V and
+1.8 V selectors with their enable bits clear. Linux loaded the codec
+and IIO modules. The device list still had no ALSA card or IIO sensor.
+
+R62 exposes those three board rails through the Linux regulator
+framework after checking the PMIC revision and all three programmed
+voltage selectors. Enable and disable operations modify only the mode
+bits. The CS47L93 SPI node references the two codec supplies. The
+kernel also builds the ALSA sequencer that the Ubuntu modprobe rule
+loads alongside `snd`.
+
+R62 exposed all three regulator devices, and Ubuntu's normal sound
+module command succeeded with the sequencer available. The codec
+returned ID `0x3138` at 25 MHz and again in the R63 1 MHz comparison.
+R64 kept the R62 kernel, modules and normal SPI frequency and applied
+the stock Samsung MISO feedback delay. The live SPI device bound to
+Madera and identified CS47L93 silicon revision 1. The platform
+`cs47l92-codec` component also bound, and PMIC readback showed LDO33
+enabled with its original voltage selector.
+
+GDM, USB Ethernet and Wi-Fi remained active in R64. The codec reported
+a missing MCLK2 32 kHz source. The handset still has no ALSA sound card,
+and the BCM4773 driver and IIO sensor readings remain open. The R64
+test loads ACPM and Madera explicitly during qualification.
