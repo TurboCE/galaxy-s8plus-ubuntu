@@ -1,0 +1,99 @@
+Subject: [PATCH] PCI: exynos8895: let DesignWare own the ELBI mapping
+
+Linux 6.18 already claims and maps the ELBI resource. The duplicate
+request aborted the SM-G955N probe with -EBUSY. Request the shared
+interrupt after the common core has initialized its ELBI pointer.
+
+diff --git a/drivers/pci/controller/dwc/pcie-exynos8895.c b/drivers/pci/controller/dwc/pcie-exynos8895.c
+--- a/drivers/pci/controller/dwc/pcie-exynos8895.c
++++ b/drivers/pci/controller/dwc/pcie-exynos8895.c
+@@ -85,12 +85,34 @@
+ 		writel(lane0_gen1[i], ep->phy + (0x30 + i) * 4);
+ }
+ 
++static irqreturn_t exynos8895_pcie_irq(int irq, void *arg)
++{
++	struct exynos8895_pcie *ep = arg;
++	void __iomem *elbi = ep->pci.elbi_base;
++	u32 pending = readl(elbi + ELBI_IRQ_PULSE) & ELBI_INTX;
++
++	if (!pending)
++		return IRQ_NONE;
++
++	writel(pending, elbi + ELBI_IRQ_PULSE);
++	return IRQ_HANDLED;
++}
++
+ static int exynos8895_pcie_hw_init(struct dw_pcie_rp *pp)
+ {
+ 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+ 	struct exynos8895_pcie *ep = dev_get_drvdata(pci->dev);
+ 	void __iomem *elbi = pci->elbi_base;
+-	int ret;
++	int irq, ret;
++
++	/* DesignWare has mapped ELBI before invoking this callback. */
++	irq = platform_get_irq(to_platform_device(pci->dev), 0);
++	if (irq < 0)
++		return irq;
++	ret = devm_request_irq(pci->dev, irq, exynos8895_pcie_irq, IRQF_SHARED,
++			       dev_name(pci->dev), ep);
++	if (ret)
++		return ret;
+ 
+ 	ret = regmap_update_bits(ep->sysreg, EXYNOS8895_FSYS1_PCIE_REF, BIT(1), 0);
+ 	if (ret)
+@@ -203,19 +225,6 @@
+ 	.link_up = exynos8895_pcie_link_up,
+ };
+ 
+-static irqreturn_t exynos8895_pcie_irq(int irq, void *arg)
+-{
+-	struct exynos8895_pcie *ep = arg;
+-	void __iomem *elbi = ep->pci.elbi_base;
+-	u32 pending = readl(elbi + ELBI_IRQ_PULSE) & ELBI_INTX;
+-
+-	if (!pending)
+-		return IRQ_NONE;
+-
+-	writel(pending, elbi + ELBI_IRQ_PULSE);
+-	return IRQ_HANDLED;
+-}
+-
+ static void exynos8895_pcie_power_off(void *arg)
+ {
+ 	struct exynos8895_pcie *ep = arg;
+@@ -230,7 +239,7 @@
+ 	struct device *dev = &pdev->dev;
+ 	struct clk_bulk_data *clocks;
+ 	struct exynos8895_pcie *ep;
+-	int irq, ret;
++	int ret;
+ 
+ 	ep = devm_kzalloc(dev, sizeof(*ep), GFP_KERNEL);
+ 	if (!ep)
+@@ -239,9 +248,6 @@
+ 	ep->pci.dev = dev;
+ 	ep->pci.ops = &exynos8895_pcie_ops;
+ 	ep->pci.pp.ops = &exynos8895_pcie_host_ops;
+-	ep->pci.elbi_base = devm_platform_ioremap_resource_byname(pdev, "elbi");
+-	if (IS_ERR(ep->pci.elbi_base))
+-		return PTR_ERR(ep->pci.elbi_base);
+ 	ep->phy = devm_platform_ioremap_resource_byname(pdev, "phy");
+ 	if (IS_ERR(ep->phy))
+ 		return PTR_ERR(ep->phy);
+@@ -275,14 +281,6 @@
+ 
+ 	gpiod_set_value_cansleep(ep->enable, 1);
+ 	msleep(150);
+-
+-	irq = platform_get_irq(pdev, 0);
+-	if (irq < 0)
+-		return irq;
+-	ret = devm_request_irq(dev, irq, exynos8895_pcie_irq, IRQF_SHARED,
+-			       dev_name(dev), ep);
+-	if (ret)
+-		return ret;
+ 
+ 	platform_set_drvdata(pdev, ep);
+ 	return dw_pcie_host_init(&ep->pci.pp);

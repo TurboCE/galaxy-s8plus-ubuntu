@@ -3197,3 +3197,55 @@ DTB. No rail was switched during this test.
   The SM-G955N sensor and GPS path uses a BCM4773 hub in SPI mode 3.
   The existing Linux SSP driver targets other hubs and sets SPI mode 1;
   its presence alone does not qualify the Samsung sensor path.
+
+### R53–R58 Exynos8895 WLAN qualification
+
+- R53 ran Ubuntu to multi-user with the USB serial login prompt and
+  authenticated SSH on macOS. The WLAN controller first failed with
+  `-EBUSY` because the platform driver and DesignWare both requested
+  the ELBI register range. After removing the duplicate request,
+  the BCM4361 (PCI ID 14e4:441f) enumerated on a Gen1 x1 link.
+- R54 and R55 showed why the initial BAR layouts failed. The controller
+  exposes a 4 MiB CPU aperture, and the generic bridge sizing still
+  requested 6 MiB after reducing the TCM span to 3 MiB while retaining
+  a 4 MiB allocator alignment. The Samsung layout uses a 3 MiB TCM
+  window and an outbound alias for the control registers.
+- R54 reached an Ubuntu GNOME desktop with the supplied Xorg framebuffer
+  session. After keyboard authentication, the active seat0 session, Mac
+  SSH and USB gadget state remained stable through eight samples over
+  41 seconds. A screenshot showed the desktop. The prior R51
+  journal contained userspace session teardown, and no previous-boot
+  kernel entry identified a USB fault. The disconnect did not recur
+  during the R54 test.
+- The R54 system exposed neither an ALSA card nor an IIO sensor. PipeWire
+  offered Dummy Output. Linux 6.18 has a CS47L93 codec driver, but the
+  phone still needs its SPI board wiring and the Exynos8895 ABOX PCM path.
+  The BCM4773 sensor hub also needs a compatible SPI mode 3 driver.
+- R56 sized the upstream bridge window to 4 MiB. The config page at
+  the end of that aperture still prevented allocation. R57 mapped
+  CFG0 through the host-owned aperture and assigned the TCM BAR at
+  `0x11800000–0x11afffff` and the control CPU BAR at
+  `0x11b00000–0x11b07fff`, translated to PCI address `0x11c00000`.
+- The initial firmware aliases on the target were empty. Installing
+  the handset's own matching Samsung B0 firmware, calibration and CLM
+  blob started brcmfmac and created `wlp1s0`. The Ubuntu
+  `wireless-regdb` package supplied the signed regulatory database.
+  NetworkManager found access points on 2.4 and 5 GHz and connected
+  with an existing profile. After reboot, udev loaded the modules and
+  NetworkManager reconnected automatically.
+- An authenticated SSH session over Wi-Fi unbound the USB gadget.
+  All Ubuntu mirror routes used `wlp1s0`, and APT updated the
+  noble, noble-updates and noble-security indexes successfully over
+  HTTPS. The cable remained attached, and USB data was restored
+  afterward. Optional Wi-Fi Direct interface creation and the firmware
+  roaming trigger still report errors.
+- R58 booted to the graphical target, initially reconnected Wi-Fi and
+  registered the codec and sensor hub SPI masters at `0x10460000`
+  and `0x108c0000`. The login test established an active Ubuntu
+  seat0 GNOME Xorg session. At the next check, during a launch of
+  GNOME Settings, both IP paths stopped responding. The Mac still
+  enumerated the USB gadget and reported Ethernet carrier, but the
+  serial shell returned no login prompt. This reproduces a loss of
+  access after desktop login without identifying the underlying
+  fault. The Settings window, speaker, microphone and sensor
+  readings remain unqualified.

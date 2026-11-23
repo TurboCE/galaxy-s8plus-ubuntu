@@ -1920,3 +1920,20 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Xorg fallback scoped to the mainline boot.
 - Add an opt-in Exynos8895 WLAN root port with DesignWare enumeration,
   then add BCM4361 firmware and RAM definitions to brcmfmac.
+
+### R53–R58 WLAN PCIe bring-up
+
+- Let the DesignWare PCIe core map ELBI once and register the platform
+  interrupt after the mapping is ready. The revised R53 host driver
+  enumerated the BCM4361 over a Gen1 x1 link.
+- Prepare the board-specific 3 MiB TCM window and translated BCM4361
+  control BAR for the Exynos8895 WLAN port.
+- Keep the reserved CFG0 page inside the host-owned 4 MiB window so
+  the BCM4361 BARs can be assigned. Add a handset-local firmware
+  provisioning helper that rejects empty inputs and verifies copies.
+  The binary firmware and calibration files are supplied by the handset.
+- Include Ubuntu's signed Wi-Fi regulatory database in new root
+  filesystem builds. Enable the codec and sensor hub SPI masters
+  with the Korean Galaxy S8+ board pin mappings.
+- Sync the persistent bring-up journal more frequently to narrow
+  the log gap when a trial abruptly stops responding.

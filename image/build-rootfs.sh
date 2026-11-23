@@ -32,7 +32,7 @@ EOF
 chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
 chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   systemd-sysv systemd-timesyncd udev dbus openssh-server sudo busybox-static iproute2 iputils-ping \
-  network-manager wpasupplicant iw bluez modemmanager geoclue-2.0 gpsd gpsd-clients \
+  network-manager wpasupplicant wireless-regdb iw bluez modemmanager geoclue-2.0 gpsd gpsd-clients \
   iio-sensor-proxy alsa-utils alsa-ucm-conf acl e2fsprogs kmod ca-certificates curl tzdata \
   libegl1 libgles2 libgbm1 libdrm2 mesa-utils weston wayland-utils \
   ubuntu-desktop-minimal gnome-system-monitor rtkit libspa-0.2-libcamera xserver-xorg-video-fbdev xserver-xorg-input-libinput \

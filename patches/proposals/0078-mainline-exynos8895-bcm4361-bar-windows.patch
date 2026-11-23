@@ -1,0 +1,205 @@
+Subject: [PATCH] PCI: exynos8895: make BCM4361 BARs fit the WLAN aperture
+
+The SM-G955N enumerates the BCM4361, but its advertised 4 MiB TCM BAR
+and separate control BAR cannot fit the host window. Follow Samsung's
+channel 0 layout: use 3 MiB of TCM and translate the control alias to
+a distinct PCI address. The host owns the final CFG0 page inside the
+aperture, and the iATU keeps that page disjoint from either endpoint
+BAR. Restrict the quirk to this root port and endpoint ID.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -142,7 +142,7 @@
+ 		bus-range = <0 1>;
+ 		#address-cells = <3>;
+ 		#size-cells = <2>;
+-		ranges = <0x02000000 0 0x11800000 0x11800000 0 0x3ff000>;
++		ranges = <0x02000000 0 0x11800000 0x11800000 0 0x400000>;
+ 		interrupts = <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
+ 		#interrupt-cells = <1>;
+ 		interrupt-map-mask = <0 0 0 0>;
+diff --git a/drivers/pci/quirks.c b/drivers/pci/quirks.c
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -19,6 +19,7 @@
+ #include <linux/kernel.h>
+ #include <linux/export.h>
+ #include <linux/pci.h>
++#include <linux/of.h>
+ #include <linux/isa-dma.h> /* isa_dma_bridge_buggy */
+ #include <linux/init.h>
+ #include <linux/delay.h>
+@@ -309,6 +310,32 @@
+  * key system devices. For devices that need to have mmio decoding always-on,
+  * we need to set the dev->mmio_always_on bit.
+  */
++/*
++ * The Exynos8895 port has one 4 MiB aperture. Samsung maps three MiB
++ * of the BCM4361 TCM and puts the control registers behind a separate
++ * outbound translation. Size the software TCM resource accordingly
++ * at the start of the fixed, naturally aligned aperture.
++ */
++static void quirk_exynos8895_bcm4361_tcm(struct pci_dev *dev)
++{
++	struct pci_host_bridge *bridge = pci_find_host_bridge(dev->bus);
++	struct resource *tcm = &dev->resource[2];
++
++	if (!bridge || !bridge->dev.parent ||
++	    !of_device_is_compatible(bridge->dev.parent->of_node,
++				     "samsung,exynos8895-pcie-wlan") ||
++	    resource_size(tcm) != SZ_4M ||
++	    (tcm->start && !(tcm->flags & IORESOURCE_UNSET)))
++		return;
++
++	tcm->flags &= ~IORESOURCE_SIZEALIGN;
++	tcm->flags |= IORESOURCE_STARTALIGN | IORESOURCE_UNSET;
++	tcm->start = SZ_1M;
++	tcm->end = tcm->start + SZ_2M + SZ_1M - 1;
++}
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_BROADCOM, 0x441f,
++			 quirk_exynos8895_bcm4361_tcm);
++
+ static void quirk_mmio_always_on(struct pci_dev *dev)
+ {
+ 	dev->mmio_always_on = 1;
+diff --git a/drivers/pci/controller/dwc/pcie-exynos8895.c b/drivers/pci/controller/dwc/pcie-exynos8895.c
+--- a/drivers/pci/controller/dwc/pcie-exynos8895.c
++++ b/drivers/pci/controller/dwc/pcie-exynos8895.c
+@@ -17,6 +17,7 @@
+ #include <linux/pci.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
++#include <linux/sizes.h>
+ 
+ #include "pcie-designware.h"
+ 
+@@ -98,6 +99,64 @@
+ 	return IRQ_HANDLED;
+ }
+ 
++/* BCM4361 control BAR alias from the Samsung channel 0 host driver. */
++static int exynos8895_pcie_enable_wifi(struct pci_host_bridge *bridge,
++				      struct pci_dev *pdev)
++{
++	struct dw_pcie_rp *pp = bridge->sysdata;
++	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
++	resource_size_t control = pci_resource_start(pdev, 0);
++	resource_size_t size = pci_resource_len(pdev, 0);
++	struct dw_pcie_ob_atu_cfg tcm_atu = {
++		.index = 1,
++		.type = PCIE_ATU_TYPE_MEM,
++		.parent_bus_addr = 0x11800000 - pci->parent_bus_offset,
++		.pci_addr = 0x11800000,
++		.size = SZ_2M + SZ_1M,
++	};
++	struct dw_pcie_ob_atu_cfg control_atu = {
++		.index = 2,
++		.type = PCIE_ATU_TYPE_MEM,
++		.parent_bus_addr = control - pci->parent_bus_offset,
++		.pci_addr = 0x11c00000,
++		.size = SZ_64K,
++	};
++	u32 bar;
++	int ret;
++
++	if (pdev->vendor != PCI_VENDOR_ID_BROADCOM || pdev->device != 0x441f)
++		return 0;
++
++	if (!pdev->bus->self || pci->num_ob_windows < 3 ||
++	    control != 0x11b00000 || size != SZ_32K ||
++	    pci_resource_start(pdev, 2) != 0x11800000 ||
++	    pci_resource_len(pdev, 2) != SZ_2M + SZ_1M) {
++		dev_err(&pdev->dev, "unexpected WLAN BAR layout: control %pr, TCM %pr\n",
++			&pdev->resource[0], &pdev->resource[2]);
++		return -ENOSPC;
++	}
++
++	ret = dw_pcie_prog_outbound_atu(pci, &tcm_atu);
++	if (ret)
++		return ret;
++	ret = dw_pcie_prog_outbound_atu(pci, &control_atu);
++	if (ret)
++		return ret;
++
++	/* The endpoint decodes a 4 MiB BAR2, so BAR0 needs a distinct PCI
++	 * address even though its CPU alias sits in the 4 MiB aperture.
++	 */
++	pci_write_config_word(pdev->bus->self, PCI_MEMORY_LIMIT, 0x11c0);
++	pci_read_config_dword(pdev, PCI_BASE_ADDRESS_0, &bar);
++	ret = pci_write_config_dword(pdev, PCI_BASE_ADDRESS_0,
++				    0x11c00000 | (bar & ~PCI_BASE_ADDRESS_MEM_MASK));
++	if (ret)
++		return pcibios_err_to_errno(ret);
++
++	dev_info(&pdev->dev, "WLAN BAR0 translated to PCI 0x11c00000\n");
++	return 0;
++}
++
+ static int exynos8895_pcie_hw_init(struct dw_pcie_rp *pp)
+ {
+ 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+@@ -172,6 +231,7 @@
+ 	writel(0, elbi + ELBI_IRQ_EN_SPECIAL);
+ 	writel(ELBI_INTX, elbi + ELBI_IRQ_PULSE);
+ 	writel(ELBI_INTX, elbi + ELBI_IRQ_EN_PULSE);
++	pp->bridge->enable_device = exynos8895_pcie_enable_wifi;
+ 	return 0;
+ }
+ 
+diff --git a/drivers/pci/controller/dwc/pcie-exynos8895.c b/drivers/pci/controller/dwc/pcie-exynos8895.c
+--- a/drivers/pci/controller/dwc/pcie-exynos8895.c
++++ b/drivers/pci/controller/dwc/pcie-exynos8895.c
+@@ -299,6 +299,7 @@
+ 	struct device *dev = &pdev->dev;
+ 	struct clk_bulk_data *clocks;
+ 	struct exynos8895_pcie *ep;
++	struct resource *cfg;
+ 	int ret;
+ 
+ 	ep = devm_kzalloc(dev, sizeof(*ep), GFP_KERNEL);
+@@ -308,6 +309,19 @@
+ 	ep->pci.dev = dev;
+ 	ep->pci.ops = &exynos8895_pcie_ops;
+ 	ep->pci.pp.ops = &exynos8895_pcie_host_ops;
++
++	/*
++	 * CFG0 uses the final page of the WLAN controller aperture.
++	 * The host window owns the aperture. Its two endpoint BARs
++	 * leave this page free and the iATU keeps their CPU ranges
++	 * distinct from CFG0.
++	 */
++	cfg = platform_get_resource_byname(pdev, IORESOURCE_MEM, "config");
++	if (!cfg || cfg->start != 0x11bff000 || resource_size(cfg) != SZ_4K)
++		return -EINVAL;
++	ep->pci.pp.va_cfg0_base = devm_pci_remap_cfgspace(dev, cfg->start, SZ_4K);
++	if (!ep->pci.pp.va_cfg0_base)
++		return -ENOMEM;
+ 	ep->phy = devm_platform_ioremap_resource_byname(pdev, "phy");
+ 	if (IS_ERR(ep->phy))
+ 		return PTR_ERR(ep->phy);
+diff --git a/drivers/pci/controller/dwc/pcie-designware-host.c b/drivers/pci/controller/dwc/pcie-designware-host.c
+--- a/drivers/pci/controller/dwc/pcie-designware-host.c
++++ b/drivers/pci/controller/dwc/pcie-designware-host.c
+@@ -531,7 +531,8 @@
+ 		pp->bridge->sysdata = pp->cfg;
+ 		pp->cfg->priv = pp;
+ 	} else {
+-		pp->va_cfg0_base = devm_pci_remap_cfg_resource(dev, res);
++		if (!pp->va_cfg0_base)
++			pp->va_cfg0_base = devm_pci_remap_cfg_resource(dev, res);
+ 		if (IS_ERR(pp->va_cfg0_base))
+ 			return PTR_ERR(pp->va_cfg0_base);
+ 
+diff --git a/drivers/pci/controller/dwc/pcie-designware.c b/drivers/pci/controller/dwc/pcie-designware.c
+--- a/drivers/pci/controller/dwc/pcie-designware.c
++++ b/drivers/pci/controller/dwc/pcie-designware.c
+@@ -532,6 +532,8 @@
+ 	return -ETIMEDOUT;
+ }
+ 
++EXPORT_SYMBOL_GPL(dw_pcie_prog_outbound_atu);
++
+ static inline u32 dw_pcie_readl_atu_ib(struct dw_pcie *pci, u32 index, u32 reg)
+ {
+ 	return dw_pcie_readl_atu(pci, PCIE_ATU_REGION_DIR_IB, index, reg);
