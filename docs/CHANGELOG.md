@@ -2044,3 +2044,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Recognize the mainline GPIO power key and use the DECON connector
   state for the Wayland display blanking check. Pass the session's
   GTK renderer to the shutdown confirmation dialog.
+
+### 6.18 R84 Panfrost MMU error recovery
+
+- Clear stale Panfrost fault interrupts before enabling a reassigned
+  hardware address space.
+- Roll back incomplete GPU page mappings, release failed heap chunk
+  resources and report the mapping error in the MMU fault log.

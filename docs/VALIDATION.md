@@ -3697,3 +3697,19 @@ stopped responding. This left physical button wake and installed
 service activation pending. The R83 image was built with the
 power-key service mask removed and was not installed during this
 test.
+
+### R84 Panfrost MMU host validation
+
+Built the ARM64 6.18 R84 Image, SM-G955N DTB, modules and boot image.
+The two Panfrost patches matched the resulting build source. A host
+test using the build's MMU enable and page mapping functions checked
+interrupt clear and unmask order, preservation of other address
+spaces' fault masks, complete mapping, partial allocation failure,
+short mapping without an error code, and zero progress in a failing
+batch. The rollback cases verified that no installed entries were left
+behind and only the mapped range was flushed. Project tests reported
+159 cases with 9 skipped and no failures.
+
+R84 was not installed or tested on the phone. The Mac still could not
+reach the SM-G955N over USB or Wi-Fi after the R82 s2idle test.
+The cause of the earlier runtime GPU fault remains unverified.

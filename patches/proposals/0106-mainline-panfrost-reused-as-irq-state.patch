@@ -1,0 +1,50 @@
+Subject: [PATCH] drm/panfrost: clear stale fault IRQ state on AS reassignment
+
+A faulted hardware address space can be enabled by its current owner,
+reclaimed from the LRU or reassigned after the old context is destroyed.
+Clear and unmask the slot in the common enable routine under as_lock.
+
+Follow-up to the upstream AS interrupt ordering change:
+https://lore.kernel.org/lkml/20261121-panfrost-mmu-as-mask-v1-1-13ffb84d5562@gmail.com/
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_mmu.c b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+--- a/drivers/gpu/drm/panfrost/panfrost_mmu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+@@ -166,9 +166,19 @@
+ static void panfrost_mmu_enable(struct panfrost_device *pfdev, struct panfrost_mmu *mmu)
+ {
+ 	int as_nr = mmu->as;
++	u32 irq_mask = BIT(as_nr) | BIT(as_nr + 16);
+ 	u64 transtab = mmu->cfg.transtab;
+ 	u64 memattr = mmu->cfg.memattr;
+ 	u64 transcfg = mmu->cfg.transcfg;
++
++	lockdep_assert_held(&pfdev->as_lock);
++
++	/* An assigned AS can retain the fault state of its previous owner. */
++	if (pfdev->as_faulty_mask & irq_mask) {
++		pfdev->as_faulty_mask &= ~irq_mask;
++		mmu_write(pfdev, MMU_INT_CLEAR, irq_mask);
++		mmu_write(pfdev, MMU_INT_MASK, ~pfdev->as_faulty_mask);
++	}
+ 
+ 	mmu_hw_do_operation_locked(pfdev, as_nr, 0, ~0ULL, AS_COMMAND_FLUSH_MEM);
+ 
+@@ -277,16 +287,8 @@
+ 
+ 		list_move(&mmu->list, &pfdev->as_lru_list);
+ 
+-		if (pfdev->as_faulty_mask & mask) {
+-			/* Unhandled pagefault on this AS, the MMU was
+-			 * disabled. We need to re-enable the MMU after
+-			 * clearing+unmasking the AS interrupts.
+-			 */
+-			pfdev->as_faulty_mask &= ~mask;
+-			mmu_write(pfdev, MMU_INT_CLEAR, mask);
+-			mmu_write(pfdev, MMU_INT_MASK, ~pfdev->as_faulty_mask);
++		if (pfdev->as_faulty_mask & mask)
+ 			panfrost_mmu_enable(pfdev, mmu);
+-		}
+ 
+ 		goto out;
+ 	}
