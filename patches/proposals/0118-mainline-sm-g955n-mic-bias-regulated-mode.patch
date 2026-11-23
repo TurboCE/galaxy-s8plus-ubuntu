@@ -1,0 +1,31 @@
+Subject: [PATCH] ASoC: disable MICBIAS1 bypass on SM-G955N
+
+A capture register readback showed the reset bypass bit remained
+set after programming the board voltage. Match Samsung's regulated
+1.8 V microphone bias, with soft start and no external capacitor.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -62,6 +62,8 @@
+ #define CAP_SPUM1	0x0304
+ #define CAP_FLUSH	0x030c
+ #define CAP_BANK0	0x0328
++#define MICBIAS1_SOFT_START	BIT(3)
++#define MICBIAS1_BYPASS		BIT(1)
+ 
+ static const u32 saved_regs[] = {
+ 	ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
+@@ -472,8 +474,10 @@
+ 	}
+ 	/* The board's primary digital microphone uses the 1.8 V MICBIAS1A rail. */
+ 	ret = snd_soc_component_update_bits(codec, MADERA_MIC_BIAS_CTRL_1,
+-					    MADERA_MICB1_LVL_MASK,
+-					    FIELD_PREP(MADERA_MICB1_LVL_MASK, 3));
++					    MADERA_MICB1_LVL_MASK | MADERA_MICB1_EXT_CAP |
++					    MICBIAS1_SOFT_START | MICBIAS1_BYPASS,
++					    FIELD_PREP(MADERA_MICB1_LVL_MASK, 3) |
++					    MICBIAS1_SOFT_START);
+ 	if (ret < 0)
+ 		return ret;
+ 	return snd_soc_component_update_bits(codec, MADERA_IN3L_CONTROL,

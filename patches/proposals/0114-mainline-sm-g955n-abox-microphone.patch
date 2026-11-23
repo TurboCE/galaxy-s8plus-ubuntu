@@ -1,0 +1,420 @@
+Subject: [PATCH] ASoC: connect SM-G955N ABOX microphone and WDMA1
+
+Use the validated UAIF0 and NSRC0 capture path. Add a CS47L93 AIF1
+link next to the speaker. The existing shared buffer permits one
+active stream at a time.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -22,6 +22,9 @@
+ #include <linux/sizes.h>
+ #include <sound/pcm_params.h>
+ #include <sound/soc.h>
++#include <linux/mfd/madera/core.h>
++#include <linux/mfd/madera/registers.h>
++#include "../codecs/madera.h"
+ 
+ #define ABOX_CMU_GATE	0x2034
+ #define GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
+@@ -49,6 +52,14 @@
+ #define RING_BYTES	SZ_16K
+ #define PERIOD_BYTES	SZ_4K
+ #define BCLK_RATE	1536000
++#define CAP_GATE	0x2024
++#define CAP_UAIF0	0x0500
++#define CAP_DMA		0x2100
++#define CAP_ROUTE	0x0044
++#define CAP_SPUM0	0x0300
++#define CAP_SPUM1	0x0304
++#define CAP_FLUSH	0x030c
++#define CAP_BANK0	0x0328
+ 
+ static const u32 saved_regs[] = {
+ 	SYSPOWER_CTRL, ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
+@@ -56,17 +67,25 @@
+ 	RDMA0_PERIOD, RDMA0_POINT, RDMA0_VOL,
+ };
+ 
++static const u32 capture_regs[] = {
++	SYSPOWER_CTRL, CAP_ROUTE, CAP_SPUM0, CAP_SPUM1, CAP_BANK0,
++	CAP_UAIF0, CAP_UAIF0 + 4, CAP_DMA, CAP_DMA + 8,
++	CAP_DMA + 12, CAP_DMA + 16, CAP_DMA + 20, CAP_DMA + 24,
++};
++
+ struct g955n_speaker {
+ 	struct device *dev;
+ 	struct regmap *pmu;
+ 	struct clk *bclk;
++	struct clk *mic_bclk;
++	bool capture;
+ 	void __iomem *sfr;
+ 	void __iomem *cmu;
+ 	unsigned int period;
+ 	struct snd_dma_buffer ring;
+ 	struct snd_soc_card card;
+-	struct snd_soc_dai_link link;
+-	struct snd_soc_dai_link_component cpu, codec, platform;
++	struct snd_soc_dai_link link[2];
++	struct snd_soc_dai_link_component cpu[2], codec[2], platform;
+ 	struct snd_pcm_substream *stream;
+ 	struct delayed_work period_work;
+ 	unsigned long previous_bclk;
+@@ -80,6 +99,36 @@
+ static void abox_update(void __iomem *base, u32 reg, u32 mask, u32 value)
+ {
+ 	writel((readl(base + reg) & ~mask) | value, base + reg);
++}
++
++static u32 dma_control(struct g955n_speaker *p)
++{
++	return p->capture ? CAP_DMA : RDMA0_CTRL0;
++}
++
++static u32 dma_status(struct g955n_speaker *p)
++{
++	return dma_control(p) + 0x20;
++}
++
++static u32 uaif_control(struct g955n_speaker *p)
++{
++	return p->capture ? CAP_UAIF0 : UAIF4_CTRL0;
++}
++
++static u32 uaif_enable(struct g955n_speaker *p)
++{
++	return p->capture ? BIT(1) : BIT(0);
++}
++
++static u32 uaif_gate(struct g955n_speaker *p)
++{
++	return p->capture ? CAP_GATE : ABOX_CMU_GATE;
++}
++
++static struct clk *stream_clock(struct g955n_speaker *p)
++{
++	return p->capture ? p->mic_bclk : p->bclk;
+ }
+ 
+ static int abox_power_ready(struct g955n_speaker *speaker)
+@@ -112,7 +161,7 @@
+ 
+ 	if (!READ_ONCE(speaker->running))
+ 		return;
+-	status = readl(speaker->sfr + RDMA0_STATUS);
++	status = readl(speaker->sfr + dma_status(speaker));
+ 	offset = ((status & GENMASK(28, 16)) >> 12) + (status & GENMASK(12, 0));
+ 	period = offset / PERIOD_BYTES;
+ 	if (period != speaker->period) {
+@@ -151,6 +200,7 @@
+ 		return ret;
+ 	snd_soc_set_runtime_hwparams(stream, &speaker_hw);
+ 	speaker->stream = stream;
++	speaker->capture = stream->stream == SNDRV_PCM_STREAM_CAPTURE;
+ 	snd_pcm_set_runtime_buffer(stream, &speaker->ring);
+ 	return 0;
+ }
+@@ -163,11 +213,12 @@
+ 	if (!speaker->prepared)
+ 		return 0;
+ 	for (i = ARRAY_SIZE(saved_regs); i > 0; i--)
+-		writel(speaker->saved[i - 1], speaker->sfr + saved_regs[i - 1]);
+-	writel(speaker->saved_gate, speaker->cmu + ABOX_CMU_GATE);
++		writel(speaker->saved[i - 1], speaker->sfr +
++			(speaker->capture ? capture_regs : saved_regs)[i - 1]);
++	writel(speaker->saved_gate, speaker->cmu + uaif_gate(speaker));
+ 	speaker->prepared = false;
+-	ret = clk_set_rate(speaker->bclk, speaker->previous_bclk);
+-	if (!ret && clk_get_rate(speaker->bclk) != speaker->previous_bclk)
++	ret = clk_set_rate(stream_clock(speaker), speaker->previous_bclk);
++	if (!ret && clk_get_rate(stream_clock(speaker)) != speaker->previous_bclk)
+ 		ret = -EIO;
+ 	return ret;
+ }
+@@ -181,9 +232,9 @@
+ 	cancel_delayed_work(&speaker->period_work);
+ 	if (!speaker->prepared)
+ 		return 0;
+-	abox_update(speaker->sfr, UAIF4_CTRL0, BIT(0), 0);
+-	abox_update(speaker->sfr, RDMA0_CTRL0, RDMA_ENABLE, 0);
+-	ret = readl_poll_timeout(speaker->sfr + RDMA0_STATUS, status,
++	abox_update(speaker->sfr, uaif_control(speaker), uaif_enable(speaker), 0);
++	abox_update(speaker->sfr, dma_control(speaker), RDMA_ENABLE, 0);
++	ret = readl_poll_timeout(speaker->sfr + dma_status(speaker), status,
+ 				 !(status & RDMA_PROGRESS), 10, 40000);
+ 	if (ret) {
+ 		speaker->poisoned = true;
+@@ -232,28 +283,49 @@
+ 	ret = abox_power_ready(speaker);
+ 	if (ret)
+ 		return ret;
+-	if ((readl(sfr + RDMA0_CTRL0) & RDMA_ENABLE) ||
+-	    (readl(sfr + UAIF4_CTRL0) & 3))
++	if ((readl(sfr + dma_control(speaker)) & RDMA_ENABLE) ||
++	    (readl(sfr + uaif_control(speaker)) & 3))
+ 		return -EBUSY;
+ 
+-	speaker->previous_bclk = clk_get_rate(speaker->bclk);
++	speaker->previous_bclk = clk_get_rate(stream_clock(speaker));
+ 	if (!speaker->previous_bclk)
+ 		return -EIO;
+ 	for (i = 0; i < ARRAY_SIZE(saved_regs); i++)
+-		speaker->saved[i] = readl(sfr + saved_regs[i]);
+-	speaker->saved_gate = readl(speaker->cmu + ABOX_CMU_GATE);
++		speaker->saved[i] = readl(sfr + (speaker->capture ? capture_regs : saved_regs)[i]);
++	speaker->saved_gate = readl(speaker->cmu + uaif_gate(speaker));
+ 	speaker->prepared = true;
+-	ret = clk_set_rate(speaker->bclk, BCLK_RATE);
+-	if (ret || clk_get_rate(speaker->bclk) != BCLK_RATE) {
++	ret = clk_set_rate(stream_clock(speaker), BCLK_RATE);
++	if (ret || clk_get_rate(stream_clock(speaker)) != BCLK_RATE) {
+ 		ret = ret ?: -EIO;
+ 		goto restore;
+ 	}
+ 
+-	abox_update(speaker->cmu, ABOX_CMU_GATE, GATE_MASK, GATE_ON);
++	abox_update(speaker->cmu, uaif_gate(speaker), GATE_MASK, GATE_ON);
+ 	abox_update(sfr, SYSPOWER_CTRL, BIT(0), BIT(0));
+ 	ret = readl_poll_timeout(sfr + SYSPOWER_STATUS, status, status & BIT(0), 10, 20000);
+ 	if (ret)
+ 		goto restore;
++
++	if (speaker->capture) {
++		/* UAIF0 -> NSRC0 -> SIFM0 -> WDMA1, qualified on R91. */
++		abox_update(sfr, CAP_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
++		writel(BIT(0), sfr + CAP_FLUSH);
++		writel(0x800000, sfr + CAP_DMA + 24);
++		abox_update(sfr, CAP_SPUM0, BIT(4) | BIT(7), 0);
++		abox_update(sfr, CAP_SPUM1, GENMASK(12, 8) | GENMASK(1, 0), (9 << 8) | 1);
++		abox_update(sfr, CAP_ROUTE, GENMASK(3, 0), 8);
++		abox_update(sfr, CAP_UAIF0, GENMASK(4, 0), BIT(2) | BIT(4));
++		abox_update(sfr, CAP_UAIF0 + 4, GENMASK(28, 0),
++			    (9 << 24) | BIT(23) | (1 << 18) | (15 << 12));
++		writel(lower_32_bits(addr), sfr + CAP_DMA + 8);
++		writel(lower_32_bits(addr) + bytes, sfr + CAP_DMA + 12);
++		writel(PERIOD_BYTES, sfr + CAP_DMA + 16);
++		writel(lower_32_bits(addr), sfr + CAP_DMA + 20);
++		abox_update(sfr, CAP_DMA, GENMASK(22, 19) | GENMASK(18, 16) |
++			    GENMASK(13, 8) | GENMASK(5, 4) | RDMA_ENABLE,
++			    (8 << 19) | (9 << 8) | BIT(5));
++		return 0;
++	}
+ 
+ 	abox_update(sfr, SPUS_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
+ 	writel(BIT(0), sfr + SPUS_CTRL3);
+@@ -289,8 +361,8 @@
+ 		if (!speaker->prepared || speaker->poisoned)
+ 			return -EIO;
+ 		dma_wmb();
+-		abox_update(sfr, RDMA0_CTRL0, RDMA_ENABLE, RDMA_ENABLE);
+-		abox_update(sfr, UAIF4_CTRL0, BIT(0), BIT(0));
++		abox_update(sfr, dma_control(speaker), RDMA_ENABLE, RDMA_ENABLE);
++		abox_update(sfr, uaif_control(speaker), uaif_enable(speaker), uaif_enable(speaker));
+ 		speaker->period = 0;
+ 		WRITE_ONCE(speaker->running, true);
+ 		schedule_delayed_work(&speaker->period_work, msecs_to_jiffies(5));
+@@ -307,7 +379,7 @@
+ 				      struct snd_pcm_substream *stream)
+ {
+ 	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
+-	u32 status = readl(speaker->sfr + RDMA0_STATUS);
++	u32 status = readl(speaker->sfr + dma_status(speaker));
+ 	unsigned int offset = (status & GENMASK(28, 16)) >> 12;
+ 	unsigned int count = status & GENMASK(12, 0);
+ 
+@@ -324,15 +396,61 @@
+ 	.pointer = speaker_pointer,
+ };
+ 
+-static struct snd_soc_dai_driver speaker_dai = {
+-	.name = "g955n-uaif4",
+-	.playback = {
+-		.stream_name = "ABOX Speaker",
+-		.channels_min = 2,
+-		.channels_max = 2,
+-		.rates = SNDRV_PCM_RATE_48000,
+-		.formats = SNDRV_PCM_FMTBIT_S16_LE,
+-	},
++#define G955N_STREAM(name) { .stream_name = name, .channels_min = 2, \
++	.channels_max = 2, .rates = SNDRV_PCM_RATE_48000, .formats = SNDRV_PCM_FMTBIT_S16_LE }
++
++static struct snd_soc_dai_driver speaker_dai[] = {
++	{ .name = "g955n-uaif4", .playback = G955N_STREAM("ABOX Speaker") },
++	{ .name = "g955n-uaif0", .capture = G955N_STREAM("ABOX Microphone") },
++};
++
++static int g955n_mic_clock(struct snd_pcm_substream *stream,
++			  struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_dai *dai = snd_soc_rtd_to_codec(snd_soc_substream_to_rtd(stream), 0);
++	int ret;
++
++	ret = snd_soc_dai_set_pll(dai, MADERA_FLL1_REFCLK, MADERA_FLL_SRC_MCLK2,
++				  32768, 98304000);
++	if (ret)
++		return ret;
++	ret = snd_soc_component_set_sysclk(dai->component, MADERA_CLK_SYSCLK_1,
++				  MADERA_CLK_SRC_FLL1, 98304000, SND_SOC_CLOCK_IN);
++	if (ret)
++		return ret;
++	return snd_soc_dai_set_sysclk(dai, MADERA_CLK_SYSCLK_1,
++				      98304000, SND_SOC_CLOCK_IN);
++}
++
++static const struct snd_soc_ops g955n_mic_ops = { .hw_params = g955n_mic_clock };
++
++static int g955n_mic_init(struct snd_soc_pcm_runtime *rtd)
++{
++	struct snd_soc_component *codec = snd_soc_rtd_to_codec(rtd, 0)->component;
++	unsigned int pin;
++	int ret;
++
++	/* The four AIF1 pins use the dedicated function and bus hold. */
++	for (pin = 4; pin < 8; pin++) {
++		ret = snd_soc_component_write(codec, MADERA_GPIO1_CTRL_1 + 2 * pin, 0x2000);
++		if (ret)
++			return ret;
++		ret = snd_soc_component_write(codec, MADERA_GPIO1_CTRL_2 + 2 * pin, 0x6000);
++		if (ret)
++			return ret;
++	}
++	return snd_soc_component_update_bits(codec, MADERA_IN3L_CONTROL,
++					     MADERA_IN3_MODE_MASK, MADERA_IN3_MODE_MASK) < 0 ? -EIO : 0;
++}
++
++static const struct snd_soc_dapm_widget mic_widgets[] = {
++	SND_SOC_DAPM_MIC("Internal Mic", NULL),
++};
++
++static const struct snd_soc_dapm_route mic_routes[] = {
++	{ "Internal Mic", NULL, "MICBIAS1A" },
++	{ "IN1ARN", NULL, "Internal Mic" },
++	{ "IN1ARP", NULL, "Internal Mic" },
+ };
+ 
+ static void speaker_release_node(void *node)
+@@ -352,7 +470,7 @@
+ {
+ 	struct device *dev = &pdev->dev;
+ 	struct g955n_speaker *speaker;
+-	struct device_node *controller, *codec;
++	struct device_node *controller, *codec, *mic;
+ 	struct iommu_domain *domain;
+ 	struct resource cmu, sfr;
+ 	struct pinctrl *pins;
+@@ -393,6 +511,9 @@
+ 	speaker->bclk = devm_clk_get(dev, "speaker");
+ 	if (IS_ERR(speaker->bclk))
+ 		return PTR_ERR(speaker->bclk);
++	speaker->mic_bclk = devm_clk_get(dev, "mic");
++	if (IS_ERR(speaker->mic_bclk))
++		return PTR_ERR(speaker->mic_bclk);
+ 	ret = abox_power_ready(speaker);
+ 	if (ret)
+ 		return ret;
+@@ -424,29 +545,50 @@
+ 	ret = devm_add_action_or_reset(dev, speaker_release_node, codec);
+ 	if (ret)
+ 		return ret;
+-	speaker->cpu.name = dev_name(dev);
+-	speaker->cpu.dai_name = speaker_dai.name;
++	mic = of_parse_phandle(dev->of_node, "audio-mic-codec", 0);
++	if (!mic)
++		return -EINVAL;
++	ret = devm_add_action_or_reset(dev, speaker_release_node, mic);
++	if (ret)
++		return ret;
++	speaker->cpu[0].name = dev_name(dev);
++	speaker->cpu[0].dai_name = speaker_dai[0].name;
++	speaker->cpu[1].name = dev_name(dev);
++	speaker->cpu[1].dai_name = speaker_dai[1].name;
+ 	speaker->platform.name = dev_name(dev);
+-	speaker->codec.of_node = codec;
+-	speaker->codec.dai_name = "max98506-hifi";
+-	speaker->link = (struct snd_soc_dai_link) {
++	speaker->codec[0].of_node = codec;
++	speaker->codec[0].dai_name = "max98506-hifi";
++	speaker->codec[1].of_node = mic;
++	speaker->codec[1].dai_name = "cs47l92-aif1";
++	speaker->link[0] = (struct snd_soc_dai_link) {
+ 		.name = "Internal Speaker",
+ 		.stream_name = "Internal Speaker",
+-		.cpus = &speaker->cpu, .num_cpus = 1,
++		.cpus = &speaker->cpu[0], .num_cpus = 1,
+ 		.platforms = &speaker->platform, .num_platforms = 1,
+-		.codecs = &speaker->codec, .num_codecs = 1,
++		.codecs = &speaker->codec[0], .num_codecs = 1,
+ 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
+-		.playback_only = 1,
+-		.nonatomic = 1,
++		.playback_only = 1, .nonatomic = 1,
++	};
++	speaker->link[1] = (struct snd_soc_dai_link) {
++		.name = "Internal Microphone",
++		.stream_name = "Internal Microphone",
++		.cpus = &speaker->cpu[1], .num_cpus = 1,
++		.platforms = &speaker->platform, .num_platforms = 1,
++		.codecs = &speaker->codec[1], .num_codecs = 1,
++		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
++		.capture_only = 1, .nonatomic = 1,
++		.init = g955n_mic_init, .ops = &g955n_mic_ops,
+ 	};
+ 	speaker->card = (struct snd_soc_card) {
+-		.name = "SM-G955N Speaker",
+-		.owner = THIS_MODULE,
+-		.dev = dev,
+-		.dai_link = &speaker->link,
+-		.num_links = 1,
++		.name = "SM-G955N Audio",
++		.driver_name = "g955n-audio",
++		.owner = THIS_MODULE, .dev = dev,
++		.dai_link = speaker->link, .num_links = ARRAY_SIZE(speaker->link),
++		.dapm_widgets = mic_widgets, .num_dapm_widgets = ARRAY_SIZE(mic_widgets),
++		.dapm_routes = mic_routes, .num_dapm_routes = ARRAY_SIZE(mic_routes),
+ 	};
+-	ret = devm_snd_soc_register_component(dev, &speaker_component, &speaker_dai, 1);
++	ret = devm_snd_soc_register_component(dev, &speaker_component,
++					     speaker_dai, ARRAY_SIZE(speaker_dai));
+ 	if (ret)
+ 		return ret;
+ 	return devm_snd_soc_register_card(dev, &speaker->card);
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -170,11 +170,12 @@
+ 		compatible = "samsung,sm-g955n-abox-speaker";
+ 		iommus = <&abox_sysmmu>;
+ 		audio-codec = <&g955n_speaker_amp>;
++		audio-mic-codec = <&g955n_mic_codec>;
+ 		samsung,abox-cmu = <&abox_clocks>;
+-		clocks = <&abox_clocks G955N_ABOX_CLK_UAIF4>;
+-		clock-names = "speaker";
++		clocks = <&abox_clocks G955N_ABOX_CLK_UAIF4>, <&abox_clocks G955N_ABOX_CLK_UAIF0>;
++		clock-names = "speaker", "mic";
+ 		pinctrl-names = "speaker";
+-		pinctrl-0 = <&g955n_abox_speaker_pins>;
++		pinctrl-0 = <&g955n_abox_speaker_pins &g955n_abox_mic_pins>;
+ 	};
+ 
+ 	decon-handoff@12860000 {
+@@ -472,7 +473,7 @@
+ 	pinctrl-0 = <&spi3_bus &spi3_cs>;
+ 	status = "okay";
+ 
+-	codec@0 {
++	g955n_mic_codec: codec@0 {
+ 		compatible = "cirrus,cs47l93";
+ 		reg = <0>;
+ 		#sound-dai-cells = <1>;
+@@ -497,6 +498,11 @@
+ };
+ 
+ &pinctrl_abox {
++	g955n_abox_mic_pins: microphone-bus-pins {
++		samsung,pins = "gph0-1", "gph0-2", "gph0-3", "gph0-4";
++		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
++		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
++	};
+ 	g955n_abox_speaker_pins: speaker-bus-pins {
+ 		samsung,pins = "gph0-5", "gph0-6", "gph0-7";
+ 		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;

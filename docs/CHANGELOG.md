@@ -2102,3 +2102,15 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Qualify the Exynos8895 NSRC0 sample-bank address with a bounded
   WDMA1 capture-transport trial.
 - Install the Mozilla Firefox ARM64 package on the test handset.
+
+### R92–R96 native microphone, duplex and Firefox playback
+
+- Add the CS47L93 AIF1 and ABOX UAIF0 capture link using NSRC0 and
+  WDMA1. Enable the codec's MICVDD regulator and use independent
+  DMA rings for playback and capture.
+- Set the primary microphone bias to the Samsung board's regulated
+  1.8 V with soft start and configure the codec
+  charge-pump supply for 3 V. Publish the native devices through ALSA UCM
+  for WirePlumber and GNOME Sound.
+- Add the 2 GiB upper DRAM bank from the Samsung board device tree
+  and retain DMA32 for peripherals with low address limits.

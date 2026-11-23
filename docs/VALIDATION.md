@@ -3913,3 +3913,53 @@ only. ALSA still reported no hardware capture device.
 Installed Firefox 160.0.1 for ARM64 from Mozilla's signed
 APT repository. Checked the repository signing-key fingerprint,
 the installed desktop launcher and a 320 x 240 headless render.
+
+### R92–R96 native audio and Firefox playback
+
+R92 enumerated the speaker and microphone in ALSA. It recorded
+96,000 frames in two seconds with essentially no input signal.
+R93 loaded the codec's MICVDD regulator and exercised independent
+playback and capture concurrently. A four-second ALSA capture
+returned 192,000 frames. Both hardware pointers advanced during
+playback, and a separate codec tone produced a full-scale waveform
+in the capture buffer. The codec tone test confirms the digital
+path through AIF1 and WDMA1. The built-in microphone's acoustic
+response did not match the speaker's reference tones in R93.
+
+The R94 capture readback showed that MICBIAS1 still bypassed the
+regulator after the 1.8 V level was programmed. R95 clears bypass
+and sets soft start to match Samsung's dream2lte board setup.
+During the R95 test both hardware pointers advanced at the same
+time. PipeWire captured 466,944 frames. The reference tones did
+not yield consistent acoustic correlation. The native ALSA UCM configuration selected HiFi, Internal Speaker
+and Internal Microphone. WirePlumber attached the hardware playback
+and capture devices as the default sink and source.
+
+Firefox's earlier user journal contained repeated Panfrost buffer
+allocation failures with errno 12. R93 reproduced three Panfrost
+GPU job faults during the same 720p YouTube video's load. At the
+13.1-second content sample, 219 of 392 frames were dropped and
+available memory was about 118 MiB. R94 added the Samsung upper
+memory bank. Linux reported 3,942,344 KiB total and retained its
+low-address CMA areas. The same video played for 26.1 seconds
+through the ALSA sink and dropped 6 of 785 content frames. The
+first 13.9 seconds dropped 3 of 417 frames. This test interval
+logged no Panfrost job fault or buffer allocation failure. It
+used the packaged Firefox on GNOME Wayland with no software
+rendering override. These are bounded tests and do not establish
+that the intermittent GPU fault is eliminated.
+
+R95 repeated 25.6 seconds of the same content at 720p and
+dropped 22 of 768 frames. Firefox and GNOME Shell both held the
+Panfrost render node, verified through DRM file descriptors.
+No Panfrost job fault or buffer allocation failure was recorded
+during this second test interval.
+
+R96 booted after BOOT readback verification and automatic recovery
+return. The regulator framework changed MICVDD from 2.5 V to 3 V
+and reported it enabled during capture. The PipeWire duplex trial
+returned 464,896 frames and 62 progress samples with both hardware
+pointers advancing. The reference tones were not recovered from
+the microphone, so physical speaker audibility and intelligible
+acoustic capture remain unverified. The project suite ran 162
+tests with 9 skipped and no failures.

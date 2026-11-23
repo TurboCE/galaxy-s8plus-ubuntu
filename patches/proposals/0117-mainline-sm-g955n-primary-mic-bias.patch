@@ -1,0 +1,29 @@
+Subject: [PATCH] ASoC: set the SM-G955N primary microphone bias to 1.8 V
+
+Match the operating voltage specified by Samsung for MICBIAS1A
+on dream2lte. Let DAPM retain control of bias enable and disable.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -6,6 +6,7 @@
+  * mainline port. The Exynos8895 sample bank fields were verified against
+  * the handset's Calliope firmware and muted RDMA0 hardware trial.
+  */
++#include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/workqueue.h>
+@@ -469,6 +470,12 @@
+ 		if (ret)
+ 			return ret;
+ 	}
++	/* The board's primary digital microphone uses the 1.8 V MICBIAS1A rail. */
++	ret = snd_soc_component_update_bits(codec, MADERA_MIC_BIAS_CTRL_1,
++					    MADERA_MICB1_LVL_MASK,
++					    FIELD_PREP(MADERA_MICB1_LVL_MASK, 3));
++	if (ret < 0)
++		return ret;
+ 	return snd_soc_component_update_bits(codec, MADERA_IN3L_CONTROL,
+ 					     MADERA_IN3_MODE_MASK, MADERA_IN3_MODE_MASK) < 0 ? -EIO : 0;
+ }

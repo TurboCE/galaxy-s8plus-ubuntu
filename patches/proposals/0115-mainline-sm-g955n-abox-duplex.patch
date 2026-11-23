@@ -1,0 +1,497 @@
+Subject: [PATCH] ASoC: keep SM-G955N playback and capture independent
+
+Use separate coherent rings and PCM state for RDMA0 and WDMA1. Keep
+their shared ABOX system power state until the last prepared stream
+is closed. Preserve the DMA ring on an engine stop timeout.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -13,6 +13,7 @@
+ #include <linux/iopoll.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/of_address.h>
+ #include <linux/pinctrl/consumer.h>
+@@ -62,73 +63,85 @@
+ #define CAP_BANK0	0x0328
+ 
+ static const u32 saved_regs[] = {
+-	SYSPOWER_CTRL, ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
++	ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
+ 	UAIF4_CTRL0, UAIF4_CTRL1, RDMA0_CTRL0, RDMA0_START, RDMA0_END,
+ 	RDMA0_PERIOD, RDMA0_POINT, RDMA0_VOL,
+ };
+ 
+ static const u32 capture_regs[] = {
+-	SYSPOWER_CTRL, CAP_ROUTE, CAP_SPUM0, CAP_SPUM1, CAP_BANK0,
++	CAP_ROUTE, CAP_SPUM0, CAP_SPUM1, CAP_BANK0,
+ 	CAP_UAIF0, CAP_UAIF0 + 4, CAP_DMA, CAP_DMA + 8,
+ 	CAP_DMA + 12, CAP_DMA + 16, CAP_DMA + 20, CAP_DMA + 24,
+ };
+ 
+-struct g955n_speaker {
+-	struct device *dev;
+-	struct regmap *pmu;
++struct g955n_speaker;
++
++struct g955n_pcm {
++	struct g955n_speaker *abox;
+ 	struct clk *bclk;
+-	struct clk *mic_bclk;
+-	bool capture;
+-	void __iomem *sfr;
+-	void __iomem *cmu;
+ 	unsigned int period;
+ 	struct snd_dma_buffer ring;
+-	struct snd_soc_card card;
+-	struct snd_soc_dai_link link[2];
+-	struct snd_soc_dai_link_component cpu[2], codec[2], platform;
+ 	struct snd_pcm_substream *stream;
+ 	struct delayed_work period_work;
+ 	unsigned long previous_bclk;
+ 	u32 saved[ARRAY_SIZE(saved_regs)];
+ 	u32 saved_gate;
++	bool capture;
+ 	bool prepared;
+ 	bool running;
+ 	bool poisoned;
+ };
+ 
++struct g955n_speaker {
++	struct device *dev;
++	struct regmap *pmu;
++	void __iomem *sfr;
++	void __iomem *cmu;
++	struct snd_soc_card card;
++	struct snd_soc_dai_link link[2];
++	struct snd_soc_dai_link_component cpu[2], codec[2], platform;
++	struct g955n_pcm pcm[2];
++	struct mutex prepare_lock;
++	unsigned int prepared_count;
++	u32 saved_syspower;
++};
++
++static struct g955n_pcm *abox_pcm(struct snd_soc_component *component,
++				  struct snd_pcm_substream *stream)
++{
++	struct g955n_speaker *abox = container_of(component->card, struct g955n_speaker, card);
++
++	return &abox->pcm[stream->stream];
++}
++
+ static void abox_update(void __iomem *base, u32 reg, u32 mask, u32 value)
+ {
+ 	writel((readl(base + reg) & ~mask) | value, base + reg);
+ }
+ 
+-static u32 dma_control(struct g955n_speaker *p)
++static u32 dma_control(struct g955n_pcm *p)
+ {
+ 	return p->capture ? CAP_DMA : RDMA0_CTRL0;
+ }
+ 
+-static u32 dma_status(struct g955n_speaker *p)
++static u32 dma_status(struct g955n_pcm *p)
+ {
+ 	return dma_control(p) + 0x20;
+ }
+ 
+-static u32 uaif_control(struct g955n_speaker *p)
++static u32 uaif_control(struct g955n_pcm *p)
+ {
+ 	return p->capture ? CAP_UAIF0 : UAIF4_CTRL0;
+ }
+ 
+-static u32 uaif_enable(struct g955n_speaker *p)
++static u32 uaif_enable(struct g955n_pcm *p)
+ {
+ 	return p->capture ? BIT(1) : BIT(0);
+ }
+ 
+-static u32 uaif_gate(struct g955n_speaker *p)
++static u32 uaif_gate(struct g955n_pcm *p)
+ {
+ 	return p->capture ? CAP_GATE : ABOX_CMU_GATE;
+-}
+-
+-static struct clk *stream_clock(struct g955n_speaker *p)
+-{
+-	return p->capture ? p->mic_bclk : p->bclk;
+ }
+ 
+ static int abox_power_ready(struct g955n_speaker *speaker)
+@@ -153,23 +166,23 @@
+ 
+ static void speaker_tick(struct work_struct *work)
+ {
+-	struct g955n_speaker *speaker = container_of(to_delayed_work(work),
+-						   struct g955n_speaker, period_work);
++	struct g955n_pcm *pcm = container_of(to_delayed_work(work), struct g955n_pcm,
++					       period_work);
+ 
+ 	u32 status;
+ 	unsigned int offset, period;
+ 
+-	if (!READ_ONCE(speaker->running))
++	if (!READ_ONCE(pcm->running))
+ 		return;
+-	status = readl(speaker->sfr + dma_status(speaker));
++	status = readl(pcm->abox->sfr + dma_status(pcm));
+ 	offset = ((status & GENMASK(28, 16)) >> 12) + (status & GENMASK(12, 0));
+ 	period = offset / PERIOD_BYTES;
+-	if (period != speaker->period) {
+-		speaker->period = period;
+-		snd_pcm_period_elapsed(speaker->stream);
++	if (period != pcm->period) {
++		pcm->period = period;
++		snd_pcm_period_elapsed(pcm->stream);
+ 	}
+-	if (READ_ONCE(speaker->running))
+-		schedule_delayed_work(&speaker->period_work, msecs_to_jiffies(5));
++	if (READ_ONCE(pcm->running))
++		schedule_delayed_work(&pcm->period_work, msecs_to_jiffies(5));
+ }
+ 
+ static const struct snd_pcm_hardware speaker_hw = {
+@@ -190,55 +203,58 @@
+ static int speaker_open(struct snd_soc_component *component,
+ 			struct snd_pcm_substream *stream)
+ {
+-	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
+-	int ret;
+-
+-	if (speaker->poisoned || speaker->stream)
++	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	int ret;
++
++	if (pcm->poisoned)
+ 		return -EBUSY;
+-	ret = pm_runtime_resume_and_get(speaker->dev);
++	ret = pm_runtime_resume_and_get(pcm->abox->dev);
+ 	if (ret < 0)
+ 		return ret;
+ 	snd_soc_set_runtime_hwparams(stream, &speaker_hw);
+-	speaker->stream = stream;
+-	speaker->capture = stream->stream == SNDRV_PCM_STREAM_CAPTURE;
+-	snd_pcm_set_runtime_buffer(stream, &speaker->ring);
++	pcm->stream = stream;
++	snd_pcm_set_runtime_buffer(stream, &pcm->ring);
+ 	return 0;
+ }
+ 
+-static int speaker_restore(struct g955n_speaker *speaker)
++static int speaker_restore(struct g955n_pcm *pcm)
+ {
+ 	unsigned int i;
+ 	int ret;
+ 
+-	if (!speaker->prepared)
++	lockdep_assert_held(&pcm->abox->prepare_lock);
++	if (!pcm->prepared)
+ 		return 0;
+ 	for (i = ARRAY_SIZE(saved_regs); i > 0; i--)
+-		writel(speaker->saved[i - 1], speaker->sfr +
+-			(speaker->capture ? capture_regs : saved_regs)[i - 1]);
+-	writel(speaker->saved_gate, speaker->cmu + uaif_gate(speaker));
+-	speaker->prepared = false;
+-	ret = clk_set_rate(stream_clock(speaker), speaker->previous_bclk);
+-	if (!ret && clk_get_rate(stream_clock(speaker)) != speaker->previous_bclk)
++		writel(pcm->saved[i - 1], pcm->abox->sfr +
++			(pcm->capture ? capture_regs : saved_regs)[i - 1]);
++	writel(pcm->saved_gate, pcm->abox->cmu + uaif_gate(pcm));
++	pcm->prepared = false;
++	if (!--pcm->abox->prepared_count)
++		writel(pcm->abox->saved_syspower, pcm->abox->sfr + SYSPOWER_CTRL);
++	ret = clk_set_rate(pcm->bclk, pcm->previous_bclk);
++	if (!ret && clk_get_rate(pcm->bclk) != pcm->previous_bclk)
+ 		ret = -EIO;
+ 	return ret;
+ }
+ 
+-static int speaker_stop(struct g955n_speaker *speaker)
++static int speaker_stop(struct g955n_pcm *pcm)
+ {
+ 	u32 status;
+ 	int ret;
+ 
+-	WRITE_ONCE(speaker->running, false);
+-	cancel_delayed_work(&speaker->period_work);
+-	if (!speaker->prepared)
++	WRITE_ONCE(pcm->running, false);
++	cancel_delayed_work(&pcm->period_work);
++	if (!pcm->prepared)
+ 		return 0;
+-	abox_update(speaker->sfr, uaif_control(speaker), uaif_enable(speaker), 0);
+-	abox_update(speaker->sfr, dma_control(speaker), RDMA_ENABLE, 0);
+-	ret = readl_poll_timeout(speaker->sfr + dma_status(speaker), status,
++	abox_update(pcm->abox->sfr, uaif_control(pcm), uaif_enable(pcm), 0);
++	abox_update(pcm->abox->sfr, dma_control(pcm), RDMA_ENABLE, 0);
++	ret = readl_poll_timeout(pcm->abox->sfr + dma_status(pcm), status,
+ 				 !(status & RDMA_PROGRESS), 10, 40000);
+ 	if (ret) {
+-		speaker->poisoned = true;
+-		dev_err(speaker->dev, "RDMA0 did not stop; retaining ring and DMA domain until reboot\n");
++		pcm->poisoned = true;
++		dev_err(pcm->abox->dev, "%s did not stop; retaining DMA ring until reboot\n",
++			pcm->capture ? "WDMA1" : "RDMA0");
+ 	}
+ 	return ret;
+ }
+@@ -246,67 +262,65 @@
+ static int speaker_close(struct snd_soc_component *component,
+ 			 struct snd_pcm_substream *stream)
+ {
+-	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
+-	int ret = speaker_stop(speaker);
+-
+-	cancel_delayed_work_sync(&speaker->period_work);
++	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	int ret = speaker_stop(pcm);
++
++	cancel_delayed_work_sync(&pcm->period_work);
+ 	snd_pcm_set_runtime_buffer(stream, NULL);
+-	speaker->stream = NULL;
+-	if (speaker->poisoned)
+-		return ret;
+-	ret = speaker_restore(speaker);
+-	pm_runtime_put_sync(speaker->dev);
++	pcm->stream = NULL;
++	if (pcm->poisoned)
++		return ret;
++	mutex_lock(&pcm->abox->prepare_lock);
++	ret = speaker_restore(pcm);
++	mutex_unlock(&pcm->abox->prepare_lock);
++	pm_runtime_put_sync(pcm->abox->dev);
+ 	return ret;
+ }
+ 
+-static int speaker_prepare(struct snd_soc_component *component,
+-			   struct snd_pcm_substream *stream)
+-{
+-	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
+-	void __iomem *sfr = speaker->sfr;
++static int abox_prepare_pcm(struct g955n_pcm *pcm, struct snd_pcm_substream *stream)
++{
++	void __iomem *sfr = pcm->abox->sfr;
+ 	size_t bytes = snd_pcm_lib_buffer_bytes(stream);
+-	dma_addr_t addr = speaker->ring.addr;
++	dma_addr_t addr = pcm->ring.addr;
+ 	u32 status;
+ 	unsigned int i;
+ 	int ret;
+ 
+-	if (speaker->poisoned || !bytes || bytes > RING_BYTES ||
++	if (pcm->poisoned || !bytes || bytes > RING_BYTES ||
+ 	    !IS_ALIGNED(bytes, PERIOD_BYTES))
+ 		return -EINVAL;
+-	ret = speaker_stop(speaker);
+-	if (ret)
+-		return ret;
+-	cancel_delayed_work_sync(&speaker->period_work);
+-	ret = speaker_restore(speaker);
+-	if (ret)
+-		return ret;
+-	ret = abox_power_ready(speaker);
+-	if (ret)
+-		return ret;
+-	if ((readl(sfr + dma_control(speaker)) & RDMA_ENABLE) ||
+-	    (readl(sfr + uaif_control(speaker)) & 3))
++	ret = speaker_restore(pcm);
++	if (ret)
++		return ret;
++	ret = abox_power_ready(pcm->abox);
++	if (ret)
++		return ret;
++	if ((readl(sfr + dma_control(pcm)) & RDMA_ENABLE) ||
++	    (readl(sfr + uaif_control(pcm)) & 3))
+ 		return -EBUSY;
+ 
+-	speaker->previous_bclk = clk_get_rate(stream_clock(speaker));
+-	if (!speaker->previous_bclk)
++	pcm->previous_bclk = clk_get_rate(pcm->bclk);
++	if (!pcm->previous_bclk)
+ 		return -EIO;
+ 	for (i = 0; i < ARRAY_SIZE(saved_regs); i++)
+-		speaker->saved[i] = readl(sfr + (speaker->capture ? capture_regs : saved_regs)[i]);
+-	speaker->saved_gate = readl(speaker->cmu + uaif_gate(speaker));
+-	speaker->prepared = true;
+-	ret = clk_set_rate(stream_clock(speaker), BCLK_RATE);
+-	if (ret || clk_get_rate(stream_clock(speaker)) != BCLK_RATE) {
++		pcm->saved[i] = readl(sfr + (pcm->capture ? capture_regs : saved_regs)[i]);
++	pcm->saved_gate = readl(pcm->abox->cmu + uaif_gate(pcm));
++	if (!pcm->abox->prepared_count++)
++		pcm->abox->saved_syspower = readl(sfr + SYSPOWER_CTRL);
++	pcm->prepared = true;
++	ret = clk_set_rate(pcm->bclk, BCLK_RATE);
++	if (ret || clk_get_rate(pcm->bclk) != BCLK_RATE) {
+ 		ret = ret ?: -EIO;
+ 		goto restore;
+ 	}
+ 
+-	abox_update(speaker->cmu, uaif_gate(speaker), GATE_MASK, GATE_ON);
++	abox_update(pcm->abox->cmu, uaif_gate(pcm), GATE_MASK, GATE_ON);
+ 	abox_update(sfr, SYSPOWER_CTRL, BIT(0), BIT(0));
+ 	ret = readl_poll_timeout(sfr + SYSPOWER_STATUS, status, status & BIT(0), 10, 20000);
+ 	if (ret)
+ 		goto restore;
+ 
+-	if (speaker->capture) {
++	if (pcm->capture) {
+ 		/* UAIF0 -> NSRC0 -> SIFM0 -> WDMA1, qualified on R91. */
+ 		abox_update(sfr, CAP_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
+ 		writel(BIT(0), sfr + CAP_FLUSH);
+@@ -346,30 +360,46 @@
+ 	return 0;
+ 
+ restore:
+-	speaker_restore(speaker);
++	speaker_restore(pcm);
++	return ret;
++}
++
++static int speaker_prepare(struct snd_soc_component *component,
++			   struct snd_pcm_substream *stream)
++{
++	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	int ret;
++
++	ret = speaker_stop(pcm);
++	if (ret)
++		return ret;
++	cancel_delayed_work_sync(&pcm->period_work);
++	mutex_lock(&pcm->abox->prepare_lock);
++	ret = abox_prepare_pcm(pcm, stream);
++	mutex_unlock(&pcm->abox->prepare_lock);
+ 	return ret;
+ }
+ 
+ static int speaker_trigger(struct snd_soc_component *component,
+ 			   struct snd_pcm_substream *stream, int cmd)
+ {
+-	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
+-	void __iomem *sfr = speaker->sfr;
++	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	void __iomem *sfr = pcm->abox->sfr;
+ 
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+-		if (!speaker->prepared || speaker->poisoned)
++		if (!pcm->prepared || pcm->poisoned)
+ 			return -EIO;
+ 		dma_wmb();
+-		abox_update(sfr, dma_control(speaker), RDMA_ENABLE, RDMA_ENABLE);
+-		abox_update(sfr, uaif_control(speaker), uaif_enable(speaker), uaif_enable(speaker));
+-		speaker->period = 0;
+-		WRITE_ONCE(speaker->running, true);
+-		schedule_delayed_work(&speaker->period_work, msecs_to_jiffies(5));
++		abox_update(sfr, dma_control(pcm), RDMA_ENABLE, RDMA_ENABLE);
++		abox_update(sfr, uaif_control(pcm), uaif_enable(pcm), uaif_enable(pcm));
++		pcm->period = 0;
++		WRITE_ONCE(pcm->running, true);
++		schedule_delayed_work(&pcm->period_work, msecs_to_jiffies(5));
+ 		return 0;
+ 	case SNDRV_PCM_TRIGGER_STOP:
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:
+-		return speaker_stop(speaker);
++		return speaker_stop(pcm);
+ 	default:
+ 		return -EINVAL;
+ 	}
+@@ -378,8 +408,8 @@
+ static snd_pcm_uframes_t speaker_pointer(struct snd_soc_component *component,
+ 				      struct snd_pcm_substream *stream)
+ {
+-	struct g955n_speaker *speaker = container_of(component->card, struct g955n_speaker, card);
+-	u32 status = readl(speaker->sfr + dma_status(speaker));
++	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	u32 status = readl(pcm->abox->sfr + dma_status(pcm));
+ 	unsigned int offset = (status & GENMASK(28, 16)) >> 12;
+ 	unsigned int count = status & GENMASK(12, 0);
+ 
+@@ -460,10 +490,37 @@
+ 
+ static void speaker_release_ring(void *data)
+ {
+-	struct g955n_speaker *speaker = data;
+-
+-	if (!speaker->poisoned)
+-		dma_free_coherent(speaker->dev, RING_BYTES, speaker->ring.area, speaker->ring.addr);
++	struct g955n_pcm *pcm = data;
++
++	if (!pcm->poisoned)
++		dma_free_coherent(pcm->abox->dev, RING_BYTES, pcm->ring.area, pcm->ring.addr);
++}
++
++static int abox_init_pcm(struct g955n_speaker *abox, int direction, const char *clock)
++{
++	struct device *dev = abox->dev;
++	struct g955n_pcm *pcm = &abox->pcm[direction];
++	int ret;
++
++	pcm->abox = abox;
++	pcm->capture = direction == SNDRV_PCM_STREAM_CAPTURE;
++	pcm->bclk = devm_clk_get(dev, clock);
++	if (IS_ERR(pcm->bclk))
++		return PTR_ERR(pcm->bclk);
++
++	pcm->ring.dev.type = SNDRV_DMA_TYPE_DEV;
++	pcm->ring.dev.dev = dev;
++	pcm->ring.bytes = RING_BYTES;
++	pcm->ring.area = dma_alloc_coherent(dev, RING_BYTES, &pcm->ring.addr, GFP_KERNEL);
++	if (!pcm->ring.area)
++		return -ENOMEM;
++	ret = devm_add_action_or_reset(dev, speaker_release_ring, pcm);
++	if (ret)
++		return ret;
++	if (!IS_ALIGNED(pcm->ring.addr, 16) || pcm->ring.addr > U32_MAX - RING_BYTES)
++		return -ERANGE;
++	INIT_DELAYED_WORK(&pcm->period_work, speaker_tick);
++	return 0;
+ }
+ 
+ static int speaker_probe(struct platform_device *pdev)
+@@ -508,12 +565,6 @@
+ 	speaker->sfr = devm_ioremap(dev, sfr.start, resource_size(&sfr));
+ 	if (!speaker->cmu || !speaker->sfr)
+ 		return -ENOMEM;
+-	speaker->bclk = devm_clk_get(dev, "speaker");
+-	if (IS_ERR(speaker->bclk))
+-		return PTR_ERR(speaker->bclk);
+-	speaker->mic_bclk = devm_clk_get(dev, "mic");
+-	if (IS_ERR(speaker->mic_bclk))
+-		return PTR_ERR(speaker->mic_bclk);
+ 	ret = abox_power_ready(speaker);
+ 	if (ret)
+ 		return ret;
+@@ -525,20 +576,14 @@
+ 	ret = devm_pm_runtime_enable(dev);
+ 	if (ret)
+ 		return ret;
+-	speaker->ring.dev.type = SNDRV_DMA_TYPE_DEV;
+-	speaker->ring.dev.dev = dev;
+-	speaker->ring.bytes = RING_BYTES;
+-	speaker->ring.area = dma_alloc_coherent(dev, RING_BYTES, &speaker->ring.addr, GFP_KERNEL);
+-	if (!speaker->ring.area)
+-		return -ENOMEM;
+-	ret = devm_add_action_or_reset(dev, speaker_release_ring, speaker);
+-	if (ret)
+-		return ret;
+-	if (!IS_ALIGNED(speaker->ring.addr, 16) ||
+-	    speaker->ring.addr > U32_MAX - RING_BYTES)
+-		return -ERANGE;
+-
+-	INIT_DELAYED_WORK(&speaker->period_work, speaker_tick);
++	mutex_init(&speaker->prepare_lock);
++	ret = abox_init_pcm(speaker, SNDRV_PCM_STREAM_PLAYBACK, "speaker");
++	if (ret)
++		return ret;
++	ret = abox_init_pcm(speaker, SNDRV_PCM_STREAM_CAPTURE, "mic");
++	if (ret)
++		return ret;
++
+ 	codec = of_parse_phandle(dev->of_node, "audio-codec", 0);
+ 	if (!codec)
+ 		return -EINVAL;
