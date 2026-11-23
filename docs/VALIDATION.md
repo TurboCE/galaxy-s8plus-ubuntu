@@ -3963,3 +3963,10 @@ pointers advancing. The reference tones were not recovered from
 the microphone, so physical speaker audibility and intelligible
 acoustic capture remain unverified. The project suite ran 162
 tests with 9 skipped and no failures.
+
+R96 repeated 25.9 seconds of the 720p content with 8 drops in
+779 frames and an advancing speaker PCM pointer. Firefox and
+GNOME Shell both used the Panfrost DRM render node. No buffer
+allocation failure was observed. The kernel did report one
+DATA_INVALID_FAULT from a Firefox Renderer job, so this is a
+playback improvement with an open GPU driver issue.
