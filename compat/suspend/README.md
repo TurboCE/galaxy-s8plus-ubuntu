@@ -64,6 +64,18 @@ restores the display. The sleep request uses logind's Suspend method so desktop
 PrepareForSleep notifications and delay inhibitors remain part of the path.
 No password, autologin setting or authentication result is changed.
 
+## Linux 6.18 Wayland
+
+The mainline GPIO key device uses `platform-gpio-keys-event` in
+`/dev/input/by-path`. The power-key service reads the DECON DSI connector's
+enabled state to confirm Mutter has blanked the panel before requesting sleep.
+The service installer and syntax are shared with the Samsung kernel path.
+
+Boot the mainline trial with `g955n.desktop_suspend=1` and omit
+`systemd.mask=g955n-power-key.service` when enabling this service. The
+qualification uses an RTC alarm for each short-press suspend test. A press
+on a panel that has already resumed and lit up starts a new suspend cycle.
+
 ## Explicit USB recovery
 
 `recover-usb.py --reset-peripheral` is a recovery operation, not a sleep hook

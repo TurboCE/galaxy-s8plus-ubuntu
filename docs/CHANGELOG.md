@@ -2035,3 +2035,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   stock GNOME calendar.
 - Restore the Panfrost fault interrupt when re-enabling a previously
   faulted GPU address space.
+
+### 2026-11-23 — 6.18 R82 Exynos8895 UFS link timers
+
+- Preserve the Samsung UniPro timers after the Exynos8895 high-speed
+  link setup. The existing UFS core power-mode path still applies
+  on the PWM fallback.
+- Recognize the mainline GPIO power key and use the DECON connector
+  state for the Wayland display blanking check. Pass the session's
+  GTK renderer to the shutdown confirmation dialog.

@@ -2,6 +2,7 @@
 """Suspend, wake, or ask to power off from the handset power key."""
 
 import fcntl
+from functools import cache
 from pathlib import Path
 import pwd
 import select
@@ -15,7 +16,10 @@ INPUT_EVENT = struct.Struct('@llHHi')
 EVIOCSCLOCKID = 0x400445A0
 POWER_KEY = (1, 116)  # EV_KEY, KEY_POWER
 LONG_PRESS = 1.4
-GPIO_KEYS = '/dev/input/by-path/platform-gpio_keys-event'
+GPIO_KEYS = (
+    Path('/dev/input/by-path/platform-gpio-keys-event'),
+    Path('/dev/input/by-path/platform-gpio_keys-event'),
+)
 PANEL_RUNTIME = Path('/sys/class/graphics/fb0/device/power/runtime_status')
 SLEEP_MARKER = Path('/run/g955n-display-suspend')
 MUTTER = 'org.gnome.Mutter.DisplayConfig'
@@ -135,7 +139,9 @@ def suspend_session(session):
 def open_power_dialog(session):
     _, _, run = session
     wake_display(session)
-    env = display_environment(run, ('DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY'))
+    env = display_environment(run, (
+        'DISPLAY', 'XAUTHORITY', 'WAYLAND_DISPLAY', 'GSK_RENDERER',
+    ))
     dialog = subprocess.Popen([
         *run, *env, '/usr/bin/zenity', '--question', '--modal', '--default-cancel',
         '--title=Power Off', '--text=Turn off this phone?',
@@ -145,8 +151,17 @@ def open_power_dialog(session):
     return dialog
 
 
+@cache
+def panel_state():
+    for connector in Path('/sys/class/drm').glob('card*-DSI-1'):
+        if (connector / 'device/device/driver').resolve().name == 'g955n-decon-handoff':
+            return connector / 'enabled', 'enabled'
+    return PANEL_RUNTIME, 'active'
+
+
 def panel_is_on():
-    return PANEL_RUNTIME.read_text().strip() == 'active'
+    path, on_value = panel_state()
+    return path.read_text().strip() == on_value
 
 
 def is_resume_press(pressed_at):
@@ -170,7 +185,10 @@ def main():
             wake_display(session)
         return
     # A normal read shares the device with the compositor and logind.
-    with open(GPIO_KEYS, 'rb', buffering=0) as key:
+    device = next((path for path in GPIO_KEYS if path.is_char_device()), None)
+    if device is None:
+        raise SystemExit('Power key input device is unavailable')
+    with device.open('rb', buffering=0) as key:
         fcntl.ioctl(key, EVIOCSCLOCKID, struct.pack('@i', time.CLOCK_BOOTTIME))
         watch_keys(key)
 

@@ -1,0 +1,22 @@
+Subject: [PATCH] scsi: ufs: exynos8895: preserve the programmed HS UniPro timers
+
+The Exynos8895 HS transition already programs the Samsung DL and PA
+timer values in its variant callback. Tell the core to retain them
+after this callback succeeds. The generic fallback also attempts
+three local DME selectors that this controller rejects.
+
+Keep the existing core path for the PWM fallback, which does not
+install the Exynos8895 HS timer table.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -2413,6 +2413,8 @@ static int exynos8895_ufs_initial_power_mode(struct exynos_ufs *ufs,
+ 		if (ret)
+ 			return dev_err_probe(ufs->hba->dev, ret, "UFS HS PHY setup failed\n");
+ 
++		/* The core must preserve the variant's UniPro timer settings. */
++		ufs->hba->quirks |= UFSHCD_QUIRK_SKIP_DEF_UNIPRO_TIMEOUT_SETTING;
+ 		pwr->gear_rx = pwr->gear_tx = UFS_HS_G1;
+ 		pwr->lane_rx = pwr->lane_tx = 2;
+ 		pwr->pwr_rx = pwr->pwr_tx = FAST_MODE;

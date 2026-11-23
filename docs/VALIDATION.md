@@ -3651,3 +3651,49 @@ The next-fault interrupt recovery path was not separately exercised.
 
 [hangul-osk-fix]: https://github.com/libhangul/ibus-hangul/commit/eaaf6aa222926835fa155d587b05c199107cb449
 [panfrost-unmask]: https://lore.kernel.org/lkml/20261121-panfrost-mmu-as-mask-v1-1-13ffb84d5562@gmail.com/
+
+### R82 Exynos8895 UFS high-speed timer verification
+
+R81 logged three rejected generic local DME timer writes, at
+`0xd041`, `0xd042` and `0xd043`, during the high-speed transition.
+The Exynos8895 variant had already programmed its own DL and PA
+timers. R82 uses the existing UFS host quirk after the Samsung
+high-speed PHY setup succeeds, retaining the values written by the
+variant.
+
+The R82 handset booted with its ext4 root on internal UFS and
+reported an active two-lane HS-G1 series B link. The three rejected
+DME writes were absent. A 32 MiB file was written, synced and
+read back with direct I/O, with matching SHA-256 and no reported
+UFS transfer or ext4 errors in that interval.
+
+Touch entry in GDM opened the normal GNOME Wayland session. That
+session retained the Hangul engine and the legacy OpenGL GTK 4
+renderer. GNOME Shell held the DECON KMS and Panfrost render
+devices open. UPower exposed the onboard MAX77865 battery.
+Ubuntu archive updates succeeded with strict APT error handling
+over the Wi-Fi default route.
+
+R82 entered s2idle and resumed on the same boot with an RTC alarm.
+Storage returned with the same two-lane HS-G1 series B mode. USB
+serial and Wi-Fi reappeared, and the rejected DME writes stayed
+absent.
+
+### Mainline Wayland power-key test
+
+The R82 image masked the persistent power-key unit. A transient
+service exercised the updated handler against the real mainline
+GPIO input interface. Mutter changed the DECON DSI connector
+between enabled and disabled in response to display power requests.
+An injected long key press opened the visible shutdown confirmation.
+Tapping Cancel closed it without a shutdown. An injected short press
+requested s2idle, and a prearmed RTC alarm resumed that same boot
+after about 20 seconds.
+
+The panel was already enabled after the RTC resume. A second
+injected press entered s2idle without an RTC alarm, after which the
+Mac no longer saw the SM-G955N USB gadget and pinned Wi-Fi SSH
+stopped responding. This left physical button wake and installed
+service activation pending. The R83 image was built with the
+power-key service mask removed and was not installed during this
+test.

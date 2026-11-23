@@ -1,7 +1,8 @@
 [Unit]
 Description=Handle suspend, wake, and shutdown confirmation on the SM-G955N power key
-After=systemd-logind.service systemd-udev-trigger.service
-ConditionPathExists=/dev/input/by-path/platform-gpio_keys-event
+After=systemd-logind.service systemd-udev-trigger.service display-manager.service
+ConditionPathExists=|/dev/input/by-path/platform-gpio-keys-event
+ConditionPathExists=|/dev/input/by-path/platform-gpio_keys-event
 
 [Service]
 ExecStart=/usr/bin/python3 /usr/local/lib/g955n/g955n-power-key.py

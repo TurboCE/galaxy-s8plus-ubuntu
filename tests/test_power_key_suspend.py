@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -11,6 +12,24 @@ m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 
 class PowerKeySuspendTests(unittest.TestCase):
+    def test_decon_panel_follows_connector_blanking(self):
+        m.panel_state.cache_clear()
+        self.addCleanup(m.panel_state.cache_clear)
+        with tempfile.TemporaryDirectory() as directory:
+            drm = Path(directory)
+            connector = drm / 'card2-DSI-1'
+            device = connector / 'device/device'
+            device.mkdir(parents=True)
+            driver = drm / 'g955n-decon-handoff'
+            driver.mkdir()
+            (device / 'driver').symlink_to(driver)
+            enabled = connector / 'enabled'
+            with patch.object(m, 'Path', return_value=drm):
+                enabled.write_text('enabled\n')
+                self.assertTrue(m.panel_is_on())
+                enabled.write_text('disabled\n')
+                self.assertFalse(m.panel_is_on())
+
     def test_wake_resets_idle_before_powering_panel(self):
         calls=[]
         with patch.object(m,'display_environment',return_value=['DISPLAY=:1']), \
