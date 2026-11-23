@@ -2135,3 +2135,14 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   to it or a window update is pending.
 - Extend the BCM4773 diagnostic to read a bounded SSI payload after
   HOST_REQ. Report the received byte count without logging sensor data.
+
+### Linux 6.18 Ubuntu userspace profile
+
+- Build a separate offline image with stock PipeWire, WirePlumber, GeoClue,
+  and the SM-G955N ALSA UCM files. Stage the verified r02j Wi-Fi and Semco
+  Bluetooth firmware from the handset's private Android inventory.
+- Stage the native ABOX service and the GNOME power-key service. Require
+  the DECON display and the manual suspend boot flag before running the
+  power-key and suspend services.
+- Accept the reviewed modules for the matching SM-G955N kernel release.
+  Check their release and regenerate module dependency metadata in the image.

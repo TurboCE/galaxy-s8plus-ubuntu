@@ -5,6 +5,8 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import tempfile
 
@@ -13,6 +15,7 @@ AMBIENT = SOURCE / 'compat/ambient-brightness'
 AUDIO = SOURCE / 'compat/pipewire'
 GNSS = SOURCE / 'compat/gnss'
 SENSORS = SOURCE / 'compat/sensors'
+SUSPEND = SOURCE / 'compat/suspend'
 STOCK_SPA = Path('usr/lib/aarch64-linux-gnu/spa-0.2')
 PRIVATE_SPA = Path('usr/local/lib/g955n/spa-0.2')
 WIREPLUMBER = Path('etc/systemd/user/wireplumber.service')
@@ -159,6 +162,105 @@ def install_audio(root, build):
     mask.unlink()
 
 
+def install_mainline618(root):
+    for path in (
+        root / WIREPLUMBER,
+        root / 'etc/systemd/user/wireplumber.service.d/10-g955n-validated-plugin.conf',
+        root / 'etc/systemd/user/pipewire.service.d/10-g955n-validated-plugin.conf',
+    ):
+        if path.exists() or path.is_symlink():
+            raise ValueError('The mainline profile requires stock PipeWire and WirePlumber')
+    for package_file in ('usr/bin/wpctl', 'usr/bin/zenity'):
+        if not (root / package_file).is_file():
+            raise ValueError(f'Missing mainline package file: {package_file}')
+
+    firmware_dir = Path('usr/lib/firmware/brcm')
+    wifi_source = root / 'system/etc/wifi'
+    nvram = wifi_source / 'nvram.txt_r02j_b0'
+    bluetooth = root / 'usr/lib/firmware/samsung/g955n/bcm4361B0_semco.hcd'
+    # The r02j NVRAM and Semco E32 patch are the pair verified on R97.
+    if (digest(nvram) != '56c7c64290132add7720ce98a0e0ee55a73452c6f41fba5c23d3eea3b2cc5a49'
+            or digest(bluetooth) != '343fb252959cf643dde61e16967aaeea82012301b5033262cb3547a8736d5a92'):
+        raise ValueError('The mainline profile requires the verified r02j firmware pair')
+    for source_file, name in (
+        (wifi_source / 'bcmdhd_sta.bin_b0', 'brcmfmac4361b0-pcie.bin'),
+        (nvram, 'brcmfmac4361b0-pcie.txt'),
+        (wifi_source / 'bcmdhd_clm.blob', 'brcmfmac4361b0-pcie.clm_blob'),
+        (bluetooth, 'BCM.samsung,dream2lteks.hcd'),
+    ):
+        stage(root, firmware_dir / name, source_file.read_bytes())
+
+    unit_dir = Path('etc/systemd/system')
+    for source_file, target, mode in (
+        (SOURCE / 'compat/g955n-mainline-speaker.service', unit_dir / 'g955n-mainline-speaker.service', 0o644),
+        (SUSPEND / 'g955n-power-key.service', unit_dir / 'g955n-power-key.service', 0o644),
+        (SUSPEND / 'g955n-power-key.py', 'usr/local/lib/g955n/g955n-power-key.py', 0o755),
+        (SUSPEND / '60-g955n-wake-report', 'usr/lib/systemd/system-sleep/60-g955n-wake-report', 0o755),
+        (SUSPEND / '60-g955n-suspend-to-idle.conf', 'etc/systemd/sleep.conf.d/60-g955n-suspend-to-idle.conf', 0o644),
+        (GNSS / '70-g955n-network-location.conf', 'etc/geoclue/conf.d/70-g955n-network-location.conf', 0o644),
+    ):
+        stage(root, target, source_file.read_bytes(), mode)
+
+    suspend_conditions = (
+        b'[Unit]\nConditionKernelCommandLine=g955n.desktop_suspend=1\n'
+        b'ConditionPathExists=/sys/bus/platform/devices/12860000.decon-handoff/drm\n'
+    )
+    for unit in ('g955n-power-key.service', 'systemd-suspend.service'):
+        stage(root, unit_dir / (unit + '.d') / '50-g955n-mainline-suspend.conf',
+              suspend_conditions)
+    for db in ('local.d', 'gdm.d'):
+        stage(root, Path('etc/dconf/db') / db / '60-g955n-manual-suspend',
+              (SUSPEND / '60-g955n-manual-suspend').read_bytes())
+    for unit in ('sleep.target', 'suspend.target'):
+        mask = root / unit_dir / unit
+        if mask.is_symlink() and mask.readlink() == Path('/dev/null'):
+            mask.unlink()
+    link(root, unit_dir / 'graphical.target.wants/g955n-power-key.service',
+         Path('../g955n-power-key.service'))
+    link(root, unit_dir / 'multi-user.target.wants/g955n-mainline-speaker.service',
+         Path('../g955n-mainline-speaker.service'))
+
+
+def install_mainline_modules(root, source):
+    release = source.name
+    if not re.fullmatch(r'6\.18\.\d+-g955n-[a-z0-9.-]+', release):
+        raise ValueError('Expected a SM-G955N 6.18 kernel release directory')
+    if not (source / 'modules.order').is_file():
+        raise ValueError('Kernel release directory is missing modules.order')
+    if (any(path.is_symlink() for path in source.iterdir() if path.name not in ('build', 'source'))
+            or any(path.is_symlink() for path in (source / 'kernel').rglob('*'))):
+        raise ValueError('Kernel module files must be local to the release directory')
+    modules = Path('usr/lib/modules')
+    destination = root / modules / release
+    if destination.is_symlink() or not destination.parent.resolve().is_relative_to(root):
+        raise ValueError('Unsafe target kernel module directory')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    required = (
+        'kernel/drivers/gpu/drm/tiny/g955n-decon-handoff.ko',
+        'kernel/sound/soc/samsung/g955n-abox-speaker.ko',
+    )
+    with tempfile.TemporaryDirectory(dir=destination.parent) as temporary:
+        candidate = Path(temporary) / release
+        shutil.copytree(source, candidate, ignore=shutil.ignore_patterns('build', 'source'))
+        for name in required:
+            result = subprocess.check_output(
+                ['chroot', str(root), '/usr/sbin/modinfo', '-F', 'vermagic',
+                 '/' + str((candidate / name).relative_to(root))], text=True)
+            if result.split(maxsplit=1)[:1] != [release]:
+                raise ValueError(f'Kernel module release mismatch: {name}')
+        if destination.exists():
+            if not (destination / 'modules.order').is_file():
+                raise ValueError(f'Existing module tree is incomplete: {release}')
+            files = set(path.relative_to(candidate) for path in candidate.rglob('*.ko'))
+            installed = set(path.relative_to(destination) for path in destination.rglob('*.ko'))
+            if files != installed or any(digest(candidate / name) != digest(destination / name)
+                                         for name in files):
+                raise ValueError(f'Existing modules differ for kernel release {release}')
+        else:
+            candidate.rename(destination)
+    subprocess.run(['chroot', str(root), '/usr/sbin/depmod', release], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rootfs', required=True, type=Path)
@@ -166,10 +268,21 @@ def main():
     parser.add_argument('--audio-build', type=Path)
     parser.add_argument('--ambient-power-daemon', type=Path)
     parser.add_argument('--gnss-client', type=Path)
+    parser.add_argument('--mainline618', action='store_true')
+    parser.add_argument('--mainline-modules', type=Path)
     args = parser.parse_args()
     root = args.rootfs.resolve(strict=True)
     if root == Path('/') or (root / 'etc/hostname').read_text().strip() != 'g955n-ubuntu':
         parser.error('requires the offline SM-G955N Ubuntu rootfs')
+    if args.mainline618:
+        if any((args.sensor_daemon, args.ambient_power_daemon, args.audio_build, args.gnss_client)):
+            parser.error('--mainline618 cannot be combined with downstream adapters')
+        install_mainline618(root)
+        if args.mainline_modules:
+            install_mainline_modules(root, args.mainline_modules)
+        return
+    if args.mainline_modules:
+        parser.error('--mainline-modules requires --mainline618')
     if args.sensor_daemon:
         install_sensors(root, args.sensor_daemon)
     if args.ambient_power_daemon:

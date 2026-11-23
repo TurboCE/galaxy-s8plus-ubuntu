@@ -122,6 +122,18 @@ python3 scripts/pack_boot.py --kernel-dir artifacts/build-TIMESTAMP-SUFFIX \
   --busybox artifacts/rootfs/busybox-arm64-static --output artifacts/boot-g955n-experimental.img
 ```
 
+The Linux 6.18 image uses Ubuntu's stock PipeWire, WirePlumber and GeoClue
+with the board's ALSA UCM configuration and Wi-Fi/Bluetooth firmware. It
+stages the power key and manual suspend when the DECON boot enables
+`g955n.desktop_suspend=1`. The same build can include the reviewed modules
+for the matching SM-G955N BOOT image.
+
+```sh
+python3 scripts/build_rootfs.py --mainline618 \
+  --mainline-modules /path/to/lib/modules/6.18.0-g955n-usb-r98
+python3 scripts/validate_rootfs.py artifacts/rootfs/mainline618/g955n-rootfs.unqualified.img
+```
+
 Private output contains SSH keys, host-key pins, firmware and disk images; never
 publish it. Native USB networking uses 192.168.55.2/24 with ECM and a serial port.
 The initial image deliberately disables automatic suspend and automatic camera

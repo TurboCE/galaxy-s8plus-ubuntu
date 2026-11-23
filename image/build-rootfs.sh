@@ -30,6 +30,10 @@ deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] $MIRROR noble-upd
 deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] $MIRROR noble-security main universe restricted multiverse
 EOF
 chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
+extra_packages=()
+if [ "${G955N_ROOTFS_PROFILE:-legacy}" = mainline618 ]; then
+  extra_packages+=(pipewire-audio zenity)
+fi
 chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   systemd-sysv systemd-timesyncd udev dbus openssh-server sudo busybox-static iproute2 iputils-ping \
   network-manager wpasupplicant wireless-regdb iw bluez modemmanager geoclue-2.0 gpsd gpsd-clients \
@@ -37,7 +41,7 @@ chroot "$R" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-
   libegl1 libgles2 libgbm1 libdrm2 mesa-utils weston wayland-utils \
   ubuntu-desktop-minimal gnome-system-monitor libpam-gnome-keyring rtkit libspa-0.2-libcamera \
   xserver-xorg-video-fbdev xserver-xorg-input-libinput \
-  xserver-xorg-legacy xinit fonts-dejavu-core ibus ibus-hangul
+  xserver-xorg-legacy xinit fonts-dejavu-core ibus ibus-hangul "${extra_packages[@]}"
 chroot "$R" useradd -m -s /bin/bash -G sudo ubuntu
 install -d -m 700 "$R/home/ubuntu/.ssh"
 install -m 600 /inputs/ssh.pub "$R/home/ubuntu/.ssh/authorized_keys"
@@ -47,6 +51,7 @@ printf 'ubuntu ALL=(ALL) NOPASSWD:ALL\n' > "$R/etc/sudoers.d/90-g955n-ubuntu"
 chmod 440 "$R/etc/sudoers.d/90-g955n-ubuntu"
 printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\n' > "$R/etc/ssh/sshd_config.d/10-g955n.conf"
 printf 'g955n-ubuntu\n' > "$R/etc/hostname"
+printf '%s\n' "${G955N_ROOTFS_PROFILE:-legacy}" > "$R/etc/g955n-rootfs-profile"
 printf '127.0.0.1 localhost\n127.0.1.1 g955n-ubuntu\n' > "$R/etc/hosts"
 ln -sf /usr/share/zoneinfo/Asia/Seoul "$R/etc/localtime"
 printf 'Asia/Seoul\n' > "$R/etc/timezone"

@@ -11,7 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--volume', default='g955n-ubuntu-rootfs-build')
+    parser.add_argument('--volume')
+    parser.add_argument('--mainline618', action='store_true',
+                        help='Build a stock Ubuntu userspace for the Linux 6.18 board drivers')
+    parser.add_argument('--mainline-modules', type=Path,
+                        help='Include a reviewed SM-G955N 6.18 kernel release directory')
     parser.add_argument('--finalize-only', action='store_true')
     parser.add_argument('--sensor-daemon', type=Path,
                         help='Stage the reviewed AArch64 Samsung SSP SensorProxy executable')
@@ -22,6 +26,18 @@ def main():
     parser.add_argument('--gnss-client', type=Path,
                         help='Stage the reviewed AArch64 SM-G955N GNSS client and GeoClue configuration')
     args = parser.parse_args()
+    if args.mainline618 and any((args.sensor_daemon, args.ambient_power_daemon,
+                                args.audio_build, args.gnss_client)):
+        parser.error('--mainline618 uses the stock Ubuntu hardware services')
+    if args.mainline_modules and not args.mainline618:
+        parser.error('--mainline-modules requires --mainline618')
+    if args.mainline_modules:
+        args.mainline_modules = args.mainline_modules.resolve(strict=True)
+        if not re.fullmatch(r'6\.18\.\d+-g955n-[a-z0-9.-]+', args.mainline_modules.name):
+            parser.error('--mainline-modules must name a SM-G955N 6.18 kernel release directory')
+    if not args.volume:
+        args.volume = ('g955n-mainline618-rootfs-build' if args.mainline618
+                       else 'g955n-ubuntu-rootfs-build')
     if not re.fullmatch(r'g955n-[a-z0-9-]+', args.volume):
         raise SystemExit('Requires a dedicated g955n-* build volume')
     if subprocess.check_output(['docker', 'ps', '--filter', 'volume=' + args.volume, '--format', '{{.ID}}'], text=True).strip():
@@ -29,6 +45,8 @@ def main():
     builder = os.environ.get('G955N_BUILDER', 'g955n-ubuntu-builder:24.04')
     os.umask(0o077)
     output = ROOT / 'artifacts/rootfs'
+    if args.mainline618:
+        output /= 'mainline618'
     inputs = ROOT / 'artifacts/inputs'
     output.mkdir(parents=True, exist_ok=True)
     inputs.mkdir(parents=True, exist_ok=True)
@@ -36,7 +54,9 @@ def main():
     if not identity.exists():
         subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(identity), '-C', 'g955n-ubuntu-local'], check=True)
     (inputs / 'ssh.pub').write_bytes(identity.with_suffix('.pub').read_bytes())
+    profile = 'mainline618' if args.mainline618 else 'legacy'
     common = ['docker', 'run', '--rm', '--cpus', '3', '--memory', '4g',
+              '-e', 'G955N_ROOTFS_PROFILE=' + profile,
               '-v', args.volume + ':/work', '-v', str(output) + ':/outputs']
     subprocess.run(['docker', 'volume', 'create', args.volume], check=True, stdout=subprocess.DEVNULL)
     if not args.finalize_only:
@@ -56,6 +76,8 @@ def main():
         hardware_mounts += ['-v', str(args.audio_build.resolve(strict=True)) + ':/adapters/audio:ro']
     if args.gnss_client:
         hardware_mounts += ['-v', str(args.gnss_client.resolve(strict=True)) + ':/adapters/gnss-client:ro']
+    if args.mainline_modules:
+        hardware_mounts += ['-v', f'{args.mainline_modules}:/adapters/modules/{args.mainline_modules.name}:ro']
     subprocess.run([*common, '--network', 'none',
                     '-v', str(inputs) + ':/inputs:ro',
                     '-v', str(ROOT / 'image') + ':/source/image:ro',

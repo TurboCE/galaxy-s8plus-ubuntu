@@ -4029,3 +4029,15 @@ expose IIO devices or a GNSS source.
 USB serial, USB Ethernet, recovery ADB and the pinned Wi-Fi route were
 unavailable. R98 and the pending Power Key wake guard were not deployed.
 The host suite ran 164 tests with 9 skipped and no failures.
+
+### Linux 6.18 Ubuntu userspace profile
+
+The offline stage tests passed for stock WirePlumber, network-based
+GeoClue, the native audio and power-key services, and the opt-in
+manual suspend conditions. A downstream WirePlumber mask is rejected
+by the native profile. Tests also checked that a mismatched module
+release is rejected before install and that a matching release can be
+staged again without copying build-tree symlinks.
+
+The SM-G955N remained unavailable over USB and Wi-Fi in this run.
+No image or service changes were applied to the handset.

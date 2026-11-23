@@ -4,17 +4,31 @@ set -euo pipefail
 R=/work/rootfs
 test -x "$R/sbin/init"
 test "$(cat "$R/etc/hostname")" = g955n-ubuntu
-tar -C /source/image/rootfs-overlay -cf - . | tar -C "$R" --keep-directory-symlink -xpf -
-# Broad ACP probing still reaches unsafe Abox endpoints. New images must retain
-# isolation until a separately reviewed runtime trial qualifies the replacement.
-test "$(readlink "$R/etc/systemd/user/wireplumber.service")" = /dev/null
-# Both session policy and the actual PCM engine must use the same guarded SPA
-# tree. Missing candidate/manifest makes startup fail closed on a fresh image.
-install -D -m 755 /source/compat/pipewire/g955n-wireplumber "$R/usr/local/libexec/g955n-wireplumber"
-install -D -m 644 /source/compat/pipewire/10-g955n-validated-plugin.conf "$R/etc/systemd/user/wireplumber.service.d/10-g955n-validated-plugin.conf"
-install -D -m 644 /source/compat/pipewire/10-g955n-validated-core.conf "$R/etc/systemd/user/pipewire.service.d/10-g955n-validated-plugin.conf"
+profile=${G955N_ROOTFS_PROFILE:-legacy}
+built_profile=legacy
+if [ -f "$R/etc/g955n-rootfs-profile" ]; then
+  built_profile=$(cat "$R/etc/g955n-rootfs-profile")
+fi
+test "$built_profile" = "$profile" || { echo 'Rootfs build and finalization profiles differ' >&2; exit 1; }
+overlay_options=()
+if [ "$profile" = mainline618 ]; then
+  overlay_options+=(--exclude=./etc/systemd/user/wireplumber.service)
+fi
+tar -C /source/image/rootfs-overlay "${overlay_options[@]}" -cf - . | tar -C "$R" --keep-directory-symlink -xpf -
 # Stage these only when the builder is supplied the matched local artifacts.
 hardware_args=(--rootfs "$R")
+if [ "$profile" = mainline618 ]; then
+  hardware_args+=(--mainline618)
+  if [ -d /adapters/modules ]; then
+    hardware_args+=(--mainline-modules /adapters/modules/*)
+  fi
+else
+  # On the Samsung 4.4 kernel the guarded SPA plugin scopes unsafe ABOX PCM probes.
+  test "$(readlink "$R/etc/systemd/user/wireplumber.service")" = /dev/null
+  install -D -m 755 /source/compat/pipewire/g955n-wireplumber "$R/usr/local/libexec/g955n-wireplumber"
+  install -D -m 644 /source/compat/pipewire/10-g955n-validated-plugin.conf "$R/etc/systemd/user/wireplumber.service.d/10-g955n-validated-plugin.conf"
+  install -D -m 644 /source/compat/pipewire/10-g955n-validated-core.conf "$R/etc/systemd/user/pipewire.service.d/10-g955n-validated-plugin.conf"
+fi
 if [ -f /adapters/sensor-proxy ]; then
   hardware_args+=(--sensor-daemon /adapters/sensor-proxy)
 fi
@@ -36,7 +50,10 @@ install -D -m 644 /source/compat/xdamage-monitor.py "$R/usr/local/lib/g955n/g955
 chmod 755 "$R/usr/local/sbin/g955n-location-hub"
 chmod 755 "$R/usr/local/sbin/g955n-bluetooth-address"
 chmod 755 "$R/usr/local/sbin/g955n-kernel-evidence"
-chroot "$R" systemctl enable g955n-hardware.service g955n-grow-root.service g955n-fb-display.service g955n-kernel-evidence.service g955n-bluetooth-rom.service serial-getty@ttyGS0.service
+chroot "$R" systemctl enable g955n-grow-root.service g955n-kernel-evidence.service serial-getty@ttyGS0.service
+if [ "$profile" = legacy ]; then
+  chroot "$R" systemctl enable g955n-hardware.service g955n-fb-display.service g955n-bluetooth-rom.service
+fi
 chroot "$R" dconf update
 chroot "$R" systemctl set-default graphical.target
 if [ -s /inputs/ubuntu-password ]; then
