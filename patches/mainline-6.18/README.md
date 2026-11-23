@@ -124,6 +124,23 @@ reserve five cells under `/chosen` in the embedded DTB. Use
 `samsung,g955n-g3d-power-snapshot` with each cell initialized to
 `0xffffffff`. The loader collects BUCK6 control and two voltage
 selectors, LDO9 control and G3D power state for the USB boot log.
+For the clock snapshot, also apply proposal 0066 and reserve seven more
+cells under `/chosen` as `samsung,g955n-g3d-clock-snapshot`, all
+initialized to `0xffffffff`. The loader reads the G3D clock registers
+only when the PMU reports that the domain is fully on.
+
+Apply proposal 0067 to register the G3D clocks and Mali device. A
+diagnostic DTB enables both nodes. The driver checks inherited power
+before accessing the CMU. This trial uses the firmware voltage and
+frequency pending native regulator and power-domain support.
+
+For the Mesa rendering check, build
+`scripts/boot/panfrost-render-probe.c` for AArch64 against the EGL, GLES,
+GBM and exported DRM UAPI headers, and link with `-ldl`. Include the executable in the
+initramfs at `/bin/g955n-panfrost-render` and add
+`g955n.panfrost_diag=1` to the boot arguments. The test uses the installed
+Mesa libraries from the read-only Ubuntu mount. It verifies shader
+rendering and pixel readback through Panfrost without exercising DECON.
 
 ## Reading the warm boot trace
 

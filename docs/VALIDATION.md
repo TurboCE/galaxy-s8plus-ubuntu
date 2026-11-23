@@ -3013,3 +3013,42 @@ DTB. No rail was switched during this test.
   R29 builds this guard alongside the native Hibern8 status and clock
   changes. Its loader link was checked for an actual call to the G3D
   snapshot routine before packing BOOT.
+
+### R28 through R36 storage and Panfrost trials
+
+- R28 reached multi-user.target and passed the private network
+  namespace exercise. Recovery captured a successful UniPro Hibern8
+  completion and a subsequent synchronous external abort during system
+  shutdown. The faulting instruction is the same HCI clock-stop read as
+  in R26. Retaining clocks across Hibern8 entry alone did not address it.
+- Mac USB serial read the R29 early kernel log. uniLoader reported the
+  firmware's BUCK6 control and voltage selectors and LDO9 control.
+  The PMU reported G3D status 0xf at handoff. This establishes inherited
+  power state for that boot. It does not exercise GPU rendering.
+- R29 reached multi-user.target at 194.490 seconds on the installed
+  UFS root and passed the network namespace test. macOS received the
+  kernel log and ttyGS0 login prompt. It automatically returned to TWRP.
+  The retained shutdown record reached Restarting system with command
+  recovery and contained neither the prior UFS abort nor the init panic.
+  The legacy kernel-evidence service still timed out during boot.
+- R30 and R31 repeated the read-only UFS check. Both captured successful
+  native Hibern8 indications and automatically returned to TWRP. R31
+  confirmed that the active PLL is at offset 0x0140 rather than 0x0120.
+  The latter is the switch mux in this register layout. The live PLL
+  word 0xa0a00412 yielded 260 MHz from the 26 MHz oscillator.
+- R32 registered the G3D clocks and detected Mali-G71 (ID 0x60a0) with
+  Panfrost at 260 MHz. The kernel registered the Panfrost DRM device and
+  returned to TWRP automatically. This probe uses inherited firmware
+  power and a dummy regulator. It does not qualify regulator control,
+  DVFS, DECON scanout or a stock Wayland desktop.
+- R33's render diagnostic selected the correct sysfs driver but omitted
+  the dri directory in the device path. R34 corrected the path and
+  returned to TWRP after the render probe exceeded its initial deadline.
+  R35 added progress logging and a longer bounded test.
+- R35 opened the render node and loaded EGL and GBM, then hit the
+  90-second deadline before a GLES context was current. Its retained log
+  recorded a successful Hibern8 completion and normal recovery reboot.
+- R36 opened the Panfrost render node, queried GPU model 0x60a0 using
+  the DRM ioctl, and allocated and released a GEM buffer. It loaded
+  EGL and GBM but timed out before gbm_create_device returned. The
+  Mesa shader and pixel check therefore remains unqualified.

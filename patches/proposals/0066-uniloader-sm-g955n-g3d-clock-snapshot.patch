@@ -1,0 +1,68 @@
+Subject: [PATCH] uniLoader: capture the active SM-G955N G3D clock tree
+
+When the firmware has already powered on the G3D domain, capture the
+clock source, PLL, bus mux, peripheral divider and AGPU gate. The
+diagnostic DT opts in with a fixed-width property. Do not change clocks
+or access G3D registers while the domain is off.
+
+Apply after the SM-G955N G3D supply snapshot proposal.
+
+diff --git a/board/samsung/board-dream2lteks.c b/board/samsung/board-dream2lteks.c
+--- a/board/samsung/board-dream2lteks.c
++++ b/board/samsung/board-dream2lteks.c
+@@ -45,6 +45,31 @@
+ 	return 0;
+ }
+ 
++static void dream2lteks_record_g3d_clocks(void *fdt, int chosen)
++{
++	static const uintptr_t cmu_regs[] = {
++		0x13800100, /* embedded reference mux */
++		0x13800120, /* G3D switch mux */
++		0x13800140, /* G3D PLL control */
++		0x13800148, /* G3D PLL options */
++		0x13801000, /* bus mux */
++		0x13801804, /* peripheral divider */
++		0x1380201c, /* AGPU gate */
++	};
++	fdt32_t snapshot[ARRAY_SIZE(cmu_regs)];
++	const char *prop = "samsung,g955n-g3d-clock-snapshot";
++	int len;
++
++	if (!fdt_getprop(fdt, chosen, prop, &len) || len != sizeof(snapshot))
++		return;
++
++	for (unsigned int i = 0; i < ARRAY_SIZE(cmu_regs); i++)
++		snapshot[i] = cpu_to_fdt32(readl((const volatile uint32_t *)cmu_regs[i]));
++
++	if (fdt_setprop_inplace(fdt, chosen, prop, snapshot, sizeof(snapshot)))
++		printk(KERN_ERR, "SM-G955N: failed to publish G3D clock snapshot\n");
++}
++
+ /*
+  * Report the inherited GPU power configuration without touching the CMU
+  * or changing regulator settings. Enabled only by diagnostic DTBs.
+@@ -56,6 +81,7 @@
+ 	fdt32_t snapshot[ARRAY_SIZE(offsets) + 1];
+ 	const char *property = "samsung,g955n-g3d-power-snapshot";
+ 	int chosen = fdt_path_offset(fdt, "/chosen");
++	uint32_t pmu_status;
+ 	int len;
+ 
+ 	if (chosen < 0 || !fdt_getprop(fdt, chosen, property, &len) ||
+@@ -68,10 +94,13 @@
+ 			return;
+ 		snapshot[i] = cpu_to_fdt32(pmic.val & 0xff);
+ 	}
+-	snapshot[ARRAY_SIZE(offsets)] = cpu_to_fdt32(
+-		readl((const volatile uint32_t *)0x164840e4) & 0xf);
++	pmu_status = readl((const volatile uint32_t *)0x164840e4) & 0xf;
++	snapshot[ARRAY_SIZE(offsets)] = cpu_to_fdt32(pmu_status);
+ 	if (fdt_setprop_inplace(fdt, chosen, property, snapshot, sizeof(snapshot)))
+ 		printk(KERN_ERR, "SM-G955N: failed to publish G3D power snapshot\n");
++
++	if (pmu_status == 0xf)
++		dream2lteks_record_g3d_clocks(fdt, chosen);
+ }
+ 
+ static struct video_info dream2lteks_fb = {

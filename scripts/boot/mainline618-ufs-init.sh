@@ -11,6 +11,22 @@ log() {
     printf '<6>g955n-ufs: %s\n' "$*" > /dev/kmsg
 }
 
+log_g3d_snapshot() {
+    local snapshot="/proc/device-tree/chosen/samsung,g955n-g3d-$1-snapshot"
+    local value
+
+    [ -r "$snapshot" ] || return 0
+    value=$("$BB" od -An -v -tx1 "$snapshot" | "$BB" tr -d ' \n')
+    case "$value" in
+        *[!f]*)
+            log "G3D $1: $2 (BE32) $value"
+            ;;
+        *)
+            log "G3D $1: loader snapshot unavailable"
+            ;;
+    esac
+}
+
 stop() {
     log "$*"
     if [ -r /proc/cmdline ] && [ -x /sbin/reboot-recovery ]; then
@@ -194,6 +210,33 @@ partdev() {
     printf '%s\n' "$found"
 }
 
+probe_panfrost_render() (
+    local node driver render='' mounts='' dir output result
+
+    for node in /sys/class/drm/renderD*; do
+        driver=$("$BB" readlink "$node/device/driver") || continue
+        [ "${driver##*/}" = panfrost ] || continue
+        [ -c "/dev/dri/${node##*/}" ] || continue
+        render="/dev/dri/${node##*/}"
+        break
+    done
+    [ -n "$render" ] || { log 'Panfrost probe: no render node'; exit 1; }
+    "$BB" cp /bin/g955n-panfrost-render /run/g955n-panfrost-render || exit 1
+    trap 'for dir in $mounts; do "$BB" umount "/newroot/$dir"; done' EXIT
+    for dir in dev proc sys run; do
+        "$BB" mount --bind "/$dir" "/newroot/$dir" || exit 1
+        mounts="$dir $mounts"
+    done
+    result=0
+    "$BB" timeout -s KILL 90 "$BB" chroot /newroot /usr/bin/env \
+        MESA_SHADER_CACHE_DISABLE=true \
+        __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
+        /run/g955n-panfrost-render "$render" > /run/g955n-panfrost-render.log 2>&1 || result=$?
+    while IFS= read -r output; do log "$output"; done < /run/g955n-panfrost-render.log
+    [ "$result" -eq 0 ] || log "Panfrost probe exit status $result"
+    return "$result"
+)
+
 "$BB" mount -t devtmpfs devtmpfs /dev || stop 'Missing devtmpfs'
 "$BB" mount -t proc proc /proc || stop 'Missing procfs'
 "$BB" mount -t sysfs sysfs /sys || stop 'Missing sysfs'
@@ -201,18 +244,8 @@ partdev() {
 [ "$("$BB" tr -d '\000' < /proc/device-tree/model)" = 'Samsung Galaxy S8+ (SM-G955N)' ] ||
     stop 'Unexpected board model'
 log 'SM-G955N UFS INIT'
-g3d_snapshot=/proc/device-tree/chosen/samsung,g955n-g3d-power-snapshot
-if [ -r "$g3d_snapshot" ]; then
-    g3d_state=$("$BB" od -An -v -tx1 "$g3d_snapshot" | "$BB" tr -d ' \n')
-    case "$g3d_state" in
-        ffffffffffffffffffffffffffffffffffffffff|'')
-            log 'G3D power: loader snapshot unavailable'
-            ;;
-        *)
-            log "G3D power: BUCK6_CTRL OUT1 OUT2 LDO9_CTRL PMU_STATUS (BE32) $g3d_state"
-            ;;
-    esac
-fi
+log_g3d_snapshot power 'BUCK6_CTRL OUT1 OUT2 LDO9_CTRL PMU_STATUS'
+log_g3d_snapshot clock 'REF_MUX SWITCH_MUX PLL_CTRL PLL_OPTIONS BUSD_MUX BUSP_DIV AGPU_GATE'
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.usb_diag=1 "*)
         if start_usb_gadget; then
@@ -250,6 +283,10 @@ log "USERDATA capacity: $sectors sectors"
     stop 'Unexpected root filesystem'
 [ -x /newroot/sbin/init ] || stop 'Ubuntu init missing'
 log 'SM-G955N UFS UBUNTU ROOT OK (read-only)'
+
+case " $("$BB" cat /proc/cmdline) " in
+    *" g955n.panfrost_diag=1 "*) probe_panfrost_render || true ;;
+esac
 
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.ufs_boot=1 "*) ;;

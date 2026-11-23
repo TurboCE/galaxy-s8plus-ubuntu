@@ -1,0 +1,234 @@
+Subject: [PATCH] Exynos8895: describe the firmware-powered G3D probe
+
+Add the G3D CCF clocks using the register offsets observed on the
+SM-G955N, and describe the Mali Bifrost MMIO and interrupts. Guard
+clock registration using the PMU status before accessing the domain.
+
+Keep both devices disabled in the base tree. An opt-in trial can retain
+the firmware voltage and clock configuration. Full power management
+and DECON scanout require their own driver paths.
+
+diff --git a/drivers/clk/samsung/clk-exynos8895.c b/drivers/clk/samsung/clk-exynos8895.c
+--- a/drivers/clk/samsung/clk-exynos8895.c
++++ b/drivers/clk/samsung/clk-exynos8895.c
+@@ -7,9 +7,11 @@
+  */
+ 
+ #include <linux/clk-provider.h>
++#include <linux/mfd/syscon.h>
+ #include <linux/mod_devicetable.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
++#include <linux/regmap.h>
+ 
+ #include <dt-bindings/clock/samsung,exynos8895.h>
+ 
+@@ -2764,12 +2766,94 @@
+ 	.clk_name		= "bus",
+ };
+ 
++/* CMU_G3D on the Exynos8895 embedded G3D power domain. */
++#define G3D_PLL_LOCKTIME		0x0000
++#define G3D_SWITCH_MUX		0x0120
++#define G3D_PLL_CTRL		0x0140
++#define G3D_BUSD_MUX		0x1000
++#define G3D_BUSP_DIV		0x1804
++#define G3D_AGPU_GATE		0x201c
++#define G3D_PMU_STATUS		0x40e4
++#define G3D_PMU_ON		GENMASK(3, 0)
++
++static const unsigned long g3d_clk_regs[] __initconst = {
++	G3D_PLL_LOCKTIME,
++	G3D_SWITCH_MUX,
++	G3D_PLL_CTRL,
++	G3D_BUSD_MUX,
++	G3D_BUSP_DIV,
++	G3D_AGPU_GATE,
++};
++
++static const struct samsung_pll_clock g3d_pll_clks[] __initconst = {
++	PLL(pll_1052x, CLK_FOUT_G3D_PLL, "fout_g3d_pll", "oscclk",
++	    G3D_PLL_LOCKTIME, G3D_PLL_CTRL, NULL),
++};
++
++PNAME(mout_g3d_switch_p) = { "oscclk", "dout_cmu_g3d_switch" };
++PNAME(mout_g3d_busd_p) = { "fout_g3d_pll", "mout_g3d_switch" };
++
++static const struct samsung_mux_clock g3d_mux_clks[] __initconst = {
++	MUX(CLK_MOUT_G3D_SWITCH, "mout_g3d_switch", mout_g3d_switch_p,
++	    G3D_SWITCH_MUX, 4, 1),
++	MUX(CLK_MOUT_G3D_BUSD, "mout_g3d_busd", mout_g3d_busd_p,
++	    G3D_BUSD_MUX, 0, 1),
++};
++
++static const struct samsung_div_clock g3d_div_clks[] __initconst = {
++	DIV(CLK_DOUT_G3D_BUSP, "dout_g3d_busp", "mout_g3d_busd",
++	    G3D_BUSP_DIV, 0, 3),
++};
++
++static const struct samsung_gate_clock g3d_gate_clks[] __initconst = {
++	GATE(CLK_GOUT_G3D_AGPU, "gout_g3d_agpu", "mout_g3d_busd",
++	     G3D_AGPU_GATE, 21, 0, 0),
++};
++
++static const struct samsung_cmu_info g3d_cmu_info __initconst = {
++	.pll_clks		= g3d_pll_clks,
++	.nr_pll_clks		= ARRAY_SIZE(g3d_pll_clks),
++	.mux_clks		= g3d_mux_clks,
++	.nr_mux_clks		= ARRAY_SIZE(g3d_mux_clks),
++	.div_clks		= g3d_div_clks,
++	.nr_div_clks		= ARRAY_SIZE(g3d_div_clks),
++	.gate_clks		= g3d_gate_clks,
++	.nr_gate_clks		= ARRAY_SIZE(g3d_gate_clks),
++	.nr_clk_ids		= CLK_GOUT_G3D_AGPU + 1,
++	.clk_regs		= g3d_clk_regs,
++	.nr_clk_regs		= ARRAY_SIZE(g3d_clk_regs),
++	.clk_name		= "switch",
++};
++
++static int __init exynos8895_g3d_check_power(struct device *dev)
++{
++	struct regmap *pmu;
++	unsigned int status;
++	int ret;
++
++	pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
++	if (IS_ERR(pmu))
++		return PTR_ERR(pmu);
++
++	ret = regmap_read(pmu, G3D_PMU_STATUS, &status);
++	if (ret)
++		return ret;
++
++	return (status & G3D_PMU_ON) == G3D_PMU_ON ? 0 : -ENODEV;
++}
++
+ static int __init exynos8895_cmu_probe(struct platform_device *pdev)
+ {
+ 	const struct samsung_cmu_info *info;
+ 	struct device *dev = &pdev->dev;
++	int ret;
+ 
+ 	info = of_device_get_match_data(dev);
++	if (info == &g3d_cmu_info) {
++		ret = exynos8895_g3d_check_power(dev);
++		if (ret)
++			return dev_err_probe(dev, ret, "G3D power domain unavailable\n");
++	}
+ 	exynos_arm64_register_cmu(dev, dev->of_node, info);
+ 
+ 	return 0;
+@@ -2783,6 +2867,9 @@
+ 		.compatible = "samsung,exynos8895-cmu-fsys1",
+ 		.data = &fsys1_cmu_info,
+ 	}, {
++		.compatible = "samsung,exynos8895-cmu-g3d",
++		.data = &g3d_cmu_info,
++	}, {
+ 		.compatible = "samsung,exynos8895-cmu-peric0",
+ 		.data = &peric0_cmu_info,
+ 	}, {
+diff --git a/include/dt-bindings/clock/samsung,exynos8895.h b/include/dt-bindings/clock/samsung,exynos8895.h
+--- a/include/dt-bindings/clock/samsung,exynos8895.h
++++ b/include/dt-bindings/clock/samsung,exynos8895.h
+@@ -450,4 +450,11 @@
+ #define CLK_GOUT_PERIC1_USI13_I_SCLK_USI		63
+ #define CLK_GOUT_PERIC1_XIU_P_PERIC1_ACLK		64
+ 
++/* CMU_G3D */
++#define CLK_FOUT_G3D_PLL			1
++#define CLK_MOUT_G3D_SWITCH			2
++#define CLK_MOUT_G3D_BUSD			3
++#define CLK_DOUT_G3D_BUSP			4
++#define CLK_GOUT_G3D_AGPU			5
++
+ #endif /* _DT_BINDINGS_CLOCK_EXYNOS8895_H */
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895.dtsi b/arch/arm64/boot/dts/exynos/exynos8895.dtsi
+--- a/arch/arm64/boot/dts/exynos/exynos8895.dtsi
++++ b/arch/arm64/boot/dts/exynos/exynos8895.dtsi
+@@ -1367,6 +1367,27 @@
+ 			interrupts = <GIC_SPI 103 IRQ_TYPE_LEVEL_HIGH>;
+ 		};
+ 
++		cmu_g3d: clock-controller@13800000 {
++			compatible = "samsung,exynos8895-cmu-g3d";
++			reg = <0x13800000 0x8000>;
++			#clock-cells = <1>;
++			clocks = <&oscclk>, <&cmu_top CLK_DOUT_CMU_G3D_SWITCH>;
++			clock-names = "oscclk", "switch";
++			samsung,pmu = <&pmu_system_controller>;
++			status = "disabled";
++		};
++
++		gpu: gpu@13900000 {
++			compatible = "samsung,exynos8895-mali", "arm,mali-bifrost";
++			reg = <0x13900000 0x5000>;
++			interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>,
++				     <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>;
++			interrupt-names = "job", "mmu", "gpu";
++			clocks = <&cmu_g3d CLK_GOUT_G3D_AGPU>;
++			status = "disabled";
++		};
++
+ 		cmu_top: clock-controller@15a80000 {
+ 			compatible = "samsung,exynos8895-cmu-top";
+ 			reg = <0x15a80000 0x8000>;
+diff --git a/Documentation/devicetree/bindings/clock/samsung,exynos8895-clock.yaml b/Documentation/devicetree/bindings/clock/samsung,exynos8895-clock.yaml
+--- a/Documentation/devicetree/bindings/clock/samsung,exynos8895-clock.yaml
++++ b/Documentation/devicetree/bindings/clock/samsung,exynos8895-clock.yaml
+@@ -32,6 +32,7 @@
+     enum:
+       - samsung,exynos8895-cmu-fsys0
+       - samsung,exynos8895-cmu-fsys1
++      - samsung,exynos8895-cmu-g3d
+       - samsung,exynos8895-cmu-peric0
+       - samsung,exynos8895-cmu-peric1
+       - samsung,exynos8895-cmu-peris
+@@ -44,6 +45,10 @@
+   clock-names:
+     minItems: 1
+     maxItems: 16
++
++  samsung,pmu:
++    $ref: /schemas/types.yaml#/definitions/phandle
++    description: PMU that reports the G3D domain power state.
+ 
+   "#clock-cells":
+     const: 1
+@@ -59,6 +64,24 @@
+   - "#clock-cells"
+ 
+ allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: samsung,exynos8895-cmu-g3d
++    then:
++      properties:
++        clocks:
++          items:
++            - description: External reference clock (26 MHz)
++            - description: G3D switch clock from CMU_TOP
++        clock-names:
++          items:
++            - const: oscclk
++            - const: switch
++      required:
++        - samsung,pmu
++
+   - if:
+       properties:
+         compatible:
+diff --git a/Documentation/devicetree/bindings/gpu/arm,mali-bifrost.yaml b/Documentation/devicetree/bindings/gpu/arm,mali-bifrost.yaml
+--- a/Documentation/devicetree/bindings/gpu/arm,mali-bifrost.yaml
++++ b/Documentation/devicetree/bindings/gpu/arm,mali-bifrost.yaml
+@@ -32,6 +32,7 @@
+               - rockchip,rk3562-mali
+               - rockchip,rk3568-mali
+               - rockchip,rk3576-mali
++              - samsung,exynos8895-mali
+           - const: arm,mali-bifrost # Mali Bifrost GPU model/revision is fully discoverable
+       - items:
+           - enum:

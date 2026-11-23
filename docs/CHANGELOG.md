@@ -1871,3 +1871,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Add a shutdown-only Exynos8895 guard against accessing the host's
   clock-stop registers after link-off and PHY isolation.
+
+## 2026-11-23 — Exynos8895 UFS and G3D hardware trial
+
+- Add an opt-in G3D clock snapshot to the loader and boot log. The
+  loader checks that the power domain is on before reading clocks.
+- Add the opt-in SM-G955N G3D clock and Mali device-tree proposal.
+- Add a read-only Mesa shader rendering and pixel readback diagnostic.
