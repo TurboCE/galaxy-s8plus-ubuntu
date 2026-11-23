@@ -4048,3 +4048,30 @@ The image's module dependency index lists Broadcom Wi-Fi, DECON,
 and the native ABOX modules. The R98 kernel builds Panfrost in.
 The host suite ran 167 tests with 9 skipped and no failures. The
 image and its validation receipt are private build artifacts.
+
+### R98 boot on the existing Ubuntu filesystem
+
+After USB and Wi-Fi returned, the handset was confirmed to be running R97.
+The R98 modules were staged over authenticated SSH. The handset returned
+to TWRP automatically, and fresh recovery backups were verified before
+the BOOT-only installation. The BOOT image passed readback verification.
+The existing Ubuntu filesystem was kept in place.
+
+R98 reached the running system state with GDM and NetworkManager active.
+USB Ethernet SSH and the dedicated USB serial device returned. Wi-Fi
+reconnected automatically. With traffic routed over Wi-Fi, Ubuntu fetched
+19.3 MB during apt update and completed an apt upgrade simulation. GDM
+started GNOME Shell on Wayland, enabled atomic modesetting on DECON, and
+opened the Panfrost render node. The error-priority kernel journal contained
+no entries during this bounded run.
+
+The PipeWire duplex test completed playback and captured 462,848 frames,
+with 62 samples where both ALSA hardware pointers progressed. The captured
+signal did not show a repeatable match to the playback tones. Physical
+speaker audibility and intelligible microphone pickup remain outstanding.
+
+The installed power-key script matched the reviewed wake-guard source,
+its unit started successfully, and all 11 host regression tests passed.
+This run stopped at the GDM greeter. Touch login, desktop scanout buffer
+identity, suspend display wake and rotation were not exercised. No IIO
+sensor devices were exposed.

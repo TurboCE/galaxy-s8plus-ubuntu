@@ -2146,3 +2146,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   power-key and suspend services.
 - Accept the reviewed modules for the matching SM-G955N kernel release.
   Check their release and regenerate module dependency metadata in the image.
+
+### Linux 6.18 R98 handset deployment
+
+- Installed and readback-verified the R98 BOOT image from TWRP after
+  staging the matching modules on the existing Ubuntu filesystem.
+- Deployed the pending power-key wake guard and verified service startup.
