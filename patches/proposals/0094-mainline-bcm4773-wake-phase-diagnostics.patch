@@ -1,0 +1,49 @@
+Subject: [PATCH] iio: distinguish Exynos8895 BCM4773 wake phases
+
+Report the response edge and verify the request GPIO readback.
+
+diff --git a/drivers/iio/common/g955n-bcm4773-wake.c b/drivers/iio/common/g955n-bcm4773-wake.c
+--- a/drivers/iio/common/g955n-bcm4773-wake.c
++++ b/drivers/iio/common/g955n-bcm4773-wake.c
+@@ -21,6 +21,7 @@
+ 	struct gpio_desc *request, *response;
+ 	struct gpio_desc *enable = NULL;
+ 	struct regulator *supply;
++	const char *phase = "revision 10 power-enable";
+ 	int ret, level, release, retries;
+ 
+ 	if (!of_machine_is_compatible("samsung,dream2lteks") ||
+@@ -49,6 +50,7 @@
+ 		}
+ 	}
+ 	msleep(120);
++	phase = "response idle-low";
+ 	ret = read_poll_timeout(gpiod_get_value_cansleep, level, level <= 0,
+ 				1000, 100000, false, response);
+ 	if (ret || level < 0) {
+@@ -56,8 +58,16 @@
+ 		goto power_off;
+ 	}
+ 
++	phase = "response to wake request";
+ 	for (retries = 0; retries < 4; retries++) {
+ 		gpiod_set_value_cansleep(request, 1);
++		level = gpiod_get_value_cansleep(request);
++		if (level != 1) {
++			phase = "request output readback";
++			ret = level < 0 ? level : -EIO;
++			gpiod_set_value_cansleep(request, 0);
++			break;
++		}
+ 		ret = read_poll_timeout(gpiod_get_value_cansleep, level, level != 0,
+ 					1000, 22000, false, response);
+ 		gpiod_set_value_cansleep(request, 0);
+@@ -74,7 +84,7 @@
+ 	release = regulator_disable(supply);
+ 	if (release)
+ 		return dev_err_probe(dev, release, "cannot release VDDIO\n");
+-	return ret ? dev_err_probe(dev, ret, "BCM4773 GPIO wake handshake failed\n") : 0;
++	return ret ? dev_err_probe(dev, ret, "BCM4773 wake failed at %s\n", phase) : 0;
+ }
+ 
+ static const struct of_device_id g955n_bcm4773_wake_match[] = {

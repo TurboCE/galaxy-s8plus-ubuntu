@@ -1,0 +1,90 @@
+Subject: [PATCH] iio: check a BCM4773 SSI header after wake
+
+The Samsung wake handshake accepts an already asserted
+response. Verify the SSI stream header before treating that
+level as a device response, without sending a write command.
+
+diff --git a/drivers/iio/common/g955n-bcm4773-wake.c b/drivers/iio/common/g955n-bcm4773-wake.c
+--- a/drivers/iio/common/g955n-bcm4773-wake.c
++++ b/drivers/iio/common/g955n-bcm4773-wake.c
+@@ -7,6 +7,8 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/spi/spi.h>
+ 
++#define BCM4773_SSI_READ_HD 0x20
++
+ static bool rev10_power;
+ module_param(rev10_power, bool, 0400);
+ MODULE_PARM_DESC(rev10_power, "Apply the verified rev10 hub enable pin");
+@@ -15,6 +17,32 @@
+  * Qualify the board power and GPIO handshake before attaching a BBD client.
+  * The diagnostic releases its supply and leaves the MCU request inactive.
+  */
++static int g955n_bcm4773_read_header(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct spi_transfer transfer = { .len = 2, .bits_per_word = 8 };
++	u8 *tx, *rx;
++	int ret;
++
++	tx = devm_kzalloc(dev, transfer.len, GFP_KERNEL);
++	rx = devm_kzalloc(dev, transfer.len, GFP_KERNEL);
++	if (!tx || !rx)
++		return -ENOMEM;
++
++	tx[0] = BCM4773_SSI_READ_HD;
++	transfer.tx_buf = tx;
++	transfer.rx_buf = rx;
++	ret = spi_sync_transfer(spi, &transfer, 1);
++	if (ret)
++		return ret;
++
++	dev_info(dev, "BCM4773 SSI header status=0x%02x length=%u\n", rx[0], rx[1]);
++	if (rx[0])
++		return -EPROTO;
++	/* A zero header alone could be an undriven data line. */
++	return rx[1] ? 0 : -ENODATA;
++}
++
+ static int g955n_bcm4773_wake_probe(struct spi_device *spi)
+ {
+ 	struct device *dev = &spi->dev;
+@@ -50,14 +78,7 @@
+ 		}
+ 	}
+ 	msleep(120);
+-	phase = "response idle-low";
+-	ret = read_poll_timeout(gpiod_get_value_cansleep, level, level <= 0,
+-				1000, 100000, false, response);
+-	if (ret || level < 0) {
+-		ret = ret ? ret : level;
+-		goto power_off;
+-	}
+-
++	/* Samsung's wake sequence permits a response that is already high. */
+ 	phase = "response to wake request";
+ 	for (retries = 0; retries < 4; retries++) {
+ 		gpiod_set_value_cansleep(request, 1);
+@@ -70,15 +91,19 @@
+ 		}
+ 		ret = read_poll_timeout(gpiod_get_value_cansleep, level, level != 0,
+ 					1000, 22000, false, response);
++		if (!ret) {
++			phase = "SSI header";
++			ret = level < 0 ? level : g955n_bcm4773_read_header(spi);
++			gpiod_set_value_cansleep(request, 0);
++			break;
++		}
+ 		gpiod_set_value_cansleep(request, 0);
+ 		if (ret != -ETIMEDOUT)
+ 			break;
+ 		usleep_range(1000, 2000);
+ 	}
+-	if (!ret && level < 0)
+-		ret = level;
+ 	if (!ret)
+-		dev_info(dev, "BCM4773 VDDIO and wake request/response verified\n");
++		dev_info(dev, "BCM4773 wake and SSI header received\n");
+ 
+ power_off:
+ 	release = regulator_disable(supply);

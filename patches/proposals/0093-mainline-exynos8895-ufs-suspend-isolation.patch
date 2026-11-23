@@ -1,0 +1,76 @@
+Subject: [PATCH] ufs: exynos: defer Exynos8895 HCI access until PHY resume
+
+R70 aborts at HCI_CLKSTOP_CTRL after Hibern8 and PHY isolation.
+Keep the generic clock transitions and defer vendor register access
+until both the host clocks and PHY are available again.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -1054,6 +1054,14 @@
+ 	if (!ufs)
+ 		return 0;
+ 
++	/*
++	 * The HCI windows are inaccessible while the Exynos8895 PHY is
++	 * isolated. The core still switches its CCF clocks normally.
++	 * Restore the vendor gates from exynos_ufs_resume after the PHY.
++	 */
++	if (ufs->drv_data->native_hibern8_status && ufs->phy_suspended)
++		return 0;
++
+ 	if (on && status == PRE_CHANGE) {
+ 		if (ufs->opts & EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL)
+ 			exynos_ufs_disable_auto_ctrl_hcc(ufs);
+@@ -1817,8 +1825,15 @@
+ 	if (ufs->drv_data->suspend)
+ 		ufs->drv_data->suspend(ufs);
+ 
+-	if (!ufshcd_is_link_active(hba))
+-		phy_power_off(ufs->phy);
++	if (!ufshcd_is_link_active(hba)) {
++		int ret = phy_power_off(ufs->phy);
++
++		if (ufs->drv_data->native_hibern8_status) {
++			if (ret)
++				return ret;
++			ufs->phy_suspended = true;
++		}
++	}
+ 
+ 	return 0;
+ }
+@@ -1827,8 +1842,20 @@
+ {
+ 	struct exynos_ufs *ufs = ufshcd_get_variant(hba);
+ 
+-	if (!ufshcd_is_link_active(hba))
+-		phy_power_on(ufs->phy);
++	if (!ufs->drv_data->native_hibern8_status) {
++		if (!ufshcd_is_link_active(hba))
++			phy_power_on(ufs->phy);
++	} else if (ufs->phy_suspended) {
++		int ret = phy_power_on(ufs->phy);
++
++		if (ret)
++			return ret;
++		ufs->phy_suspended = false;
++
++		if (ufs->opts & EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL)
++			exynos_ufs_disable_auto_ctrl_hcc(ufs);
++		exynos_ufs_ungate_clks(ufs);
++	}
+ 
+ 	exynos_ufs_config_smu(ufs);
+ 	exynos_ufs_fmp_resume(hba);
+diff --git a/drivers/ufs/host/ufs-exynos.h b/drivers/ufs/host/ufs-exynos.h
+--- a/drivers/ufs/host/ufs-exynos.h
++++ b/drivers/ufs/host/ufs-exynos.h
+@@ -215,6 +215,7 @@
+ };
+ 
+ struct exynos_ufs {
++	bool phy_suspended;
+ 	struct ufs_hba *hba;
+ 	struct phy *phy;
+ 	void __iomem *reg_hci;

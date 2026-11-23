@@ -318,6 +318,53 @@ BindReadOnlyPaths=-/usr/share/xsessions/ubuntu-xorg.desktop:/usr/share/xsessions
 EOF
 }
 
+prepare_decon_suspend() {
+    local work=/run/g955n-trial
+    local units=/run/systemd/system/systemd-suspend.service.d
+
+    "$BB" mkdir -p "$work" "$units" || return 1
+    "$BB" cat > "$work/wlan-suspend" <<'EOF' || return 1
+#!/bin/sh
+set -eu
+pci=0000:01:00.0
+device=/sys/bus/pci/devices/$pci
+driver=/sys/bus/pci/drivers/brcmfmac
+marker=/run/g955n-trial/wlan-suspend.rebind
+
+case "$1" in
+    pre)
+        [ -e "$device/driver" ] || exit 0
+        [ "$(cat "$device/vendor")" = 0x14e4 ] &&
+        [ "$(cat "$device/device")" = 0x441f ] &&
+        [ "$(readlink -f "$device/driver")" = "$driver" ] || exit 1
+        # BCM4361 firmware does not acknowledge the D3 mailbox request.
+        touch "$marker"
+        printf '%s' "$pci" > "$driver/unbind"
+        ;;
+    post)
+        [ -f "$marker" ] || exit 0
+        if [ ! -e "$device/driver" ]; then
+            printf '%s' "$pci" > "$driver/bind"
+        fi
+        [ "$(readlink -f "$device/driver")" = "$driver" ] || exit 1
+        rm -f "$marker"
+        ;;
+    *) exit 2 ;;
+esac
+EOF
+    "$BB" cat > "$units/70-g955n-decon-suspend.conf" <<'EOF'
+[Unit]
+# Replace the downstream Samsung 4.4 device-tree conditions.
+ConditionPathExists=
+ConditionPathExists=/sys/bus/platform/devices/12860000.decon-handoff/drm
+ConditionPathExists=/sys/power/state
+
+[Service]
+ExecStartPre=/bin/sh /run/g955n-trial/wlan-suspend pre
+ExecStopPost=/bin/sh /run/g955n-trial/wlan-suspend post
+EOF
+}
+
 prepare_ubuntu_trial_return() {
     "$BB" mkdir -p /run/systemd/system/timers.target.wants /run/g955n-trial || return 1
     "$BB" cat > /run/g955n-trial/check <<'EOF' || return 1
@@ -578,6 +625,9 @@ case " $("$BB" cat /proc/cmdline) " in
 esac
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.desktop=1 "*) prepare_ubuntu_desktop || log 'Cannot stage Ubuntu framebuffer desktop' ;;
+esac
+case " $("$BB" cat /proc/cmdline) " in
+    *" g955n.desktop_suspend=1 "*) prepare_decon_suspend || log 'Cannot stage DECON suspend policy' ;;
 esac
 case " $("$BB" cat /proc/cmdline) " in
     *" g955n.transport_evidence=1 "*) prepare_transport_evidence || log 'Cannot stage transport evidence' ;;

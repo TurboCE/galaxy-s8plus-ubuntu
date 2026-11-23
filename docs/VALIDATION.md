@@ -3469,3 +3469,41 @@ guarded by the 4.4-specific WLAN and display properties. A direct
 RTC-timed freeze then interrupted both USB and Wi-Fi. A completed
 resume of that boot could not be verified. The systemd guard remains
 in place.
+
+### R70 through R72 suspend and touch login
+
+After reboot, the archived R70 ramoops trace showed s2idle entry,
+UniPro Hibern8 completion, then a synchronous external abort in
+`exynos_ufs_ctrl_clkstop`, called by `exynos_ufs_setup_clocks`.
+The trace had partial corruption but preserved the function names
+and call order. R71 deferred accesses to the vendor HCI registers
+while the Exynos8895 PHY was isolated. The host completed suspend
+unwind on the same boot after the next device reported a failure.
+
+R71 independently reproduced a BCM4361 firmware timeout waiting
+for a PCI D3 reply. After temporarily releasing that driver, a
+14-second RTC-timed freeze completed on the same boot. The stock
+systemd suspend path also completed with the same pre/post policy.
+NetworkManager reconnected without user input. R72 staged the
+opt-in policy at boot with `g955n.desktop_suspend=1`. Two normal `systemctl suspend`
+requests completed about 17 and 19 seconds of s2idle with RTC wake
+on the same boot. GNOME, USB Ethernet and Wi-Fi remained available.
+After the second resume, DECON displayed the GNOME lock screen.
+The stock screen keyboard accepted touch input and returned the
+same Wayland session to the desktop. Hardware button wake was not
+exercised.
+
+On R70, R71 and R72 the stock GDM account picker accepted a touch.
+Swiping up from the bottom screen edge opened the stock screen
+keyboard. The test opened the numeric layout and submitted the
+existing credential using touchscreen events only. PAM started
+the ordinary Ubuntu Wayland session on the DECON KMS card and
+Panfrost render node. One Panfrost `JOB_BUS_FAULT` was logged on
+R71 after login despite AFBC being disabled.
+
+The BCM4773 response was already high before the wake request.
+R72 followed the downstream wake sequence and checked one SSI
+read header. The header was `ff ff`, which did not qualify as
+a device response. No IIO sensor data was registered. The three
+Calliope firmware files remained present, and no ALSA audio card
+was exposed.

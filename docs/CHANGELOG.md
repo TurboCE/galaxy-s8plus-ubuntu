@@ -1995,3 +1995,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   with the distribution Mesa Panfrost renderer and an Xorg fallback.
 - Add an optional Mesa AFBC isolation setting and a kernel fragment
   for input and suspend testing.
+
+### R72 suspend recovery and stock touch login
+
+- Defer Exynos8895 UFS vendor register access while the PHY is isolated.
+- Stage the R72 suspend policy for the verified DECON configuration.
+  Release the BCM4361 driver before sleep and bind it on resume so
+  NetworkManager can reconnect.
+- Verify stock GDM touch authentication via the bottom-edge keyboard
+  gesture and distinguish the BCM4773 GPIO and SSI probe phases.
