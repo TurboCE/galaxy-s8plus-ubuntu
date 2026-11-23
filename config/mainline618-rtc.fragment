@@ -1,3 +1,5 @@
 CONFIG_RTC_CLASS=y
 CONFIG_RTC_DRV_S3C=y
 # CONFIG_RTC_HCTOSYS is not set
+# Expose pm_wakeup_irq to the post-suspend display wake hook.
+CONFIG_PM_DEBUG=y

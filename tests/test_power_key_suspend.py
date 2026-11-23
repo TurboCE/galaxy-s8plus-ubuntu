@@ -12,23 +12,36 @@ m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 
 class PowerKeySuspendTests(unittest.TestCase):
-    def test_decon_panel_follows_connector_blanking(self):
-        m.panel_state.cache_clear()
-        self.addCleanup(m.panel_state.cache_clear)
+    def test_late_decon_connector_takes_over_panel_state(self):
         with tempfile.TemporaryDirectory() as directory:
             drm = Path(directory)
-            connector = drm / 'card2-DSI-1'
-            device = connector / 'device/device'
-            device.mkdir(parents=True)
-            driver = drm / 'g955n-decon-handoff'
-            driver.mkdir()
-            (device / 'driver').symlink_to(driver)
-            enabled = connector / 'enabled'
-            with patch.object(m, 'Path', return_value=drm):
-                enabled.write_text('enabled\n')
+            fallback = drm / 'runtime_status'
+            fallback.write_text('active\n')
+            with patch.object(m, 'Path', return_value=drm), \
+                 patch.object(m, 'PANEL_RUNTIME', fallback):
                 self.assertTrue(m.panel_is_on())
+                connector = drm / 'card2-DSI-1'
+                device = connector / 'device/device'
+                device.mkdir(parents=True)
+                driver = drm / 'g955n-decon-handoff'
+                driver.mkdir()
+                (device / 'driver').symlink_to(driver)
+                enabled = connector / 'enabled'
                 enabled.write_text('disabled\n')
                 self.assertFalse(m.panel_is_on())
+                enabled.write_text('enabled\n')
+                self.assertTrue(m.panel_is_on())
+
+    def test_panel_read_failure_restores_display_without_requesting_sleep(self):
+        with patch.object(m, 'lock_before_sleep'), \
+             patch.object(m, 'panel_is_on', side_effect=FileNotFoundError('panel')), \
+             patch.object(m, 'read_command') as command, \
+             patch.object(m, 'wake_display') as wake:
+            with self.assertRaisesRegex(FileNotFoundError, 'panel'):
+                m.suspend_session(('c4', 'wayland', ['user']))
+        self.assertEqual(command.call_count, 1)
+        self.assertEqual(command.call_args.args[-3:], ('PowerSaveMode', 'i', '3'))
+        wake.assert_called_once()
 
     def test_wake_resets_idle_before_powering_panel(self):
         calls=[]

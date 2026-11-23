@@ -2051,3 +2051,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   hardware address space.
 - Roll back incomplete GPU page mappings, release failed heap chunk
   resources and report the mapping error in the MMU fault log.
+
+### 6.18 R85 display wake and wake-source reporting
+
+- Recheck the DECON connector if it appears after the power-key service
+  begins, and restore the display if the blanking check or suspend
+  request fails.
+- Expose the kernel wake IRQ and recognize the mainline gpio-keys
+  label so the sleep hook can request display wake after a power-key
+  resume even if the key was released before evdev delivered it.

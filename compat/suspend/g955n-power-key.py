@@ -2,7 +2,6 @@
 """Suspend, wake, or ask to power off from the handset power key."""
 
 import fcntl
-from functools import cache
 from pathlib import Path
 import pwd
 import select
@@ -110,29 +109,27 @@ def suspend_session(session):
     # available, before our explicit blanking barrier.
     try:
         lock_before_sleep(session)
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        wake_display(session)
-        raise
-    if session_type == 'x11':
-        # Blank while the graphical session can still process X requests.
-        # systemd's later sleep hooks run with user sessions frozen.
-        env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
-        if not any(value.startswith('DISPLAY=') for value in env):
-            raise RuntimeError('No active display to blank before suspend')
-        read_command(*run, *env, '/usr/bin/xset', 'dpms', 'force', 'off')
-    else:
-        read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
-                     MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '3')
-    deadline = time.monotonic() + 2
-    while panel_is_on():
-        if time.monotonic() >= deadline:
-            wake_display(session)
-            raise RuntimeError('Panel did not blank; suspend was not requested')
-        time.sleep(.05)
-    try:
+        if session_type == 'x11':
+            # Blank before systemd freezes the graphical session.
+            env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
+            if not any(value.startswith('DISPLAY=') for value in env):
+                raise RuntimeError('No active display to blank before suspend')
+            read_command(*run, *env, '/usr/bin/xset', 'dpms', 'force', 'off')
+        else:
+            read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
+                         MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '3')
+        deadline = time.monotonic() + 2
+        while panel_is_on():
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Panel did not blank; suspend was not requested')
+            time.sleep(.05)
         read_command(*LOGIND_SUSPEND, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        wake_display(session)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        try:
+            wake_display(session)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            print(f'Could not restore the display after failed suspend ({type(error).__name__})',
+                  flush=True)
         raise
 
 
@@ -151,7 +148,6 @@ def open_power_dialog(session):
     return dialog
 
 
-@cache
 def panel_state():
     for connector in Path('/sys/class/drm').glob('card*-DSI-1'):
         if (connector / 'device/device/driver').resolve().name == 'g955n-decon-handoff':

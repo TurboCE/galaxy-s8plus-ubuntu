@@ -3713,3 +3713,45 @@ behind and only the mapped range was flushed. Project tests reported
 R84 was not installed or tested on the phone. The Mac still could not
 reach the SM-G955N over USB or Wi-Fi after the R82 s2idle test.
 The cause of the earlier runtime GPU fault remains unverified.
+
+### R84 Panfrost, Wayland and power-key qualification
+
+R82 reappeared on USB and Wi-Fi. The journal recorded a same-boot
+resume after the earlier interval with no transports. The wake source
+was unavailable in this kernel.
+
+Applied R84 after verifying the recovery backups and BOOT readback.
+USB serial and Wi-Fi returned. The standard Wayland greeter accepted
+the injected touchscreen sequence and screen keyboard. The desktop
+opened the Terminal, moved it by touchscreen drag, and showed the
+new position in the DECON scanout. GNOME Shell held the DECON and
+Panfrost DRM nodes. Strict APT metadata refresh succeeded over the
+Wi-Fi default route and the simulated upgrade reported no pending
+packages.
+
+The installed power-key unit still used the older GPIO device name.
+Installing the tracked unit restored service activation. An injected
+short press entered s2idle, the prearmed RTC resumed the same boot,
+and USB and Wi-Fi returned. A separate injected press woke the
+already-resumed panel. The touchscreen and screen keyboard unlocked
+the Wayland session. A long press opened the shutdown dialog, which
+was cancelled by touch. These tests did not exercise physical
+power-button wake from s2idle.
+
+R84 still recorded a Panfrost DATA_INVALID_FAULT from GNOME Shell
+after resume. Bluetooth firmware and Wi-Fi roaming/P2P messages
+were also present in the kernel log. No ALSA card or IIO sensor
+device was enumerated.
+
+### R85 wake IRQ reporting
+
+Built and applied the ARM64 R85 image with the same Panfrost changes
+and PM sleep debugging enabled. The power-key service started from
+the installed unit at boot. Wayland screen-keyboard login and USB
+serial worked. An injected short press started s2idle. The prearmed
+RTC resumed the same boot in about 27 seconds and the system sleep
+hook identified IRQ 49 as the RTC alarm. USB serial and Wi-Fi
+returned, the explicit display wake command lit the panel and a
+strict APT update succeeded via Wi-Fi. The host wake-hook test
+matched both power-key labels and ignored volume and RTC labels.
+Physical power-button wake still needs a separate test.
