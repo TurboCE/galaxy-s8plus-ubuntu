@@ -3441,3 +3441,31 @@ read-only SYSTEM partition, staged them in Ubuntu's firmware directory
 and compared each file against its source. No ALSA card was exposed.
 The BCM4773 revision 10 electrical wake test again timed out, with
 no IIO measurements available.
+
+### R70 stock Wayland, touch and suspend trial
+
+With the R70 boot options `g955n.desktop=1 g955n.desktop_accel=1
+g955n.desktop_wayland=1 g955n.panfrost_noafbc=1`, the handset
+automatically registered DECON before GDM started. The Ubuntu account
+session preference was changed to the standard Ubuntu Wayland session
+through AccountsService. Both the Wayland greeter and the authenticated
+Wayland user session opened the DECON KMS card and Panfrost render
+node. The active DRM CRTC used the fixed 1440×2960 DSI mode.
+
+An injected event through the stmfts input device selected the account
+and brought up the password field. The screen keyboard toggle appeared
+enabled, but the keyboard did not appear when the field was touched.
+Authentication completed through a temporary uinput keyboard. After
+login, a touchscreen drag moved the Terminal window. Snapshots of the
+active KMS buffer confirmed its new position, and sampling the CRTC
+showed multiple framebuffer IDs during the drag. No GPU job fault was
+seen in the recorded R70 login and drag interval with AFBC disabled.
+Longer testing is required to determine whether AFBC triggered the
+R69 faults.
+
+The R70 kernel exposed freeze and s2idle, and the RTC alarm was armed
+and observed to expire while awake. The systemd suspend job remained
+guarded by the 4.4-specific WLAN and display properties. A direct
+RTC-timed freeze then interrupted both USB and Wi-Fi. A completed
+resume of that boot could not be verified. The systemd guard remains
+in place.

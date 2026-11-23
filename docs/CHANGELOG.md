@@ -1988,3 +1988,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   and exercise native KMS with Mesa's render-only GBM buffer path.
 - Provision the matched ABOX firmware from the handset's read-only
   Samsung SYSTEM partition into Ubuntu's standard firmware directory.
+
+### R70 Ubuntu Wayland boot
+
+- Add a boot option for standard GDM and GNOME Wayland on DECON DRM/KMS
+  with the distribution Mesa Panfrost renderer and an Xorg fallback.
+- Add an optional Mesa AFBC isolation setting and a kernel fragment
+  for input and suspend testing.

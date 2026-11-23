@@ -196,19 +196,39 @@ EOF
         /run/systemd/system/multi-user.target.wants/g955n-transport-evidence.service
 }
 
-# Keep the board's Xorg session configuration scoped to GDM.
+# Use standard GDM and Mutter configuration for the board graphics devices.
+prepare_decon_wayland() {
+    local rules=/run/udev/rules.d
+    local node
+
+    "$BB" chroot /newroot /usr/sbin/modprobe g955n-decon-handoff native_kms=1 ||
+        return 1
+    for node in /sys/bus/platform/devices/12860000.decon-handoff/drm/card[0-9]*; do
+        [ -c "/dev/dri/${node##*/}" ] && break
+    done
+    [ -c "/dev/dri/${node##*/}" ] || return 1
+    "$BB" mkdir -p "$rules" || return 1
+    "$BB" cat > "$rules/71-g955n-kms.rules" <<'EOF'
+SUBSYSTEM=="drm", ENV{DEVTYPE}=="drm_minor", KERNEL=="card[0-9]*", KERNELS=="cc000000.framebuffer", TAG+="mutter-device-ignore"
+SUBSYSTEM=="drm", ENV{DEVTYPE}=="drm_minor", KERNEL=="card[0-9]*", KERNELS=="12860000.decon-handoff", TAG+="mutter-device-preferred-primary"
+EOF
+}
 prepare_ubuntu_desktop() {
     local desktop=/run/g955n-mainline-desktop
     local units=/run/systemd/system/gdm.service.d
     local card=
     local node
+    local wayland=false
+    local session=ubuntu-xorg.desktop
+    local mesa_options=
+    local cmdline=" $("$BB" cat /proc/cmdline) "
 
     [ -c /dev/fb0 ] || {
         log 'Ubuntu desktop fallback unavailable: no framebuffer device'
         return 1
     }
     "$BB" mkdir -p "$desktop" "$units" || return 1
-    case " $("$BB" cat /proc/cmdline) " in
+    case "$cmdline" in
         *" g955n.desktop_accel=1 "*)
             if [ -r /newroot/usr/lib/aarch64-linux-gnu/dri/exynos_dri.so ]; then
                 for node in /sys/bus/platform/devices/13900000.gpu/drm/renderD*; do
@@ -226,11 +246,21 @@ prepare_ubuntu_desktop() {
             fi
             ;;
     esac
-    "$BB" cat > "$desktop/gdm.conf" <<'EOF' || return 1
+    case "$cmdline" in
+        *" g955n.desktop_wayland=1 "*)
+            if [ -n "$card" ] && prepare_decon_wayland; then
+                wayland=true
+                session=ubuntu.desktop
+            else
+                log 'DECON KMS unavailable, using the Xorg fallback'
+            fi
+            ;;
+    esac
+    "$BB" cat > "$desktop/gdm.conf" <<EOF || return 1
 [daemon]
-WaylandEnable=false
+WaylandEnable=$wayland
 AutomaticLoginEnable=false
-DefaultSession=ubuntu-xorg.desktop
+DefaultSession=$session
 EOF
     if [ -n "$card" ]; then
         # Match the canonical path of the DRM master fd supplied by logind.
@@ -251,10 +281,21 @@ Section "Screen"
 EndSection
 EOF
         # Ubuntu Mesa's exynos kmsro entry pairs simpledrm with Panfrost.
-        "$BB" cat > "$units/51-g955n-panfrost.conf" <<'EOF' || return 1
-[Service]
-Environment=MESA_LOADER_DRIVER_OVERRIDE=exynos
-EOF
+        case "$cmdline" in
+            *" g955n.panfrost_noafbc=1 "*) mesa_options=PAN_MESA_DEBUG=noafbc ;;
+        esac
+        {
+            printf '[Service]\nEnvironment=MESA_LOADER_DRIVER_OVERRIDE=exynos\n'
+            [ -z "$mesa_options" ] || printf 'Environment=%s\n' "$mesa_options"
+        } > "$units/51-g955n-panfrost.conf" || return 1
+        if [ "$wayland" = true ]; then
+            # The independently started user systemd instance imports environment.d.
+            "$BB" mkdir -p /run/environment.d || return 1
+            {
+                printf 'MESA_LOADER_DRIVER_OVERRIDE=exynos\n'
+                [ -z "$mesa_options" ] || printf '%s\n' "$mesa_options"
+            } > /run/environment.d/51-g955n-panfrost.conf || return 1
+        fi
     else
         "$BB" cat > "$desktop/xorg.conf" <<'EOF' || return 1
 Section "Device"
