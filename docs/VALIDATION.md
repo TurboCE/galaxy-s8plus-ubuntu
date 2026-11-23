@@ -3842,3 +3842,27 @@ listed no card, so speaker playback and microphone capture cannot
 be started on this kernel. Native ABOX PCM/DMA and clock/serializer
 configuration remain necessary. The project suite ran 162 cases
 with 9 skipped and no failures.
+
+### R89 speaker and microphone serializer clock rates
+
+The 4.4 ALSA reference had advanced RDMA0 for the speaker and
+WDMA1 for the primary microphone. Its capture route used UAIF0,
+NSRC0, SPUM ASRC1 and SIFM0. R89 only changes the serializer
+divider operation on the 6.18 path.
+
+On R89 the opt-in trial identified the Exynos8895 ABOX and verified
+both UAIF0 and UAIF4 divider outputs at 1536000 Hz, the bit-clock
+rate for stereo S16_LE at 48000 Hz. The provider restored both
+to their inherited 24576000 Hz rates. This was clock register
+readback while the serializers were idle. No pins or audio signal
+were measured. The MAX98506 and CS47L93 bound, and USB serial
+and Wi-Fi remained available.
+
+The host test exercised the exact divider operations, including
+the 32:1 divider, original-value restoration, refusal while the
+DSP or serializer is active, and a simulated failed write. The
+project suite ran 162 cases with 9 skipped and no failures.
+
+ALSA still listed no card and there was no playback or capture
+PCM to exercise. R89 has no native ABOX PCM/DMA binding or ASoC
+machine routing.

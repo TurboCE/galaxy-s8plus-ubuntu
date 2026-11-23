@@ -2081,3 +2081,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Expose the Samsung-programmed ABOX PLL, AUDIF and both codec
   serializer divider rates through the Common Clock Framework.
 - Keep clock register reads behind the ABOX power-state check.
+
+### 6.18 R89 UAIF bit-clock configuration
+
+- Allow the idle SM-G955N ABOX UAIF0 and UAIF4 dividers to be
+  configured through CCF after checking the ABOX power and clock
+  state, DSP ownership, and serializer enable bits.
+- Add an opt-in trial that verifies and restores the clock rates.

@@ -1,0 +1,262 @@
+Subject: [PATCH] clk: allow programming idle SM-G955N ABOX UAIF dividers
+
+Support rate changes for the microphone and speaker serializers.
+Validate ABOX power, AP ownership, the bus clock and idle serializers
+before writing a divider. Preserve unrelated bits and verify and
+restore the divider on a failed update. Provide an explicit test of
+the 48 kHz stereo S16_LE bit clock that restores the inherited rates.
+
+diff --git a/drivers/soc/samsung/g955n-abox-power-test.c b/drivers/soc/samsung/g955n-abox-power-test.c
+--- a/drivers/soc/samsung/g955n-abox-power-test.c
++++ b/drivers/soc/samsung/g955n-abox-power-test.c
+@@ -2,8 +2,10 @@
+ #include <dt-bindings/clock/samsung,exynos8895-abox.h>
+ #include <linux/bitfield.h>
+ #include <linux/bitops.h>
++#include <linux/clk.h>
+ #include <linux/clk-provider.h>
+ #include <linux/io.h>
++#include <linux/iopoll.h>
+ #include <linux/math64.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
+@@ -27,6 +29,21 @@
+ #define AUDIF_DIV		0x1800
+ #define UAIF0_DIV		0x1828
+ #define UAIF4_DIV		0x1838
++#define ABOX_CA7_RUNNING	BIT(0)
++#define AUD_DIV_BUSY		BIT(16)
++#define ABOX_ACLK_GATE		0x201c
++#define ABOX_GATE_ACTIVE	BIT(21)
++#define ABOX_GATE_MANUAL	BIT(20)
++#define ABOX_GATE_AUTO		BIT(28)
++#define ABOX_IP_INDEX		0x0000
++#define ABOX_HW_ID		0x41424f58
++#define ABOX_UAIF0_CTRL		0x0500
++#define ABOX_UAIF4_CTRL		0x0540
++#define ABOX_UAIF_ENABLE		GENMASK(1, 0)
++
++static bool probe_uaif_clock;
++module_param(probe_uaif_clock, bool, 0400);
++MODULE_PARM_DESC(probe_uaif_clock, "Test and restore idle UAIF0 and UAIF4 dividers");
+ 
+ static bool probe_power;
+ module_param(probe_power, bool, 0400);
+@@ -36,6 +53,8 @@
+ 	struct clk_hw hw;
+ 	struct regmap *pmu;
+ 	void __iomem *cmu;
++	void __iomem *sfr;
++	unsigned int uaif_ctrl;
+ 	unsigned int reg;
+ 	unsigned int mask;
+ };
+@@ -74,24 +93,134 @@
+ 	.recalc_rate = g955n_abox_clock_rate,
+ };
+ 
++static int g955n_abox_uaif_rate_request(struct clk_hw *hw,
++					struct clk_rate_request *req)
++{
++	struct g955n_abox_clk *clock = container_of(hw, struct g955n_abox_clk, hw);
++	unsigned long divisor;
++
++	if (!req->rate || !req->best_parent_rate)
++		return -EINVAL;
++
++	divisor = DIV_ROUND_CLOSEST(req->best_parent_rate, req->rate);
++	divisor = clamp_val(divisor, 1, clock->mask + 1);
++	req->rate = req->best_parent_rate / divisor;
++
++	return 0;
++}
++
++static int g955n_abox_uaif_set_rate(struct clk_hw *hw, unsigned long rate,
++				   unsigned long parent_rate)
++{
++	struct g955n_abox_clk *clock = container_of(hw, struct g955n_abox_clk, hw);
++	unsigned long divisor;
++	unsigned int status;
++	void __iomem *reg = clock->cmu + clock->reg;
++	u32 before, value;
++	int ret;
++
++	if (!rate || !parent_rate)
++		return -EINVAL;
++
++	divisor = DIV_ROUND_CLOSEST(parent_rate, rate);
++	if (!divisor || divisor > clock->mask + 1 || parent_rate / divisor != rate)
++		return -EINVAL;
++
++	ret = regmap_read(clock->pmu, ABOX_STATUS, &status);
++	if (ret || (status & ABOX_LOCAL_PWR) != ABOX_LOCAL_PWR)
++		return ret ?: -EHOSTDOWN;
++
++	ret = regmap_read(clock->pmu, ABOX_CA7_STATUS, &status);
++	if (ret || (status & ABOX_CA7_RUNNING))
++		return ret ?: -EBUSY;
++
++	value = readl(clock->cmu + ABOX_ACLK_GATE);
++	if ((value & ABOX_GATE_MANUAL ? !(value & ABOX_GATE_ACTIVE) :
++	     (value & ABOX_GATE_AUTO)) ||
++	    readl(clock->sfr + ABOX_IP_INDEX) != ABOX_HW_ID)
++		return -ENODEV;
++
++	if (readl(clock->sfr + clock->uaif_ctrl) & ABOX_UAIF_ENABLE)
++		return -EBUSY;
++
++	ret = readl_poll_timeout(reg, before, !(before & AUD_DIV_BUSY), 1, 1000);
++	if (ret)
++		return ret;
++
++	writel((before & ~clock->mask) | (divisor - 1), reg);
++	ret = readl_poll_timeout(reg, value, !(value & AUD_DIV_BUSY), 1, 1000);
++	if (!ret && (value & clock->mask) == divisor - 1)
++		return 0;
++
++	writel(before, reg);
++	if (readl_poll_timeout(reg, value, !(value & AUD_DIV_BUSY), 1, 1000) ||
++	    (value & clock->mask) != (before & clock->mask))
++		pr_err("%s: could not restore divider after failed rate change\n",
++		       clk_hw_get_name(hw));
++
++	return ret ?: -EIO;
++}
++
++static const struct clk_ops g955n_abox_uaif_ops = {
++	.recalc_rate = g955n_abox_clock_rate,
++	.determine_rate = g955n_abox_uaif_rate_request,
++	.set_rate = g955n_abox_uaif_set_rate,
++};
++
++static int g955n_abox_test_uaif(struct device *dev, struct clk_hw *hw)
++{
++	const unsigned long test_rate = 48000 * 2 * 16;
++	struct clk *clk;
++	unsigned long previous, actual;
++	int ret, restore;
++
++	clk = devm_clk_hw_get_clk(dev, hw, NULL);
++	if (IS_ERR(clk))
++		return PTR_ERR(clk);
++
++	previous = clk_get_rate(clk);
++	if (!previous)
++		return -EIO;
++
++	ret = clk_set_rate(clk, test_rate);
++	if (ret)
++		return ret;
++
++	actual = clk_get_rate(clk);
++	restore = clk_set_rate(clk, previous);
++	if (restore)
++		return dev_err_probe(dev, restore, "%s: cannot restore clock\n",
++				     clk_hw_get_name(hw));
++
++	if (actual != test_rate || clk_get_rate(clk) != previous)
++		return -EIO;
++
++	dev_info(dev, "%s tested at %lu Hz and restored to %lu Hz\n",
++		 clk_hw_get_name(hw), actual, previous);
++	return 0;
++}
++
+ static int g955n_abox_register_clocks(struct device *dev, struct regmap *pmu,
+-				    void __iomem *cmu)
++				    void __iomem *cmu, void __iomem *sfr)
+ {
+ 	static const struct {
+ 		const char *name;
+ 		unsigned int reg;
+ 		unsigned int mask;
+ 		unsigned int parent;
++		unsigned int uaif_ctrl;
+ 	} clocks[] = {
+ 		[G955N_ABOX_CLK_PLL] = { "g955n-aud-pll", AUD_PLL_CON0 },
+ 		[G955N_ABOX_CLK_AUDIF] = {
+ 			"g955n-audif", AUDIF_DIV, GENMASK(8, 0), G955N_ABOX_CLK_PLL,
+ 		},
+ 		[G955N_ABOX_CLK_UAIF0] = {
+-			"g955n-uaif0-bclk-div", UAIF0_DIV, GENMASK(4, 0), G955N_ABOX_CLK_AUDIF,
++			"g955n-uaif0-bclk-div", UAIF0_DIV, GENMASK(4, 0),
++			G955N_ABOX_CLK_AUDIF, ABOX_UAIF0_CTRL,
+ 		},
+ 		[G955N_ABOX_CLK_UAIF4] = {
+-			"g955n-uaif4-bclk-div", UAIF4_DIV, GENMASK(4, 0), G955N_ABOX_CLK_AUDIF,
++			"g955n-uaif4-bclk-div", UAIF4_DIV, GENMASK(4, 0),
++			G955N_ABOX_CLK_AUDIF, ABOX_UAIF4_CTRL,
+ 		},
+ 	};
+ 	const struct clk_parent_data oscillator = { .fw_name = "oscclk" };
+@@ -118,6 +247,11 @@
+ 			.num_parents = 1,
+ 		};
+ 
++		if (clocks[i].uaif_ctrl) {
++			init.ops = &g955n_abox_uaif_ops;
++			init.flags |= CLK_SET_RATE_GATE;
++		}
++
+ 		if (i == G955N_ABOX_CLK_PLL) {
+ 			init.parent_data = &oscillator;
+ 		} else {
+@@ -128,6 +262,8 @@
+ 		clock->hw.init = &init;
+ 		clock->pmu = pmu;
+ 		clock->cmu = cmu;
++		clock->sfr = sfr;
++		clock->uaif_ctrl = clocks[i].uaif_ctrl;
+ 		clock->reg = clocks[i].reg;
+ 		clock->mask = clocks[i].mask;
+ 
+@@ -138,6 +274,14 @@
+ 		data->hws[i] = &clock->hw;
+ 	}
+ 
++	if (probe_uaif_clock) {
++		ret = g955n_abox_test_uaif(dev, data->hws[G955N_ABOX_CLK_UAIF0]);
++		if (!ret)
++			ret = g955n_abox_test_uaif(dev, data->hws[G955N_ABOX_CLK_UAIF4]);
++		if (ret)
++			return dev_err_probe(dev, ret, "idle UAIF clock test failed\n");
++	}
++
+ 	data->num = ARRAY_SIZE(clocks);
+ 	ret = devm_of_clk_add_hw_provider(dev, of_clk_hw_onecell_get, data);
+ 	if (ret)
+@@ -162,7 +306,7 @@
+ static int g955n_abox_power_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+-	void __iomem *cmu;
++	void __iomem *cmu, *sfr;
+ 	struct regmap *pmu;
+ 	unsigned int status, ca7, option;
+ 	int ret, off;
+@@ -186,7 +330,11 @@
+ 		dev_info(dev, "inherited ABOX clocks: PLL=%#x AUDIF=%#x UAIF0=%#x\n",
+ 			 readl(cmu + AUD_PLL_CON0), readl(cmu + AUDIF_DIV),
+ 			 readl(cmu + UAIF0_DIV));
+-		return g955n_abox_register_clocks(dev, pmu, cmu);
++		sfr = devm_platform_ioremap_resource_byname(pdev, "sfr");
++		if (IS_ERR(sfr))
++			return PTR_ERR(sfr);
++
++		return g955n_abox_register_clocks(dev, pmu, cmu, sfr);
+ 	}
+ 	if (!probe_power)
+ 		return 0;
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -148,7 +148,8 @@
+ &{/soc@0} {
+ 	abox-power-test@13e00000 {
+ 		compatible = "samsung,sm-g955n-abox-power-test";
+-		reg = <0x13e00000 0x4000>;
++		reg = <0x13e00000 0x4000>, <0x13e50000 0x10000>;
++		reg-names = "cmu", "sfr";
+ 		clocks = <&oscclk>;
+ 		clock-names = "oscclk";
+ 		#clock-cells = <1>;
