@@ -2127,3 +2127,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   blanks the display and requests suspend.
 - Route the first short power press on a locked Wayland session after
   resume to display wake even if the DRM connector is marked enabled.
+
+### R98 display and sensor transport
+
+- Check the powered DECON G0 shadow register before skipping a repeated
+  framebuffer. Re-latch the same DMA buffer if scanout no longer points
+  to it or a window update is pending.
+- Extend the BCM4773 diagnostic to read a bounded SSI payload after
+  HOST_REQ. Report the received byte count without logging sensor data.

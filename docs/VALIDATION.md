@@ -4010,3 +4010,22 @@ locked Wayland session with a pending resume marker as display wake.
 This guard passed the host regression test and still needs deployment
 and handset verification. The full host suite ran 164 tests with 9
 skipped and no failures.
+
+### R98 display and sensor transport
+
+Built the ARM64 Linux 6.18 R98 kernel, SM-G955N DTB, modules and BOOT
+image. The DECON change preserves the existing framebuffer lifetime
+and zero-copy scanout. It reads the shadow address only while the
+display power domain is on. The R97 screen-wake incident did not
+yield a register capture, so a stale DECON address remains a candidate
+to test on the handset.
+
+The diagnostic follows Samsung's two-transfer SSI receive sequence,
+with a 254-byte data limit and a nonzero payload length required
+after the second transfer. It still requires an asserted HOST_REQ.
+The earlier BCM4773 trial did not observe HOST_REQ, and R98 does not
+expose IIO devices or a GNSS source.
+
+USB serial, USB Ethernet, recovery ADB and the pinned Wi-Fi route were
+unavailable. R98 and the pending Power Key wake guard were not deployed.
+The host suite ran 164 tests with 9 skipped and no failures.

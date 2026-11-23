@@ -1,0 +1,36 @@
+Subject: [PATCH] drm: g955n-decon: check hardware before skipping a repeated flip
+
+DRM keeps its active framebuffer reference across suspend. Compare the
+requested address with the G0 shadow register before skipping a repeated
+buffer, and use the existing shadow latch and DMA reference handling
+when the hardware address no longer matches.
+
+diff --git a/drivers/gpu/drm/tiny/g955n-decon-handoff.c b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+--- a/drivers/gpu/drm/tiny/g955n-decon-handoff.c
++++ b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+@@ -296,8 +296,24 @@
+ 	int ret;
+ 
+ 	mutex_lock(&handoff->lock);
+-	if (kms->fault || fb == kms->active)
++	if (kms->fault)
+ 		goto unlock;
++
++	/*
++	 * DRM state can survive suspend even if the inherited scanout address
++	 * changes. Skip only when the hardware also holds the requested base
++	 * and there is no outstanding window update.
++	 */
++	if (fb == kms->active) {
++		u32 power;
++
++		if (regmap_read(handoff->pmu, DISP_POWER_STATUS, &power) ||
++		    (power & 0xf) != DISP_POWER_ON)
++			goto unlock;
++		if (readl(handoff->g0 + G0_BASE_SHADOW) == lower_32_bits(addr) &&
++		    !(readl(handoff->decon + DECON_SHADOW_UPDATE) & DECON_WINDOW_5))
++			goto unlock;
++	}
+ 
+ 	/*
+ 	 * Keep a reference independent of the atomic state until the address
