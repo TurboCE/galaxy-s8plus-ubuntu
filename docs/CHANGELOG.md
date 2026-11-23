@@ -2068,3 +2068,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Record full Panfrost job addresses, raw status and slot configuration
   when a GPU job faults.
 - Install the stock GNOME keyring PAM module in the Ubuntu rootfs.
+
+### 6.18 R87 Samsung audio codec endpoints
+
+- Enable the board I2C interface for the MAX98506 speaker amplifier
+  and register a native ASoC I2S playback codec after revision detection.
+- Describe the CS47L93 AIF and digital microphone bias references in
+  the SM-G955N device tree.

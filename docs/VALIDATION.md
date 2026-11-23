@@ -3796,3 +3796,25 @@ preference was restored. Physical power-button wake was not tested.
 The R86 tested login and resume interval contained no Panfrost job
 fault, so the new register fields were not exercised by a real
 fault. The intermittent GPU fault remains open.
+
+### R87 speaker amplifier and microphone codec
+
+The Samsung 4.4 dream2lte board graph connects the MAX98506 at
+I2C address 0x31 to ABOX UAIF4, and CS47L93 AIF1 on SPI to ABOX
+UAIF0. R87 adds the MAX98506 codec and limits its first DAI to
+48 kHz, stereo, signed 16-bit I2S. The I2C probe reads the
+revision without enabling the amplifier. The CS47L93 node also
+carries the downstream digital microphone bias references.
+
+The ARM64 kernel, DTB and codec module built. After verified BOOT
+readback, the SM-G955N booted R87. The kernel recognized MAX98506
+revision 0x80 and CS47L93 silicon revision 1 and bound both codec
+drivers. The four bias references were present in the running
+device tree. USB serial, Wi-Fi reconnection and GDM remained
+available. The project suite ran 162 cases with 9 skipped and
+no failures.
+
+There was still no ALSA card or PCM playback or capture device.
+The native ABOX CPU DAI, DMA and machine routing are required to
+connect these codec endpoints to Ubuntu. No audio signal, sound
+pressure or microphone recording was verified by this trial.

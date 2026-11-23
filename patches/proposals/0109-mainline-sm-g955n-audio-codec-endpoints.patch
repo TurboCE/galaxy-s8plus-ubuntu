@@ -1,0 +1,276 @@
+Subject: [PATCH] ASoC: add SM-G955N MAX98506 amplifier and codec endpoints
+
+Use the amplifier's downstream I2C bus and probe its silicon revision
+before registering a playback DAI. Limit the initial DAI to the
+48 kHz stereo I2S format and leave the amplifier off at probe.
+Describe the existing CS47L93 audio interface and its microphone bias
+wiring from the Samsung dream2lte device tree. A CPU DAI and PCM DMA
+for UAIF4 and UAIF0 are separate from these codec endpoints.
+
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -10,6 +10,7 @@
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/input/input.h>
+ #include <dt-bindings/soc/samsung,exynos-usi.h>
++#include <dt-bindings/sound/madera.h>
+ 
+ / {
+ 	model = "Samsung Galaxy S8+ (SM-G955N)";
+@@ -449,6 +450,13 @@
+ 	codec@0 {
+ 		compatible = "cirrus,cs47l93";
+ 		reg = <0>;
++		#sound-dai-cells = <1>;
++
++		/* Digital microphone bias wiring from the SM-G955N board. */
++		cirrus,dmic-ref = <MADERA_DMIC_REF_MICVDD
++				  MADERA_DMIC_REF_MICBIAS1
++				  MADERA_DMIC_REF_MICBIAS1
++				  MADERA_DMIC_REF_MICVDD>;
+ 		spi-max-frequency = <25000000>;
+ 		interrupts-extended = <&gpa2 6 IRQ_TYPE_LEVEL_LOW>;
+ 		reset-gpios = <&gpe7 0 GPIO_ACTIVE_LOW>;
+@@ -460,6 +468,23 @@
+ 		CPVDD1-supply = <&g955n_codec_1v8>;
+ 		CPVDD2-supply = <&g955n_codec_1v2>;
+ 		DCVDD-supply = <&g955n_codec_1v2>;
++	};
++};
++
++&usi3 {
++	samsung,mode = <USI_MODE_I2C>;
++	status = "okay";
++};
++
++&hsi2c_11 {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	status = "okay";
++
++	amplifier@31 {
++		compatible = "maxim,max98506";
++		reg = <0x31>;
++		#sound-dai-cells = <0>;
+ 	};
+ };
+ 
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -1428,6 +1428,13 @@
+ 	tristate
+ 	depends on I2C
+ 
++config SND_SOC_MAX98506
++	tristate "Maxim MAX98506 mono speaker amplifier"
++	depends on I2C
++	select REGMAP_I2C
++	help
++	  Register the MAX98506 I2S amplifier as an ASoC codec.
++
+ config SND_SOC_MAX9860
+ 	tristate "Maxim MAX9860 Mono Audio Voice Codec"
+ 	depends on I2C
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -180,6 +180,7 @@
+ snd-soc-max98390-y := max98390.o
+ snd-soc-max98396-y := max98396.o
+ snd-soc-max9850-y := max9850.o
++snd-soc-max98506-y := max98506.o
+ snd-soc-max9860-y := max9860.o
+ snd-soc-mc13783-y := mc13783.o
+ snd-soc-ml26124-y := ml26124.o
+@@ -606,6 +607,7 @@
+ obj-$(CONFIG_SND_SOC_MAX98390)	+= snd-soc-max98390.o
+ obj-$(CONFIG_SND_SOC_MAX98396)	+= snd-soc-max98396.o
+ obj-$(CONFIG_SND_SOC_MAX9850)	+= snd-soc-max9850.o
++obj-$(CONFIG_SND_SOC_MAX98506)	+= snd-soc-max98506.o
+ obj-$(CONFIG_SND_SOC_MAX9860)	+= snd-soc-max9860.o
+ obj-$(CONFIG_SND_SOC_MC13783)	+= snd-soc-mc13783.o
+ obj-$(CONFIG_SND_SOC_ML26124)	+= snd-soc-ml26124.o
+diff --git a/sound/soc/codecs/max98506.c b/sound/soc/codecs/max98506.c
+new file mode 100644
+--- /dev/null
++++ b/sound/soc/codecs/max98506.c
+@@ -0,0 +1,177 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Maxim MAX98506 mono speaker amplifier.
++ * Register values based on Samsung's Exynos8895 MAX98506 codec driver.
++ */
++#include <linux/bits.h>
++#include <linux/i2c.h>
++#include <linux/module.h>
++#include <linux/regmap.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
++#define MAX98506_CLOCK1           0x1a
++#define MAX98506_CLOCK2           0x1b
++#define MAX98506_FORMAT           0x20
++#define MAX98506_SLOTS            0x21
++#define MAX98506_GAIN             0x2d
++#define MAX98506_BLOCK_ENABLE     0x36
++#define MAX98506_GLOBAL_ENABLE    0x38
++#define MAX98506_REVISION         0xff
++
++#define MAX98506_CLOCK_BCLK       BIT(6)
++#define MAX98506_MDLL_X8          6
++#define MAX98506_RATE_48000       (8 << 4)
++#define MAX98506_FORMAT_16_I2S    (BIT(6) | BIT(1))
++#define MAX98506_SUM_BOTH_HALVED  GENMASK(6, 5)
++#define MAX98506_SPEAKER_BOOST    (BIT(7) | BIT(4))
++#define MAX98506_ENABLE           BIT(7)
++
++static int max98506_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
++{
++	unsigned int mask = SND_SOC_DAIFMT_FORMAT_MASK |
++			    SND_SOC_DAIFMT_INV_MASK |
++			    SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK;
++
++	if ((fmt & mask) != (SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
++			     SND_SOC_DAIFMT_CBC_CFC))
++		return -EINVAL;
++
++	return 0;
++}
++
++static int max98506_hw_params(struct snd_pcm_substream *substream,
++			      struct snd_pcm_hw_params *params,
++			      struct snd_soc_dai *dai)
++{
++	struct regmap *regmap = dev_get_drvdata(dai->dev);
++	static const struct reg_sequence setup[] = {
++		{ MAX98506_GLOBAL_ENABLE, 0 },
++		{ MAX98506_CLOCK1, MAX98506_CLOCK_BCLK | MAX98506_MDLL_X8 },
++		{ MAX98506_CLOCK2, MAX98506_RATE_48000 },
++		{ MAX98506_FORMAT, MAX98506_FORMAT_16_I2S },
++		{ MAX98506_SLOTS, 0xc8 },
++		{ MAX98506_GAIN, MAX98506_SUM_BOTH_HALVED | 1 },
++	};
++
++	if (params_rate(params) != 48000 || params_channels(params) != 2 ||
++	    params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
++		return -EINVAL;
++
++	/* Keep the hardware muted while configuring a new PCM stream. */
++	return regmap_multi_reg_write(regmap, setup, ARRAY_SIZE(setup));
++}
++
++static int max98506_mute(struct snd_soc_dai *dai, int mute, int stream)
++{
++	struct regmap *regmap = dev_get_drvdata(dai->dev);
++	int ret;
++
++	if (mute) {
++		/* Disable the output before disabling the power blocks. */
++		ret = regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE,
++					 MAX98506_ENABLE, 0);
++		if (ret)
++			return ret;
++		return regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
++					  MAX98506_SPEAKER_BOOST, 0);
++	}
++
++	ret = regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
++				 MAX98506_SPEAKER_BOOST, MAX98506_SPEAKER_BOOST);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE,
++				 MAX98506_ENABLE, MAX98506_ENABLE);
++	if (ret)
++		regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
++				   MAX98506_SPEAKER_BOOST, 0);
++
++	return ret;
++}
++
++static const struct snd_soc_dai_ops max98506_ops = {
++	.set_fmt = max98506_set_fmt,
++	.hw_params = max98506_hw_params,
++	.mute_stream = max98506_mute,
++	.no_capture_mute = 1,
++};
++
++static struct snd_soc_dai_driver max98506_dai = {
++	.name = "max98506-hifi",
++	.playback = {
++		.stream_name = "HiFi Playback",
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = SNDRV_PCM_RATE_48000,
++		.formats = SNDRV_PCM_FMTBIT_S16_LE,
++	},
++	.ops = &max98506_ops,
++};
++
++static const struct snd_soc_dapm_widget max98506_widgets[] = {
++	SND_SOC_DAPM_OUTPUT("Speaker"),
++};
++
++static const struct snd_soc_dapm_route max98506_routes[] = {
++	{ "Speaker", NULL, "HiFi Playback" },
++};
++
++static const struct snd_soc_component_driver max98506_component = {
++	.dapm_widgets = max98506_widgets,
++	.num_dapm_widgets = ARRAY_SIZE(max98506_widgets),
++	.dapm_routes = max98506_routes,
++	.num_dapm_routes = ARRAY_SIZE(max98506_routes),
++};
++
++static const struct regmap_config max98506_regmap = {
++	.reg_bits = 8,
++	.val_bits = 8,
++	.max_register = MAX98506_REVISION,
++};
++
++static int max98506_probe(struct i2c_client *client)
++{
++	struct device *dev = &client->dev;
++	struct regmap *regmap;
++	unsigned int revision;
++	int ret;
++
++	regmap = devm_regmap_init_i2c(client, &max98506_regmap);
++	if (IS_ERR(regmap))
++		return dev_err_probe(dev, PTR_ERR(regmap), "cannot initialize regmap\n");
++
++	ret = regmap_read(regmap, MAX98506_REVISION, &revision);
++	if (ret)
++		return dev_err_probe(dev, ret, "cannot read amplifier revision\n");
++
++	if (revision != 0x40 && revision != 0x50 && revision != 0x80)
++		return dev_err_probe(dev, -ENODEV, "unknown amplifier revision %#x\n", revision);
++
++	i2c_set_clientdata(client, regmap);
++	ret = devm_snd_soc_register_component(dev, &max98506_component,
++					      &max98506_dai, 1);
++	if (!ret)
++		dev_info(dev, "MAX98506 revision %#x registered\n", revision);
++
++	return ret;
++}
++
++static const struct of_device_id max98506_of_match[] = {
++	{ .compatible = "maxim,max98506" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, max98506_of_match);
++
++static struct i2c_driver max98506_driver = {
++	.driver = {
++		.name = "max98506",
++		.of_match_table = max98506_of_match,
++	},
++	.probe = max98506_probe,
++};
++module_i2c_driver(max98506_driver);
++
++MODULE_DESCRIPTION("Maxim MAX98506 mono speaker amplifier");
++MODULE_LICENSE("GPL");
