@@ -3598,3 +3598,18 @@ The previous Terminal font name, Ubuntu Sans Mono, resolved to
 proportional DejaVu Sans on the handset. The default Terminal profile
 now uses installed DejaVu Sans Mono 10 and opens at 64 columns.
 A real new Terminal window showed the narrower geometry and font.
+
+A subsequent normal reboot changed the kernel boot ID. The stock GDM
+on-screen keyboard started the regular Ubuntu Wayland session. Both
+GNOME Shell and the user manager inherited `GSK_RENDERER=gl` without
+an environment override in the launch commands. Touching the stock
+app-grid icons opened System Monitor, Settings and Terminal. The
+desktop Home icon opened Files. System Monitor, Settings and Files
+had visible text and controls and held the Panfrost render node.
+Two framebuffer captures showed changes inside the System Monitor
+graph area, and its configured sampling interval was still 100 ms.
+The new Terminal's PTY measured 24 rows by 64 columns and the active
+profile still selected DejaVu Sans Mono 10. Two unrelated-to-app
+attribution checks in the same boot were logged as
+`DATA_INVALID_FAULT` from GNOME Shell, so this check does not
+qualify the compositor as fault-free.
