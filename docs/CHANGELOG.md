@@ -2096,3 +2096,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Connect RDMA0 through SIFS1 and UAIF4 to the MAX98506 speaker.
   Register a 48 kHz, signed 16-bit stereo ALSA playback PCM and
   load the board drivers through a model-specific systemd unit.
+
+### R91 capture DMA diagnosis and browser installation
+
+- Qualify the Exynos8895 NSRC0 sample-bank address with a bounded
+  WDMA1 capture-transport trial.
+- Install the Mozilla Firefox ARM64 package on the test handset.

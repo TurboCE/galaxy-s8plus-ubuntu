@@ -3897,3 +3897,19 @@ Installed and enabled the model-specific speaker service. A normal
 reboot changed the boot ID, the service started automatically and
 ALSA enumerated the same hardware playback PCM. The project suite
 ran 162 tests with 9 skipped and no failures.
+
+### R91 microphone transport and Firefox
+
+A diagnostic reused the speaker device's translated DMA domain
+with playback idle. The first UAIF0-to-WDMA1 trial did not advance
+and reported a microphone FIFO overrun. The handset's Calliope
+firmware identifies the NSRC0 bank at ABOX offset 0x0328. Using
+that bank, the WDMA1 pointer changed in all 25 sampled intervals
+and no overrun was reported in the final UAIF0 status. Both trials
+stopped the DMA and restored the touched registers. The microphone
+codec was not wired into the trial, so it proves DMA transport
+only. ALSA still reported no hardware capture device.
+
+Installed Firefox 160.0.1 for ARM64 from Mozilla's signed
+APT repository. Checked the repository signing-key fingerprint,
+the installed desktop launcher and a 320 x 240 headless render.
