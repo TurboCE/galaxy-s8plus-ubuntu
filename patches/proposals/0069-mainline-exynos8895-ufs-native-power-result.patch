@@ -1,0 +1,143 @@
+Subject: [PATCH] Exynos8895: check the UniPro result for HS power changes
+
+R38 completed the PA_PWRMODE interrupt but read zero from UPMCRS.
+The Samsung driver reads the Exynos8895 UniPro power indication.
+Also check the confirmation register before accepting completion.
+
+Let initial strict-power failures unwind through the probe caller,
+and skip the late HCI clock-gate access after strict probe failure.
+
+Depends on proposals 0062, 0064, 0065 and 0068.
+
+diff --git a/drivers/ufs/host/ufs-exynos.c b/drivers/ufs/host/ufs-exynos.c
+--- a/drivers/ufs/host/ufs-exynos.c
++++ b/drivers/ufs/host/ufs-exynos.c
+@@ -1061,11 +1061,13 @@
+ 	} else if (!on && status == POST_CHANGE) {
+ 		/*
+ 		 * On Exynos8895 the PHY has already been isolated when
+-		 * shutdown drops the host clocks. HCI_CLKSTOP_CTRL and
+-		 * HCI_MISC cannot be accessed here.
++		 * shutdown drops the host clocks. A failed strict probe can
++		 * also reach this point with the PHY already isolated.
+ 		 */
+ 		if (ufs->drv_data->native_hibern8_status &&
+-		    hba->shutting_down && ufshcd_is_link_off(hba))
++		    ((hba->shutting_down && ufshcd_is_link_off(hba)) ||
++		     ((hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE) &&
++		      hba->ufshcd_state == UFSHCD_STATE_RESET)))
+ 			return 0;
+ 
+ 		exynos_ufs_gate_clks(ufs);
+@@ -1741,7 +1743,11 @@
+ #define EXYNOS8895_HIBERN8_EXIT_CNF	0x7874
+ #define EXYNOS8895_HIBERN8_EXIT_IND	0x7878
+ 
+-static bool exynos_ufs_hibern8_completed(struct ufs_hba *hba, enum uic_cmd_dme cmd)
++#define EXYNOS8895_PWR_CNF		0x78e8
++#define EXYNOS8895_PWR_IND		0x78ec
++
++static bool exynos_ufs_pwr_ctrl_completed(struct ufs_hba *hba,
++					 enum uic_cmd_dme cmd, u32 arg1)
+ {
+ 	struct exynos_ufs *ufs = ufshcd_get_variant(hba);
+ 	u32 confirmation;
+@@ -1750,18 +1756,33 @@
+ 	if (!ufs->drv_data->native_hibern8_status)
+ 		return false;
+ 
+-	if (cmd == UIC_CMD_DME_HIBER_ENTER) {
++	switch (cmd) {
++	case UIC_CMD_DME_HIBER_ENTER:
+ 		confirmation = unipro_readl(ufs, EXYNOS8895_HIBERN8_ENTER_CNF);
+ 		indication = unipro_readl(ufs, EXYNOS8895_HIBERN8_ENTER_IND);
+-	} else {
++		break;
++	case UIC_CMD_DME_HIBER_EXIT:
+ 		confirmation = unipro_readl(ufs, EXYNOS8895_HIBERN8_EXIT_CNF);
+ 		indication = unipro_readl(ufs, EXYNOS8895_HIBERN8_EXIT_IND);
++		break;
++	case UIC_CMD_DME_SET:
++		if (arg1 != UIC_ARG_MIB(PA_PWRMODE) ||
++		    !(hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE))
++			return false;
++		confirmation = unipro_readl(ufs, EXYNOS8895_PWR_CNF);
++		indication = unipro_readl(ufs, EXYNOS8895_PWR_IND);
++		dev_info(hba->dev, "UniPro PA_PWRMODE confirmation=%#x indication=%#x\n",
++			 confirmation, indication);
++		break;
++	default:
++		return false;
+ 	}
+ 
+ 	if ((u8)confirmation != UIC_CMD_RESULT_SUCCESS || (u8)indication != PWR_LOCAL)
+ 		return false;
+ 
+-	dev_info_once(hba->dev, "Hibern8 completion confirmed by UniPro registers\n");
++	if (cmd != UIC_CMD_DME_SET)
++		dev_info_once(hba->dev, "Hibern8 completion confirmed by UniPro registers\n");
+ 	return true;
+ }
+ 
+@@ -2088,7 +2109,7 @@
+ 	.setup_xfer_req			= exynos_ufs_specify_nexus_t_xfer_req,
+ 	.setup_task_mgmt		= exynos_ufs_specify_nexus_t_tm_req,
+ 	.hibern8_notify			= exynos_ufs_hibern8_notify,
+-	.hibern8_completed		= exynos_ufs_hibern8_completed,
++	.pwr_ctrl_completed		= exynos_ufs_pwr_ctrl_completed,
+ 	.suspend			= exynos_ufs_suspend,
+ 	.resume				= exynos_ufs_resume,
+ 	.fill_crypto_prdt		= exynos_ufs_fmp_fill_prdt,
+diff --git a/drivers/ufs/core/ufshcd.c b/drivers/ufs/core/ufshcd.c
+--- a/drivers/ufs/core/ufshcd.c
++++ b/drivers/ufs/core/ufshcd.c
+@@ -4384,10 +4384,8 @@
+ check_upmcrs:
+ 	status = ufshcd_get_upmcrs(hba);
+ 	if (status == PWR_OK && !ret && !cmd->cmd_active &&
+-	    (cmd->command == UIC_CMD_DME_HIBER_ENTER ||
+-	     cmd->command == UIC_CMD_DME_HIBER_EXIT) &&
+-	    hba->vops && hba->vops->hibern8_completed &&
+-	    hba->vops->hibern8_completed(hba, cmd->command))
++	    hba->vops && hba->vops->pwr_ctrl_completed &&
++	    hba->vops->pwr_ctrl_completed(hba, cmd->command, cmd->argument1))
+ 		status = PWR_LOCAL;
+ 	if (status != PWR_LOCAL) {
+ 		dev_err(hba->dev,
+@@ -4405,7 +4403,13 @@
+ 	spin_lock_irqsave(hba->host->host_lock, flags);
+ 	hba->active_uic_cmd = NULL;
+ 	hba->uic_async_done = NULL;
+-	if (ret && !hba->pm_op_in_progress) {
++	/*
++	 * A strict power-change failure during probe is handled by the
++	 * probe caller. Do not race its cleanup with error work.
++	 */
++	if (ret && !hba->pm_op_in_progress &&
++	    (!(hba->quirks & UFSHCD_QUIRK_STRICT_PWR_CHANGE) ||
++	     hba->ufshcd_state != UFSHCD_STATE_RESET)) {
+ 		ufshcd_set_link_broken(hba);
+ 		ufshcd_schedule_eh_work(hba);
+ 	}
+diff --git a/include/ufs/ufshcd.h b/include/ufs/ufshcd.h
+--- a/include/ufs/ufshcd.h
++++ b/include/ufs/ufshcd.h
+@@ -317,7 +317,7 @@
+  * @setup_task_mgmt: called before any task management request is issued
+  *                  to set some things
+  * @hibern8_notify: called around hibern8 enter/exit
+- * @hibern8_completed: check a variant-specific Hibern8 completion when
++ * @pwr_ctrl_completed: check a variant-specific power completion when
+  *                      the host power status stays at PWR_OK
+  * @apply_dev_quirks: called to apply device specific quirks
+  * @fixup_dev_quirks: called to modify device specific quirks
+@@ -363,7 +363,8 @@
+ 	void	(*setup_task_mgmt)(struct ufs_hba *, int, u8);
+ 	void    (*hibern8_notify)(struct ufs_hba *, enum uic_cmd_dme,
+ 					enum ufs_notify_change_status);
+-	bool	(*hibern8_completed)(struct ufs_hba *hba, enum uic_cmd_dme cmd);
++	bool	(*pwr_ctrl_completed)(struct ufs_hba *hba, enum uic_cmd_dme cmd,
++				      u32 arg1);
+ 	int	(*apply_dev_quirks)(struct ufs_hba *hba);
+ 	void	(*fixup_dev_quirks)(struct ufs_hba *hba);
+ 	int     (*suspend)(struct ufs_hba *, enum ufs_pm_op,

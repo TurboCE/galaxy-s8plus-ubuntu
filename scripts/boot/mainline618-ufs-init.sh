@@ -5,6 +5,7 @@ set -u
 BB=/bin/busybox
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 diag_pid=''
+usb_handoff_done=''
 
 log() {
     printf '%s\n' "$*"
@@ -138,8 +139,11 @@ prepare_ubuntu_trial_return() {
     "$BB" mkdir -p /run/systemd/system/timers.target.wants /run/g955n-trial || return 1
     if [ -x /bin/g955n-kernel-evidence ] && [ -r /bin/g955n-kernel-evidence.service ]; then
         "$BB" cp /bin/g955n-kernel-evidence /run/g955n-trial/kernel-evidence || return 1
-        "$BB" sed 's|/usr/local/sbin/g955n-kernel-evidence|/run/g955n-trial/kernel-evidence|' \
-            /bin/g955n-kernel-evidence.service > /run/systemd/system/g955n-kernel-evidence.service || return 1
+        "$BB" mkdir -p /run/systemd/system/g955n-kernel-evidence.service.d || return 1
+        {
+            printf '[Service]\nExecStart=\nExecStart=/run/g955n-trial/kernel-evidence\n'
+            "$BB" sed -n '/^Type=/p; /^RuntimeMaxSec=/p' /bin/g955n-kernel-evidence.service
+        } > /run/systemd/system/g955n-kernel-evidence.service.d/50-g955n-trial.conf || return 1
     fi
     "$BB" cat > /run/g955n-trial/check <<'EOF' || return 1
 #!/bin/sh
@@ -327,6 +331,7 @@ case " $("$BB" cat /proc/cmdline) " in
         [ -e /run/g955n-usb-handoff.wait ] || [ -e /run/g955n-usb-handoff.ready ] ||
             stop 'UFS module trial requires USB handoff'
         wait_for_usb_handoff || stop 'UFS module trial did not receive host acknowledgement'
+        usb_handoff_done=1
         (
             log 'Starting UFS HS module with USB diagnostics active'
             if ! "$BB" insmod /bin/ufs-exynos.ko exynos8895_hs_trial=1; then
@@ -378,7 +383,7 @@ case " $("$BB" cat /proc/cmdline) " in
     *) stop 'Read-only check complete' ;;
 esac
 if [ -n "$diag_pid" ]; then
-    wait_for_usb_handoff || true
+    [ -n "$usb_handoff_done" ] || wait_for_usb_handoff || true
     kill "$diag_pid" 2>/dev/null || true
 fi
 

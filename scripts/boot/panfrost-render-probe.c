@@ -182,13 +182,18 @@ int main(int argc, char **argv)
     glClear_fn(GL_COLOR_BUFFER_BIT);
     glDrawArrays_fn(GL_TRIANGLES, 0, 3);
     fprintf(stderr, "Panfrost probe: reading rendered pixels\n");
-    GLubyte center[4], corner[4];
+    GLubyte center[4] = {0}, corner[4] = {0};
     glReadPixels_fn(8, 8, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, center);
     glReadPixels_fn(0, 15, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, corner);
-    if (glGetError_fn() != GL_NO_ERROR ||
+    GLenum gl_error = glGetError_fn();
+    if (gl_error != GL_NO_ERROR ||
         memcmp(center, (GLubyte[]){255, 0, 0, 255}, sizeof(center)) ||
-        memcmp(corner, (GLubyte[]){0, 0, 255, 255}, sizeof(corner)))
+        memcmp(corner, (GLubyte[]){0, 0, 255, 255}, sizeof(corner))) {
+        fprintf(stderr, "Panfrost pixels: error=%#x center=%u,%u,%u,%u corner=%u,%u,%u,%u\n",
+                gl_error, center[0], center[1], center[2], center[3],
+                corner[0], corner[1], corner[2], corner[3]);
         return fail("GPU pixel verification");
+    }
     printf("Panfrost GPU draw and readback verified: %s\n", renderer);
     return 0;
 }

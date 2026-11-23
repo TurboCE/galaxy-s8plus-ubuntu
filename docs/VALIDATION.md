@@ -3072,3 +3072,33 @@ DTB. No rail was switched during this test.
 - The asynchronous kernel evidence unit passed systemd-analyze verify.
   Its on-device boot timing and the optional Mesa syscall trace are
   qualified separately.
+
+### R41–R44 high-speed Ubuntu boot and Mali-G71 rendering
+
+- R38's warm trace recorded a completed PA_PWRMODE UIC command followed
+  by a missing standard power result. Cleanup then took a synchronous
+  external abort at the vendor clock-stop register. The native UniPro
+  result is checked before accepting the new link state.
+- R41 reported successful PA_PWRMODE confirmation and indication, both
+  receive lanes locked, and HS-B gear 1 with two lanes. It checked
+  the installed ext4 Ubuntu root with `ro,noload` and completed an
+  8 MiB direct USERDATA read. It returned to TWRP automatically.
+- R42 mounted the installed Ubuntu root read/write and reached
+  `multi-user.target` in 7.180 seconds in systemd's startup summary
+  (2.513 kernel, 4.667 userspace). R29 on the same handset reached the
+  same target in 194.552 seconds (35.900 kernel, 158.651 userspace).
+  These timings begin at the Linux kernel and exclude the Samsung
+  bootloader, host interaction and graphical login. The Mac USB
+  login prompt and private network namespace check passed. The
+  asynchronous evidence collector completed within the boot. The
+  device shut down and returned to TWRP automatically.
+- R43 opened the Mali-G71 render node and submitted Mesa jobs. At
+  timeout the MMU had a pending interrupt (raw 0x1, mask 0) and the
+  shader, tiler and L2 were powered. This build omitted CONFIG_PM, so
+  the initialization normally repeated at runtime resume had never
+  enabled the MMU interrupts.
+- R44 enabled the MMU interrupts during probe. The same Mesa GLES
+  draw produced the expected triangle and background pixels on the
+  Mali-G71. The check renders to an off-screen buffer. DECON scanout,
+  stock GNOME Wayland, screen rotation, suspend/resume, audio and
+  Wi-Fi still require their own 6.18 tests.

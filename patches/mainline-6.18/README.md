@@ -123,8 +123,8 @@ and the host clock state when shutting down. Apply them in that order
 for the combined trial. Keep using the timed recovery return while
 testing.
 
-Proposal 0068 adds the experimental Exynos8895 two-lane HS-B gear 1
-tuning. Use a read-only trial when applying it. For diagnosis, build
+Proposals 0068 and 0069 add the Exynos8895 two-lane HS-B gear 1 tuning
+and verify the UniPro power-mode result. Begin with a read-only trial. Build
 `CONFIG_SCSI_UFS_EXYNOS=m` and place `ufs-exynos.ko` at
 `/bin/ufs-exynos.ko` in the initramfs. Boot with `g955n.ufs_module_hs_trial=1`,
 `g955n.usb_diag=1` and `g955n.usb_handoff=1`. The initramfs loads the
@@ -157,6 +157,14 @@ rendering and pixel readback through Panfrost without exercising DECON.
 An optional Ubuntu AArch64 `strace` executable at `/bin/g955n-strace`
 enables a bounded syscall trace. The initramfs logs the last entries if
 the rendering probe fails.
+Proposal 0070 logs the Exynos8895 GPU interrupt, fault and power-domain
+registers when a submitted job times out.
+Apply proposal 0071 to enable the MMU interrupts at probe, including on
+builds without runtime PM. R44 reported
+`Panfrost GPU draw and readback verified: Mali-G71 (Panfrost)` using
+installed Ubuntu's Mesa. The display path requires a separate DRM/KMS
+test of a DMA-BUF imported into the primary DECON plane, including
+fence handling and a completed page flip.
 
 ## Reading the warm boot trace
 

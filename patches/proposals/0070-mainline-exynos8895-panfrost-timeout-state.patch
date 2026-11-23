@@ -1,0 +1,37 @@
+Subject: [PATCH] drm/panfrost: log Exynos8895 GPU timeout state
+
+Capture GPU, job and MMU interrupt bits and the shader, tiler and
+cache state when a submitted Exynos8895 job fails to complete.
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.c b/drivers/gpu/drm/panfrost/panfrost_job.c
+--- a/drivers/gpu/drm/panfrost/panfrost_job.c
++++ b/drivers/gpu/drm/panfrost/panfrost_job.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /* Copyright 2019 Linaro, Ltd, Rob Herring <robh@kernel.org> */
+ /* Copyright 2019 Collabora ltd. */
++#include <linux/of.h>
+ #include <linux/delay.h>
+ #include <linux/interrupt.h>
+ #include <linux/io.h>
+@@ -781,6 +782,20 @@
+ 		job_read(pfdev, JS_TAIL_LO(js)),
+ 		sched_job);
+ 
++	if (of_device_is_compatible(pfdev->dev->of_node, "samsung,exynos8895-mali")) {
++		dev_err(pfdev->dev,
++			"G3D timeout IRQ raw/mask GPU=%#x/%#x JOB=%#x/%#x MMU=%#x/%#x\n",
++			gpu_read(pfdev, GPU_INT_RAWSTAT), gpu_read(pfdev, GPU_INT_MASK),
++			job_read(pfdev, JOB_INT_RAWSTAT), job_read(pfdev, JOB_INT_MASK),
++			gpu_read(pfdev, MMU_INT_RAWSTAT), gpu_read(pfdev, MMU_INT_MASK));
++		dev_err(pfdev->dev,
++			"G3D timeout status=%#x fault=%#x ready shader=%#x tiler=%#x l2=%#x active shader=%#x tiler=%#x l2=%#x\n",
++			gpu_read(pfdev, GPU_STATUS), gpu_read(pfdev, GPU_FAULT_STATUS),
++			gpu_read(pfdev, SHADER_READY_LO), gpu_read(pfdev, TILER_READY_LO),
++			gpu_read(pfdev, L2_READY_LO), gpu_read(pfdev, SHADER_PWRACTIVE_LO),
++			gpu_read(pfdev, TILER_PWRACTIVE_LO), gpu_read(pfdev, L2_PWRACTIVE_LO));
++	}
++
+ 	panfrost_core_dump(job);
+ 
+ 	atomic_set(&pfdev->reset.pending, 1);

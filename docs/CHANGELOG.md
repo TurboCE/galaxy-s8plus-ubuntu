@@ -1887,3 +1887,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   SM-G955N 6.18 releases.
 - Add the opt-in HS-B UFS calibration, acknowledged module load and
   direct read timing. Support a bounded syscall trace of the Mesa probe.
+
+## 2026-11-23 — High-speed UFS boot and first Panfrost render
+
+- Use the Exynos8895 UniPro power-mode result for the experimental
+  HS-B UFS link. Boot the installed Ubuntu through the two-lane link.
+- Apply the asynchronous kernel evidence collector through a runtime
+  drop-in during the Ubuntu trial.
+- Enable Panfrost MMU interrupts at probe so shader jobs can recover
+  from growable tiler heap faults before any runtime resume.
