@@ -3612,3 +3612,42 @@ The new Terminal's PTY measured 24 rows by 64 columns and the active
 profile still selected DejaVu Sans Mono 10. The kernel also logged
 two Panfrost `DATA_INVALID_FAULT` events attributed to GNOME Shell
 during the same boot.
+
+### R80 and R81 Korean input, calendar and Panfrost fault recovery
+
+Ubuntu's Korean language packs generated `ko_KR.UTF-8`. Noto CJK
+fonts displayed Korean in a real GTK 4 window. The GNOME input
+source list retained English and added the two-set IBus Hangul
+engine. The language packs also make the Korean desktop locale available.
+
+On the stock Noble engine, the real GNOME screen keyboard produced
+`ㅎㅏㄴㄱㅡㄹ` from the same key sequence that an evdev keyboard composed
+as `한글`. The [upstream keycode-zero fix][hangul-osk-fix] was applied to
+the pinned 1.5.5 source. The user IBus service registers the rebuilt
+engine ahead of the system component and uses Ubuntu's GNOME Shell
+and GDM. Both the screen keyboard
+and an evdev test keyboard then composed and committed `한글` in
+a native Wayland text field. On the subsequent R80 reboot the user
+IBus service loaded the private component path automatically.
+
+The stock GNOME calendar previously could not start the Evolution
+source registry. After installing Ubuntu's Evolution Data Server,
+the source registry was active and GNOME CalendarServer responded
+over the session bus.
+
+The original R80 Panfrost log included a level-2 MMU translation
+fault on a GPU read. R81 includes the [proposed upstream AS interrupt
+ordering fix][panfrost-unmask] so a later fault can be delivered after
+that address space is re-enabled. The first translation fault's
+cause has not been identified.
+
+The R81 handset booted to GDM and accepted touch entry on the screen
+keyboard. Its stock Wayland session automatically started the Hangul
+engine and composed `한글` again using only touchscreen key events.
+Wi-Fi and the GNOME calendar service were active. USB SSH briefly
+timed out, and Wi-Fi SSH read the Hangul result from the same boot.
+One GNOME Shell `DATA_INVALID_FAULT` occurred during this test.
+The next-fault interrupt recovery path was not separately exercised.
+
+[hangul-osk-fix]: https://github.com/libhangul/ibus-hangul/commit/eaaf6aa222926835fa155d587b05c199107cb449
+[panfrost-unmask]: https://lore.kernel.org/lkml/20261121-panfrost-mmu-as-mask-v1-1-13ffb84d5562@gmail.com/

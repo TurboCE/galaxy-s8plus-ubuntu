@@ -1,0 +1,25 @@
+From: Arun Iyengar <aiyengar1990@gmail.com>
+Subject: [PATCH] drm/panfrost: Unmask the interrupts of a re-enabled address space
+
+Apply the upstream proposal to the SM-G955N 6.18 tree. Clear the
+recovered AS in the software mask before programming the hardware
+mask so a later recoverable fault can still interrupt the driver.
+
+Link: https://lore.kernel.org/lkml/20261121-panfrost-mmu-as-mask-v1-1-13ffb84d5562@gmail.com/
+Fixes: ed7a34c57def ("drm/panfrost: Disable the AS on unhandled page faults")
+Reported-by: Sashiko <sashiko-bot@kernel.org>
+Signed-off-by: Arun Iyengar <aiyengar1990@gmail.com>
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_mmu.c b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+--- a/drivers/gpu/drm/panfrost/panfrost_mmu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+@@ -282,8 +282,8 @@ int panfrost_mmu_as_get(struct panfrost_device *pfdev, struct panfrost_mmu *mmu)
+ 			 * disabled. We need to re-enable the MMU after
+ 			 * clearing+unmasking the AS interrupts.
+ 			 */
++			pfdev->as_faulty_mask &= ~mask;
+ 			mmu_write(pfdev, MMU_INT_CLEAR, mask);
+ 			mmu_write(pfdev, MMU_INT_MASK, ~pfdev->as_faulty_mask);
+-			pfdev->as_faulty_mask &= ~mask;
+ 			panfrost_mmu_enable(pfdev, mmu);
+ 		}

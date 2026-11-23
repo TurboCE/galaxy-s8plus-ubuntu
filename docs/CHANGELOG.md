@@ -2025,3 +2025,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   shared session environment. Keep ordinary package launchers.
 - Select DejaVu Sans Mono 10 and 64 columns in the default GNOME
   Terminal profile. Keep the System Monitor graph refresh at 100 ms.
+
+### 2026-11-23 — 6.18 R81 Korean input and Panfrost recovery
+
+- Install Korean fonts and translations, add two-set Hangul to the
+  owner's GNOME input sources, and backport upstream IBus Hangul
+  support for on-screen keys that have no hardware keycode.
+- Install the missing Evolution Data Server dependency for the
+  stock GNOME calendar.
+- Restore the Panfrost fault interrupt when re-enabling a previously
+  faulted GPU address space.
