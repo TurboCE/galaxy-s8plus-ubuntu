@@ -4420,3 +4420,37 @@ still received unhandled asynchronous messages in other opens. The VI
 result does not qualify actual current/voltage feedback or show that
 the requested memory clock was met. The comparison modules were
 withdrawn. Acoustic loudspeaker output remains unresolved.
+
+### R100 speaker serial data and MIF clock readout
+
+Timestamped, phase-folded SoC pad samples established what the DSM
+trial actually sent. In the silence window the two speaker data slots
+decoded to zero while the frame and bit clocks were running. During the
+reference pattern, the data one bit after the I2S frame edge decoded to
+the supplied 16-bit stereo pairs 0xfca9/0x014a and 0x0357/0xfeb6.
+This confirms those PCM words at the SoC speaker pad. It does not verify
+electrical levels at the amplifier pins or any analog speaker output.
+
+A standalone native playback stream completed with the speaker pad
+clocks and data low in the sampled windows. With simultaneous capture,
+the native speaker clock pins were active while the data stayed low,
+despite 8,088 of 8,192 samples in the playback ring being nonzero.
+Selecting the native SIFS0 mixer route caused a PCM I/O error. Selecting
+the internal UAIF4 parent and manually enabling its reset clock left
+native output silent. Neither change was retained.
+
+All four MIF PLLs read as enabled and locked at a computed 3.588 GHz
+with the DDRPHY mux selecting the PLL. The pre-divider register held
+0x3 in both idle and active DSM playback snapshots. These are direct
+clock-tree observations. They do not establish whether the firmware
+satisfied the ABOX memory bandwidth request as an operating-point vote.
+The live DVFS mailbox layout failed the queue transport preflight, so no
+mailbox command was sent.
+
+Writing the stock MAX98506 MDLL multiplier with the amplifier enabled
+still read back 0x40 rather than 0x46. The original state was verified
+after the probe. A seven-second application stream finished while the
+microphone captured 337,920 frames, with no time-ordered acoustic tone
+sequence. Clock, framing and test sample words are accounted for up to
+the SoC pads. The amplifier input levels, boost supply and analog output
+with the speaker load remain unverified. R100 stayed installed.

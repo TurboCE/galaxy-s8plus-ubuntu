@@ -2223,3 +2223,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   the test so a prepared microphone can continue to capture.
 - Keep ALSA playing when Calliope reports optional dump buffers.
   Acknowledge those notifications without reading the buffers.
+
+### R100 loudspeaker serial-data check
+
+- Verified that the Calliope DSM trial sent the expected PCM sample words
+  through the SoC speaker pads. The loudspeaker remained silent.
+- Discarded native SIFS0 routing and reset-clock comparisons that failed
+  to recover output. Restored the installed R100 audio service.
