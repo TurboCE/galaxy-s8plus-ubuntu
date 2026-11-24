@@ -4075,3 +4075,32 @@ its unit started successfully, and all 11 host regression tests passed.
 This run stopped at the GDM greeter. Touch login, desktop scanout buffer
 identity, suspend display wake and rotation were not exercised. No IIO
 sensor devices were exposed.
+
+### R99–R100 speaker and microphone signal tests
+
+Compared the port with the pinned Samsung dream2lte DTS, MAX98506
+driver, Madera driver, and handset mixer routes. R99 and R100 were
+BOOT-only updates from verified TWRP backups and both booted the
+existing Ubuntu filesystem. The ARM64 kernel and exact-release audio
+modules built successfully for both revisions. The host suite ran
+167 tests with 9 skips and no failures.
+
+ALSA playback and capture ran simultaneously on the handset. R100
+confirmed that the amplifier's global output enable and speaker/boost
+enable were asserted during playback. The clock-mode register still
+read 0x40 while running after moving the MDLL update to trigger time.
+The gain field changed from 1 to 7, and microphone input control
+changed from 0x8c00 to 0x8800. The error-priority kernel journal had
+no entries during the R100 test.
+
+The CS47L93 internal tone produced stable PCM on both channels through
+AIF1 and WDMA1. The on-device speaker tone and the separate host
+speaker pattern did not produce a repeatable corresponding signal in
+recordings from the physical microphone. Testing the alternate IN3
+channel and a high-pass path did not resolve this. These results
+qualify the tested digital paths and leave speaker audibility and
+the microphone's acoustic response open.
+
+PipeWire and WirePlumber exposed the internal speaker and microphone as
+the R100 desktop defaults. The duplex test captured 461,824 frames
+and saw both PCM hardware pointers advance in 62 samples.

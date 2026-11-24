@@ -2152,3 +2152,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Installed and readback-verified the R98 BOOT image from TWRP after
   staging the matching modules on the existing Ubuntu filesystem.
 - Deployed the pending power-key wake guard and verified service startup.
+
+### Linux 6.18 R99–R100 audio
+
+- Match the Samsung dream2lte MAX98506 filter setup and use 0 dB
+  amplifier gain. Program the clock multiplier and unmute after the
+  ABOX playback trigger starts the serial clock.
+- Leave the CS47L93 dedicated IN3 input mode at its codec default and
+  retain the board-specific MICBIAS1A setup.

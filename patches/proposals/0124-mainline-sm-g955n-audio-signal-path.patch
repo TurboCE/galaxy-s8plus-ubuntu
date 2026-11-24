@@ -1,0 +1,97 @@
+Subject: [PATCH] ASoC: align dream2lte amplifier and digital microphone setup
+
+Preserve the dedicated CS47L93 IN3 digital input mode. Samsung's Madera
+input configuration writes the analogue/digital mode field only for
+inputs with analogue support. Keep the board's bias setup and primary
+microphone routing.
+
+Bring over the MAX98506 DAC filter setting and program the clock source
+separately from its MDLL multiplier, as the Samsung MAX98506 driver
+does. Use a fixed 0 dB hardware gain rather than the old -6 dB bring-up
+value. The stock Android gain is higher and depends on its DSM setup.
+
+diff --git a/sound/soc/codecs/max98506.c b/sound/soc/codecs/max98506.c
+--- a/sound/soc/codecs/max98506.c
++++ b/sound/soc/codecs/max98506.c
+@@ -14,21 +14,26 @@
+ #define MAX98506_CLOCK2           0x1b
+ #define MAX98506_FORMAT           0x20
+ #define MAX98506_SLOTS            0x21
++#define MAX98506_FILTERS          0x2c
+ #define MAX98506_GAIN             0x2d
+ #define MAX98506_BLOCK_ENABLE     0x36
+ #define MAX98506_GLOBAL_ENABLE    0x38
+ #define MAX98506_REVISION         0xff
+ 
+ #define MAX98506_CLOCK_BCLK       BIT(6)
++#define MAX98506_MDLL_MASK        GENMASK(3, 0)
+ #define MAX98506_MDLL_X8          6
+ #define MAX98506_RATE_48000       (8 << 4)
+ #define MAX98506_FORMAT_16_I2S    (BIT(6) | BIT(1))
+ #define MAX98506_SUM_BOTH_HALVED  GENMASK(6, 5)
++#define MAX98506_DAC_FILTERS      0xd9
++#define MAX98506_GAIN_0_DB        7
+ #define MAX98506_SPEAKER_BOOST    (BIT(7) | BIT(4))
+ #define MAX98506_ENABLE           BIT(7)
+ 
+ static int max98506_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
+ {
++	struct regmap *regmap = dev_get_drvdata(dai->dev);
+ 	unsigned int mask = SND_SOC_DAIFMT_FORMAT_MASK |
+ 			    SND_SOC_DAIFMT_INV_MASK |
+ 			    SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK;
+@@ -37,7 +42,8 @@
+ 			     SND_SOC_DAIFMT_CBC_CFC))
+ 		return -EINVAL;
+ 
+-	return 0;
++	return regmap_update_bits(regmap, MAX98506_CLOCK1,
++				  MAX98506_CLOCK_BCLK, MAX98506_CLOCK_BCLK);
+ }
+ 
+ static int max98506_hw_params(struct snd_pcm_substream *substream,
+@@ -47,19 +53,25 @@
+ 	struct regmap *regmap = dev_get_drvdata(dai->dev);
+ 	static const struct reg_sequence setup[] = {
+ 		{ MAX98506_GLOBAL_ENABLE, 0 },
+-		{ MAX98506_CLOCK1, MAX98506_CLOCK_BCLK | MAX98506_MDLL_X8 },
+ 		{ MAX98506_CLOCK2, MAX98506_RATE_48000 },
+ 		{ MAX98506_FORMAT, MAX98506_FORMAT_16_I2S },
+ 		{ MAX98506_SLOTS, 0xc8 },
+-		{ MAX98506_GAIN, MAX98506_SUM_BOTH_HALVED | 1 },
++		{ MAX98506_FILTERS, MAX98506_DAC_FILTERS },
++		{ MAX98506_GAIN, MAX98506_SUM_BOTH_HALVED | MAX98506_GAIN_0_DB },
+ 	};
++	int ret;
+ 
+ 	if (params_rate(params) != 48000 || params_channels(params) != 2 ||
+ 	    params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
+ 		return -EINVAL;
+ 
+ 	/* Keep the hardware muted while configuring a new PCM stream. */
+-	return regmap_multi_reg_write(regmap, setup, ARRAY_SIZE(setup));
++	ret = regmap_multi_reg_write(regmap, setup, ARRAY_SIZE(setup));
++	if (ret)
++		return ret;
++
++	return regmap_update_bits(regmap, MAX98506_CLOCK1,
++				  MAX98506_MDLL_MASK, MAX98506_MDLL_X8);
+ }
+ 
+ static int max98506_mute(struct snd_soc_dai *dai, int mute, int stream)
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -478,10 +478,8 @@
+ 					    MICBIAS1_SOFT_START | MICBIAS1_BYPASS,
+ 					    FIELD_PREP(MADERA_MICB1_LVL_MASK, 3) |
+ 					    MICBIAS1_SOFT_START);
+-	if (ret < 0)
+-		return ret;
+-	return snd_soc_component_update_bits(codec, MADERA_IN3L_CONTROL,
+-					     MADERA_IN3_MODE_MASK, MADERA_IN3_MODE_MASK) < 0 ? -EIO : 0;
++	/* IN3 is a dedicated digital input on the CS47L93. */
++	return ret < 0 ? ret : 0;
+ }
+ 
+ static const struct snd_soc_dapm_widget mic_widgets[] = {

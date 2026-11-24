@@ -1,0 +1,52 @@
+Subject: [PATCH] ASoC: sequence MAX98506 power after ABOX starts BCLK
+
+Program the amplifier clock multiplier after the playback serializer starts.
+The SM-G955N nonatomic link starts its PCM component before codec DAIs,
+so enable the output at trigger time and mute before stopping the clock.
+An R99 readback left the multiplier clear with the pre-trigger setup.
+
+diff --git a/sound/soc/codecs/max98506.c b/sound/soc/codecs/max98506.c
+--- a/sound/soc/codecs/max98506.c
++++ b/sound/soc/codecs/max98506.c
+@@ -59,19 +59,13 @@
+ 		{ MAX98506_FILTERS, MAX98506_DAC_FILTERS },
+ 		{ MAX98506_GAIN, MAX98506_SUM_BOTH_HALVED | MAX98506_GAIN_0_DB },
+ 	};
+-	int ret;
+ 
+ 	if (params_rate(params) != 48000 || params_channels(params) != 2 ||
+ 	    params_format(params) != SNDRV_PCM_FORMAT_S16_LE)
+ 		return -EINVAL;
+ 
+ 	/* Keep the hardware muted while configuring a new PCM stream. */
+-	ret = regmap_multi_reg_write(regmap, setup, ARRAY_SIZE(setup));
+-	if (ret)
+-		return ret;
+-
+-	return regmap_update_bits(regmap, MAX98506_CLOCK1,
+-				  MAX98506_MDLL_MASK, MAX98506_MDLL_X8);
++	return regmap_multi_reg_write(regmap, setup, ARRAY_SIZE(setup));
+ }
+ 
+ static int max98506_mute(struct snd_soc_dai *dai, int mute, int stream)
+@@ -88,6 +82,12 @@
+ 		return regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+ 					  MAX98506_SPEAKER_BOOST, 0);
+ 	}
++
++	/* The CPU PCM trigger has started BCLK before this callback. */
++	ret = regmap_update_bits(regmap, MAX98506_CLOCK1,
++				 MAX98506_MDLL_MASK, MAX98506_MDLL_X8);
++	if (ret)
++		return ret;
+ 
+ 	ret = regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+ 				 MAX98506_SPEAKER_BOOST, MAX98506_SPEAKER_BOOST);
+@@ -108,6 +108,7 @@
+ 	.hw_params = max98506_hw_params,
+ 	.mute_stream = max98506_mute,
+ 	.no_capture_mute = 1,
++	.mute_unmute_on_trigger = 1,
+ };
+ 
+ static struct snd_soc_dai_driver max98506_dai = {
