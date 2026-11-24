@@ -2483,3 +2483,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Reproduced the ordered speaker reference on #58 while R100 did not
   reproduce it. Captured direct amplifier reads and verified that the
   #58 boost request alone did not recover the R100 acoustic reference.
+
+
+### Synchronized #58 and R100 speaker trace
+
+- Captured playback clocks, ABOX state, GPIO-pad samples and direct
+  MAX98506 reads during a matched test. Matching the amplifier start
+  order and applying the measured #58 amplifier settings in separate
+  R100 trials did not recover the ordered acoustic reference.

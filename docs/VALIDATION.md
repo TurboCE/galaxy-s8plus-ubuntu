@@ -5504,3 +5504,45 @@ used 0x2d=0x67, 0x36=0x93 and 0x38=0x80. Both kernels read 0x06=0x40
 during the active samples. The #58 boost register setting alone did not
 recover the coded acoustic reference on R100. These are digital reads,
 with no independent boost rail or speaker-terminal voltage measurement.
+
+
+### Synchronized #58 and R100 speaker trace
+
+Booted the verified #58 image temporarily on the same handset, then
+restored the full R100 BOOT image with the memory-advice fix. Both
+desktop tests used the same 48 kHz S16 stereo fixture and volume. The
+#58 microphone recording detected the 523.25 Hz and 697 Hz tones in
+order. R100 did not detect either tone above the quiet baseline.
+
+A temporary sampling module read the direct amplifier registers, ABOX
+PCM and routing registers, CMU dividers and GPH0 pad readback during
+playback. Clean pad windows on both kernels agreed with 48 kHz frame
+clock and 32 bit clocks per frame, about 1.536 MHz. The #58 AUDIF
+divider register was 0xbf with a driver rate of 6.144 MHz. R100 read
+0x17, consistent with 49.152 MHz on the same PLL. The UAIF4 format
+register matched (0x0984f000). #58 used SPUS ASRC0 enabled, RDMA0
+period 0x2000 and SPUM 0x12/0x900. R100 native read SPUS ASRC0 off,
+RDMA0 period 0x1000 and SPUM 0x00/0x901.
+
+The GPIO sampling method reported no GPH0-7 data transitions even
+on #58 during successful acoustic playback. The captures therefore
+qualify pad clock timing and do not qualify the I2S sample words at
+the amplifier. The separate R100 Calliope path did show data transitions
+in the pad readback. This is not an electrical measurement of MAX98506
+DIN or speaker output.
+
+On #58 direct I2C reads observed amplifier global enable before
+UAIF4 TX by about 5 ms. The R100 native trace observed UAIF4 TX
+first, with global enable following about 12 ms later. A one-boot
+R100 DAI-link trigger-order change ran the codec start before the
+PCM component start. The first active sample showed global enable
+already set. It did not recover either acoustic tone.
+
+In a second R100 comparison, PipeWire did not start the optional
+Calliope RDMA stream. A direct ALSA run used the same WAV and
+started RDMA successfully. The test temporarily matched #58 raw
+values 0x2d=0x01, 0x36=0x90 and 0x37=0xf0 and verified them over I2C
+with global enable 0x80 and advancing RDMA. R100 again did not
+reproduce the ordered tones. The temporary settings and the original
+driver were restored. Microphone samples were analyzed in memory and
+not retained.
