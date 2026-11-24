@@ -145,12 +145,13 @@ def check_stock_audio_plugin():
         raise RuntimeError('The stock ALSA plugin is not mapped in the active audio graph')
 
 
-def default_audio_devices(native):
+def default_audio_devices(native, receiver=False):
     card_name = 'SM-G955N Audio' if native else 'Exynos8895-Madera'
     capture_device = 1 if native else 9
+    playback_device = 2 if receiver else 0
     nodes = {}
     for direction, selector, device, media in [
-            ('sink', '@DEFAULT_AUDIO_SINK@', 0, 'Audio/Sink'),
+            ('sink', '@DEFAULT_AUDIO_SINK@', playback_device, 'Audio/Sink'),
             ('source', '@DEFAULT_AUDIO_SOURCE@', capture_device, 'Audio/Source')]:
         info = command('wpctl', 'inspect', selector)
         if (card_name not in info or f'alsa.device = "{device}"' not in info
@@ -163,7 +164,7 @@ def default_audio_devices(native):
             raise RuntimeError(f'Default {direction} has no PipeWire node name')
         nodes[direction] = match[1]
     return nodes, {
-        'playback': Path('/proc/asound/card0/pcm0p/sub0/status'),
+        'playback': Path(f'/proc/asound/card0/pcm{playback_device}p/sub0/status'),
         'capture': Path(f'/proc/asound/card0/pcm{capture_device}c/sub0/status'),
     }
 
@@ -173,12 +174,16 @@ def main():
     parser.add_argument('--test-speaker-microphone', action='store_true')
     parser.add_argument('--kernel-alsa-scope', action='store_true',
                         help='Require the kernel endpoint guard and Ubuntu stock ALSA SPA')
+    parser.add_argument('--receiver', action='store_true',
+                        help='Check the currently selected native Voice profile and receiver')
     args = parser.parse_args()
     if not args.test_speaker_microphone:
         parser.error('Requires explicit --test-speaker-microphone')
     if os.geteuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise RuntimeError('Run as root only on SM-G955N')
     native = Path('/sys/class/sound/card0/device/driver').resolve().name == 'g955n-abox-speaker'
+    if args.receiver and not native:
+        parser.error('The receiver check requires the native SM-G955N driver')
     if args.kernel_alsa_scope:
         check_kernel_scoped_audio()
     if native or args.kernel_alsa_scope:
@@ -186,7 +191,7 @@ def main():
     else:
         subprocess.run(['/usr/local/libexec/g955n-wireplumber', '--check'], check=True,
                        stdout=subprocess.DEVNULL, timeout=10)
-    nodes, statuses = default_audio_devices(native)
+    nodes, statuses = default_audio_devices(native, receiver=args.receiver)
     kernel_before = Counter(subprocess.check_output(['dmesg'], text=True).splitlines())
     boot = Path('/proc/sys/kernel/random/boot_id').read_text()
     taint = Path('/proc/sys/kernel/tainted').read_text()

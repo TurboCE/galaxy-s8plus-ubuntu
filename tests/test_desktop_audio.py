@@ -98,6 +98,22 @@ class DesktopAudioTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, 'Default source'):
                         audio.default_audio_devices(native)
 
+    def test_receiver_diagnostic_uses_pcm_two_with_existing_microphone(self):
+        receiver = ('SM-G955N Audio\nalsa.device = "2"\nmedia.class = "Audio/Sink"'
+                    '\napi.alsa.open.ucm = "true"\napi.alsa.path = "hw:Audio,2"'
+                    '\n  * node.name = "alsa_output.receiver"')
+        capture = ('SM-G955N Audio\nalsa.device = "1"\nmedia.class = "Audio/Source"'
+                   '\napi.alsa.open.ucm = "true"\napi.alsa.path = "hw:Audio,1"'
+                   '\n  * node.name = "alsa_input.mic"')
+        with patch.object(audio, 'command', side_effect=[receiver, capture]):
+            nodes, statuses = audio.default_audio_devices(True, receiver=True)
+        self.assertEqual(nodes['sink'], 'alsa_output.receiver')
+        self.assertEqual(statuses['playback'], Path('/proc/asound/card0/pcm2p/sub0/status'))
+        self.assertEqual(statuses['capture'], Path('/proc/asound/card0/pcm1c/sub0/status'))
+        with patch.object(audio, 'command', return_value=receiver):
+            with self.assertRaisesRegex(RuntimeError, 'Default sink'):
+                audio.default_audio_devices(True)
+
     def test_record_failure_is_not_hidden_by_the_expected_stop_status(self):
         self.assertTrue(audio.capture_completed(0, False, ''))
         self.assertTrue(audio.capture_completed(1, True, ''))

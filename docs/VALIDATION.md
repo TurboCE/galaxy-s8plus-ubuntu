@@ -4994,3 +4994,55 @@ passed with 194 playback positions, 226 capture positions and zero
 new ALSA hardware or audio kernel errors. The CS47L92 module and
 UCM update remain installed. The one-boot firmware trial ended
 with the native playback path as the default.
+
+### R100 receiver PCM and separate output tests
+
+Implemented a third PCM for the CS47L93 AIF1 handset receiver with a
+separate Ubuntu Voice UCM profile. HiFi retains MAX98506 playback at
+device 0. Voice uses receiver playback at device 2. Both profiles use
+the existing microphone at device 1. The kernel serializes the two
+playback routes over RDMA0/SIFS1 and shares UAIF0 clock and format
+state between receiver playback and capture. It checks that the
+receiver DMA advances before reporting trigger success.
+
+A first RDMA1/SIFS0 prototype enumerated but failed to write PCM.
+During its diagnosis an incorrect temporary MMIO probe accessed
+the clock resource instead of the ABOX SFR resource and generated
+a kernel exception. That probe was withdrawn. Subsequent builds
+and tests used the Samsung alternate SIFS1 route and separate
+Voice/HiFi profiles. PipeWire selected PCM 2 for Voice and PCM 0
+for HiFi, with microphone PCM 1 in both profiles.
+
+Ran the same time-coded reference separately on PCM 2 and PCM 0.
+ALSA returned zero and the microphone captured 336,896 frames in
+each run. During the receiver test, CS47L93 selected HPOUT4 and
+asserted raw output state while MAX98506 stayed disabled. During
+the loudspeaker test, MAX98506 read block/global enable 0x90/0x80
+and the receiver raw state remained zero. Neither microphone
+recording contained a statistically significant match (receiver
+9/20 segments, p=0.335; loudspeaker 9/20, p=0.9725). PCM transport
+and output selection passed; acoustic playback remains unverified.
+
+The original R100 ABOX module was backed up. The ARM64 replacement
+build ID was verified after installing and rebooting. Both playback
+PCMs, the capture PCM and both UCM verbs remained available, with
+HiFi/PCM 0 the default. The earlier MAX98506 and CS47L92 fixes
+remain installed. The receiver patch targets the native R100
+source through patch 0125.
+
+With the receiver muted, an independent readback found GPH0-3
+unchanged in the leading silence and changing more than 3,600 times
+per sample during the nonzero stimulus. RDMA0 advanced and the
+UAIF0 transmit bit was active. This measures activity on the SoC
+codec bus and does not decode the I2S words or measure the transducer.
+
+Initial Voice/HiFi switching left the microphone mixer disconnected
+in both profiles. Moving the fixed primary-mic selection into the
+verb initialization resolved it. PipeWire's final silent duplex check
+passed in both profiles without new audio kernel errors or hardware
+error growth. The test utility gained a receiver selector and passed
+eight host tests.
+
+Samsung's stock mixer also selects ASYNCCLK rate 1 for Output Rate 1.
+R100 does not expose that mixer field through the 6.18 codec controls.
+The combined clock-domain change was not installed or qualified.

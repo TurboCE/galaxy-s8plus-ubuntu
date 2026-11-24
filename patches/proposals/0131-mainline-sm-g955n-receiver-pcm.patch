@@ -1,0 +1,457 @@
+Subject: [PATCH] ASoC: expose SM-G955N handset receiver playback
+
+Keep the existing SM-G955N speaker and microphone PCM numbering.
+Add the stock handset codec endpoint on AIF1 via UAIF0 and SIFS1.
+The two playback links share RDMA0 and are selected by separate UCM
+verbs. Serialize playback preparation and restore only the route
+fields owned by each output. Reference-count the UAIF0 clock and
+format shared with WDMA1 capture. Require the receiver DMA to move
+before its PCM trigger returns success.
+
+Apply to the native R100 source through audio patch 0125.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -62,6 +62,15 @@
+ #define CAP_SPUM1	0x0304
+ #define CAP_FLUSH	0x030c
+ #define CAP_BANK0	0x0328
++#define RECEIVER_ROUTE_MASK GENMASK(3, 0)
++#define SPEAKER_ROUTE_MASK GENMASK(19, 16)
++#define SPEAKER_SPUS_MASK GENMASK(3, 0)
++#define SIFS1_SOURCE_MASK GENMASK(18, 16)
++#define UAIF_STREAM_ENABLES GENMASK(1, 0)
++#define UAIF0_MODE (BIT(2) | BIT(4))
++#define UAIF0_FORMAT ((9 << 24) | BIT(23) | (1 << 18) | (15 << 12))
++#define RECEIVER_PCM 2
++#define PCM_COUNT 3
+ #define MICBIAS1_SOFT_START	BIT(3)
+ #define MICBIAS1_BYPASS		BIT(1)
+
+@@ -73,10 +82,15 @@
+
+ static const u32 capture_regs[] = {
+ 	CAP_ROUTE, CAP_SPUM0, CAP_SPUM1, CAP_BANK0,
+-	CAP_UAIF0, CAP_UAIF0 + 4, CAP_DMA, CAP_DMA + 8,
++	CAP_DMA, CAP_DMA + 8,
+ 	CAP_DMA + 12, CAP_DMA + 16, CAP_DMA + 20, CAP_DMA + 24,
+ };
+
++static const u32 receiver_regs[] = {
++	ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
++	RDMA0_CTRL0, RDMA0_START, RDMA0_END, RDMA0_PERIOD, RDMA0_POINT, RDMA0_VOL,
++};
++
+ struct g955n_speaker;
+
+ struct g955n_pcm {
+@@ -90,6 +104,7 @@
+ 	u32 saved[ARRAY_SIZE(saved_regs)];
+ 	u32 saved_gate;
+ 	bool capture;
++	bool receiver;
+ 	bool prepared;
+ 	bool running;
+ 	bool poisoned;
+@@ -101,11 +116,14 @@
+ 	void __iomem *sfr;
+ 	void __iomem *cmu;
+ 	struct snd_soc_card card;
+-	struct snd_soc_dai_link link[2];
+-	struct snd_soc_dai_link_component cpu[2], codec[2], platform;
+-	struct g955n_pcm pcm[2];
++	struct snd_soc_dai_link link[PCM_COUNT];
++	struct snd_soc_dai_link_component cpu[PCM_COUNT], codec[PCM_COUNT], platform;
++	struct g955n_pcm pcm[PCM_COUNT];
+ 	struct mutex prepare_lock;
+ 	unsigned int prepared_count;
++	unsigned int uaif0_users;
++	u32 saved_uaif0_ctrl0, saved_uaif0_ctrl1, saved_uaif0_gate;
++	unsigned long saved_uaif0_bclk;
+ 	u32 saved_syspower;
+ };
+
+@@ -114,7 +132,7 @@
+ {
+ 	struct g955n_speaker *abox = container_of(component->card, struct g955n_speaker, card);
+
+-	return &abox->pcm[stream->stream];
++	return &abox->pcm[snd_soc_substream_to_rtd(stream)->dai_link->id];
+ }
+
+ static void abox_update(void __iomem *base, u32 reg, u32 mask, u32 value)
+@@ -124,7 +142,9 @@
+
+ static u32 dma_control(struct g955n_pcm *p)
+ {
+-	return p->capture ? CAP_DMA : RDMA0_CTRL0;
++	if (p->capture)
++		return CAP_DMA;
++	return RDMA0_CTRL0;
+ }
+
+ static u32 dma_status(struct g955n_pcm *p)
+@@ -134,7 +154,7 @@
+
+ static u32 uaif_control(struct g955n_pcm *p)
+ {
+-	return p->capture ? CAP_UAIF0 : UAIF4_CTRL0;
++	return p->capture || p->receiver ? CAP_UAIF0 : UAIF4_CTRL0;
+ }
+
+ static u32 uaif_enable(struct g955n_pcm *p)
+@@ -142,9 +162,18 @@
+ 	return p->capture ? BIT(1) : BIT(0);
+ }
+
+-static u32 uaif_gate(struct g955n_pcm *p)
++static const u32 *abox_pcm_regs(struct g955n_pcm *pcm, size_t *count)
+ {
+-	return p->capture ? CAP_GATE : ABOX_CMU_GATE;
++	if (pcm->capture) {
++		*count = ARRAY_SIZE(capture_regs);
++		return capture_regs;
++	}
++	if (pcm->receiver) {
++		*count = ARRAY_SIZE(receiver_regs);
++		return receiver_regs;
++	}
++	*count = ARRAY_SIZE(saved_regs);
++	return saved_regs;
+ }
+
+ static int abox_power_ready(struct g955n_speaker *speaker)
+@@ -222,22 +251,54 @@
+
+ static int speaker_restore(struct g955n_pcm *pcm)
+ {
+-	unsigned int i;
+-	int ret;
++	struct g955n_speaker *abox = pcm->abox;
++	const u32 *regs;
++	size_t count;
++	u32 mask;
++	int ret = 0;
+
+-	lockdep_assert_held(&pcm->abox->prepare_lock);
++	lockdep_assert_held(&abox->prepare_lock);
+ 	if (!pcm->prepared)
+ 		return 0;
+-	for (i = ARRAY_SIZE(saved_regs); i > 0; i--)
+-		writel(pcm->saved[i - 1], pcm->abox->sfr +
+-			(pcm->capture ? capture_regs : saved_regs)[i - 1]);
+-	writel(pcm->saved_gate, pcm->abox->cmu + uaif_gate(pcm));
++
++	regs = abox_pcm_regs(pcm, &count);
++	while (count) {
++		u32 reg = regs[--count];
++
++		switch (reg) {
++		case ROUTE_CTRL0:
++			mask = pcm->receiver ? RECEIVER_ROUTE_MASK : SPEAKER_ROUTE_MASK;
++			break;
++		case SPUS_CTRL0:
++			mask = SPEAKER_SPUS_MASK;
++			break;
++		case SPUS_CTRL1:
++			mask = SIFS1_SOURCE_MASK;
++			break;
++		default:
++			mask = U32_MAX;
++			break;
++		}
++		abox_update(abox->sfr, reg, mask, pcm->saved[count] & mask);
++	}
++
++	if (uaif_control(pcm) == UAIF4_CTRL0) {
++		writel(pcm->saved_gate, abox->cmu + ABOX_CMU_GATE);
++		ret = clk_set_rate(pcm->bclk, pcm->previous_bclk);
++		if (!ret && clk_get_rate(pcm->bclk) != pcm->previous_bclk)
++			ret = -EIO;
++	} else if (!--abox->uaif0_users) {
++		writel(abox->saved_uaif0_ctrl1, abox->sfr + CAP_UAIF0 + 4);
++		writel(abox->saved_uaif0_ctrl0, abox->sfr + CAP_UAIF0);
++		writel(abox->saved_uaif0_gate, abox->cmu + CAP_GATE);
++		ret = clk_set_rate(pcm->bclk, abox->saved_uaif0_bclk);
++		if (!ret && clk_get_rate(pcm->bclk) != abox->saved_uaif0_bclk)
++			ret = -EIO;
++	}
++
+ 	pcm->prepared = false;
+-	if (!--pcm->abox->prepared_count)
+-		writel(pcm->abox->saved_syspower, pcm->abox->sfr + SYSPOWER_CTRL);
+-	ret = clk_set_rate(pcm->bclk, pcm->previous_bclk);
+-	if (!ret && clk_get_rate(pcm->bclk) != pcm->previous_bclk)
+-		ret = -EIO;
++	if (!--abox->prepared_count)
++		writel(abox->saved_syspower, abox->sfr + SYSPOWER_CTRL);
+ 	return ret;
+ }
+
+@@ -282,47 +343,70 @@
+
+ static int abox_prepare_pcm(struct g955n_pcm *pcm, struct snd_pcm_substream *stream)
+ {
+-	void __iomem *sfr = pcm->abox->sfr;
++	struct g955n_speaker *abox = pcm->abox;
++	void __iomem *sfr = abox->sfr;
++	const u32 *regs;
+ 	size_t bytes = snd_pcm_lib_buffer_bytes(stream);
+ 	dma_addr_t addr = pcm->ring.addr;
+-	u32 status;
+-	unsigned int i;
++	u32 status, dma = dma_control(pcm);
++	bool shared_uaif = uaif_control(pcm) == CAP_UAIF0;
++	bool configure_clock = !shared_uaif || !abox->uaif0_users;
++	unsigned long previous_rate = 0;
++	size_t count, i;
+ 	int ret;
+
+ 	if (pcm->poisoned || !bytes || bytes > RING_BYTES ||
+ 	    !IS_ALIGNED(bytes, PERIOD_BYTES))
+ 		return -EINVAL;
+-	ret = speaker_restore(pcm);
++	ret = abox_power_ready(abox);
+ 	if (ret)
+ 		return ret;
+-	ret = abox_power_ready(pcm->abox);
+-	if (ret)
+-		return ret;
+-	if ((readl(sfr + dma_control(pcm)) & RDMA_ENABLE) ||
+-	    (readl(sfr + uaif_control(pcm)) & 3))
++	if ((readl(sfr + dma) & RDMA_ENABLE) ||
++	    (readl(sfr + uaif_control(pcm)) &
++	     (configure_clock ? UAIF_STREAM_ENABLES : uaif_enable(pcm))))
+ 		return -EBUSY;
+
+-	pcm->previous_bclk = clk_get_rate(pcm->bclk);
+-	if (!pcm->previous_bclk)
+-		return -EIO;
+-	for (i = 0; i < ARRAY_SIZE(saved_regs); i++)
+-		pcm->saved[i] = readl(sfr + (pcm->capture ? capture_regs : saved_regs)[i]);
+-	pcm->saved_gate = readl(pcm->abox->cmu + uaif_gate(pcm));
+-	if (!pcm->abox->prepared_count++)
+-		pcm->abox->saved_syspower = readl(sfr + SYSPOWER_CTRL);
+-	pcm->prepared = true;
+-	ret = clk_set_rate(pcm->bclk, BCLK_RATE);
+-	if (ret || clk_get_rate(pcm->bclk) != BCLK_RATE) {
+-		ret = ret ?: -EIO;
+-		goto restore;
++	if (configure_clock) {
++		previous_rate = clk_get_rate(pcm->bclk);
++		if (!previous_rate)
++			return -EIO;
+ 	}
+
+-	abox_update(pcm->abox->cmu, uaif_gate(pcm), GATE_MASK, GATE_ON);
++	regs = abox_pcm_regs(pcm, &count);
++	for (i = 0; i < count; i++)
++		pcm->saved[i] = readl(sfr + regs[i]);
++	if (!shared_uaif) {
++		pcm->previous_bclk = previous_rate;
++		pcm->saved_gate = readl(abox->cmu + ABOX_CMU_GATE);
++	} else if (!abox->uaif0_users++) {
++		abox->saved_uaif0_bclk = previous_rate;
++		abox->saved_uaif0_ctrl0 = readl(sfr + CAP_UAIF0);
++		abox->saved_uaif0_ctrl1 = readl(sfr + CAP_UAIF0 + 4);
++		abox->saved_uaif0_gate = readl(abox->cmu + CAP_GATE);
++	}
++	if (!abox->prepared_count++)
++		abox->saved_syspower = readl(sfr + SYSPOWER_CTRL);
++	pcm->prepared = true;
++
++	if (configure_clock) {
++		ret = clk_set_rate(pcm->bclk, BCLK_RATE);
++		if (ret || clk_get_rate(pcm->bclk) != BCLK_RATE) {
++			ret = ret ?: -EIO;
++			goto restore;
++		}
++		abox_update(abox->cmu, shared_uaif ? CAP_GATE : ABOX_CMU_GATE,
++			    GATE_MASK, GATE_ON);
++	}
+ 	abox_update(sfr, SYSPOWER_CTRL, BIT(0), BIT(0));
+ 	ret = readl_poll_timeout(sfr + SYSPOWER_STATUS, status, status & BIT(0), 10, 20000);
+ 	if (ret)
+ 		goto restore;
+
++	if (shared_uaif && configure_clock) {
++		abox_update(sfr, CAP_UAIF0, GENMASK(4, 2), UAIF0_MODE);
++		abox_update(sfr, CAP_UAIF0 + 4, GENMASK(28, 0), UAIF0_FORMAT);
++	}
++
+ 	if (pcm->capture) {
+ 		/* UAIF0 -> NSRC0 -> SIFM0 -> WDMA1, qualified on R91. */
+ 		abox_update(sfr, CAP_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
+@@ -331,9 +415,6 @@
+ 		abox_update(sfr, CAP_SPUM0, BIT(4) | BIT(7), 0);
+ 		abox_update(sfr, CAP_SPUM1, GENMASK(12, 8) | GENMASK(1, 0), (9 << 8) | 1);
+ 		abox_update(sfr, CAP_ROUTE, GENMASK(3, 0), 8);
+-		abox_update(sfr, CAP_UAIF0, GENMASK(4, 0), BIT(2) | BIT(4));
+-		abox_update(sfr, CAP_UAIF0 + 4, GENMASK(28, 0),
+-			    (9 << 24) | BIT(23) | (1 << 18) | (15 << 12));
+ 		writel(lower_32_bits(addr), sfr + CAP_DMA + 8);
+ 		writel(lower_32_bits(addr) + bytes, sfr + CAP_DMA + 12);
+ 		writel(PERIOD_BYTES, sfr + CAP_DMA + 16);
+@@ -344,20 +425,28 @@
+ 		return 0;
+ 	}
+
+-	abox_update(sfr, SPUS_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
+-	writel(BIT(0), sfr + SPUS_CTRL3);
+-	writel(0x800000, sfr + RDMA0_VOL);
+-	abox_update(sfr, SPUS_CTRL0, GENMASK(3, 0), 0);
+-	abox_update(sfr, SPUS_CTRL1, GENMASK(18, 16), 0);
+-	abox_update(sfr, ROUTE_CTRL0, GENMASK(19, 16), 2 << 16);
+-	abox_update(sfr, UAIF4_CTRL0, GENMASK(4, 0), BIT(2));
+-	abox_update(sfr, UAIF4_CTRL1, GENMASK(28, 0),
+-		    (9 << 24) | BIT(23) | (1 << 18) | (15 << 12));
+-	writel(lower_32_bits(addr), sfr + RDMA0_START);
+-	writel(lower_32_bits(addr) + bytes, sfr + RDMA0_END);
+-	writel(PERIOD_BYTES, sfr + RDMA0_PERIOD);
+-	writel(lower_32_bits(addr), sfr + RDMA0_POINT);
+-	abox_update(sfr, RDMA0_CTRL0, GENMASK(22, 19) | GENMASK(18, 16) |
++	if (pcm->receiver) {
++		/* Samsung's alternate AP route feeds the receiver from SIFS1. */
++		abox_update(sfr, SPUS_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
++		writel(BIT(0), sfr + SPUS_CTRL3);
++		abox_update(sfr, SPUS_CTRL0, SPEAKER_SPUS_MASK, 0);
++		abox_update(sfr, SPUS_CTRL1, SIFS1_SOURCE_MASK, 0);
++		abox_update(sfr, ROUTE_CTRL0, RECEIVER_ROUTE_MASK, 2);
++	} else {
++		abox_update(sfr, SPUS_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
++		writel(BIT(0), sfr + SPUS_CTRL3);
++		abox_update(sfr, SPUS_CTRL0, SPEAKER_SPUS_MASK, 0);
++		abox_update(sfr, SPUS_CTRL1, SIFS1_SOURCE_MASK, 0);
++		abox_update(sfr, ROUTE_CTRL0, SPEAKER_ROUTE_MASK, 2 << 16);
++		abox_update(sfr, UAIF4_CTRL0, GENMASK(4, 0), BIT(2));
++		abox_update(sfr, UAIF4_CTRL1, GENMASK(28, 0), UAIF0_FORMAT);
++	}
++	writel(0x800000, sfr + dma + 24);
++	writel(lower_32_bits(addr), sfr + dma + 8);
++	writel(lower_32_bits(addr) + bytes, sfr + dma + 12);
++	writel(PERIOD_BYTES, sfr + dma + 16);
++	writel(lower_32_bits(addr), sfr + dma + 20);
++	abox_update(sfr, dma, GENMASK(22, 19) | GENMASK(18, 16) |
+ 		    GENMASK(13, 8) | GENMASK(5, 4) | RDMA_ENABLE,
+ 		    (8 << 19) | (9 << 8) | BIT(5));
+ 	return 0;
+@@ -378,7 +467,12 @@
+ 		return ret;
+ 	cancel_delayed_work_sync(&pcm->period_work);
+ 	mutex_lock(&pcm->abox->prepare_lock);
+-	ret = abox_prepare_pcm(pcm, stream);
++	ret = speaker_restore(pcm);
++	if (!ret && !pcm->capture &&
++	    pcm->abox->pcm[pcm->receiver ? SNDRV_PCM_STREAM_PLAYBACK : RECEIVER_PCM].prepared)
++		ret = -EBUSY;
++	if (!ret)
++		ret = abox_prepare_pcm(pcm, stream);
+ 	mutex_unlock(&pcm->abox->prepare_lock);
+ 	return ret;
+ }
+@@ -388,14 +482,28 @@
+ {
+ 	struct g955n_pcm *pcm = abox_pcm(component, stream);
+ 	void __iomem *sfr = pcm->abox->sfr;
++	u32 initial, status;
++	int ret;
+
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+ 		if (!pcm->prepared || pcm->poisoned)
+ 			return -EIO;
++		initial = readl(sfr + dma_status(pcm)) & GENMASK(28, 0);
+ 		dma_wmb();
+ 		abox_update(sfr, dma_control(pcm), RDMA_ENABLE, RDMA_ENABLE);
+ 		abox_update(sfr, uaif_control(pcm), uaif_enable(pcm), uaif_enable(pcm));
++		if (pcm->receiver) {
++			ret = readl_poll_timeout(sfr + dma_status(pcm), status,
++				 (status & RDMA_PROGRESS) &&
++				 (status & GENMASK(28, 0)) != initial, 100, 160000);
++			if (ret) {
++				dev_err(pcm->abox->dev, "receiver RDMA0 did not advance: %#x\n",
++					status);
++				speaker_stop(pcm);
++				return ret;
++			}
++		}
+ 		pcm->period = 0;
+ 		WRITE_ONCE(pcm->running, true);
+ 		schedule_delayed_work(&pcm->period_work, msecs_to_jiffies(5));
+@@ -435,6 +543,7 @@
+ static struct snd_soc_dai_driver speaker_dai[] = {
+ 	{ .name = "g955n-uaif4", .playback = G955N_STREAM("ABOX Speaker") },
+ 	{ .name = "g955n-uaif0", .capture = G955N_STREAM("ABOX Microphone") },
++	{ .name = "g955n-uaif0-tx", .playback = G955N_STREAM("ABOX Receiver") },
+ };
+
+ static int g955n_mic_clock(struct snd_pcm_substream *stream,
+@@ -484,10 +593,13 @@
+
+ static const struct snd_soc_dapm_widget mic_widgets[] = {
+ 	SND_SOC_DAPM_MIC("Internal Mic", NULL),
++	SND_SOC_DAPM_SPK("Receiver", NULL),
+ };
+
+ static const struct snd_soc_dapm_route mic_routes[] = {
+ 	{ "Internal Mic", NULL, "MICBIAS1A" },
++	{ "Receiver", NULL, "HPOUT4L" },
++	{ "Receiver", NULL, "HPOUT4R" },
+ 	{ "IN1ARN", NULL, "Internal Mic" },
+ 	{ "IN1ARP", NULL, "Internal Mic" },
+ };
+@@ -513,6 +625,7 @@
+
+ 	pcm->abox = abox;
+ 	pcm->capture = direction == SNDRV_PCM_STREAM_CAPTURE;
++	pcm->receiver = direction == RECEIVER_PCM;
+ 	pcm->bclk = devm_clk_get(dev, clock);
+ 	if (IS_ERR(pcm->bclk))
+ 		return PTR_ERR(pcm->bclk);
+@@ -590,6 +703,9 @@
+ 	if (ret)
+ 		return ret;
+ 	ret = abox_init_pcm(speaker, SNDRV_PCM_STREAM_CAPTURE, "mic");
++	if (ret)
++		return ret;
++	ret = abox_init_pcm(speaker, RECEIVER_PCM, "mic");
+ 	if (ret)
+ 		return ret;
+
+@@ -609,6 +725,10 @@
+ 	speaker->cpu[0].dai_name = speaker_dai[0].name;
+ 	speaker->cpu[1].name = dev_name(dev);
+ 	speaker->cpu[1].dai_name = speaker_dai[1].name;
++	speaker->cpu[RECEIVER_PCM].name = dev_name(dev);
++	speaker->cpu[RECEIVER_PCM].dai_name = speaker_dai[RECEIVER_PCM].name;
++	speaker->codec[RECEIVER_PCM].of_node = mic;
++	speaker->codec[RECEIVER_PCM].dai_name = "cs47l92-aif1";
+ 	speaker->platform.name = dev_name(dev);
+ 	speaker->codec[0].of_node = codec;
+ 	speaker->codec[0].dai_name = "max98506-hifi";
+@@ -624,6 +744,7 @@
+ 		.playback_only = 1, .nonatomic = 1,
+ 	};
+ 	speaker->link[1] = (struct snd_soc_dai_link) {
++		.id = SNDRV_PCM_STREAM_CAPTURE,
+ 		.name = "Internal Microphone",
+ 		.stream_name = "Internal Microphone",
+ 		.cpus = &speaker->cpu[1], .num_cpus = 1,
+@@ -633,6 +754,16 @@
+ 		.capture_only = 1, .nonatomic = 1,
+ 		.init = g955n_mic_init, .ops = &g955n_mic_ops,
+ 	};
++	speaker->link[RECEIVER_PCM] = (struct snd_soc_dai_link) {
++		.id = RECEIVER_PCM,
++		.name = "Receiver",
++		.stream_name = "Receiver",
++		.cpus = &speaker->cpu[RECEIVER_PCM], .num_cpus = 1,
++		.platforms = &speaker->platform, .num_platforms = 1,
++		.codecs = &speaker->codec[RECEIVER_PCM], .num_codecs = 1,
++		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
++		.playback_only = 1, .nonatomic = 1, .ops = &g955n_mic_ops,
++	};
+ 	speaker->card = (struct snd_soc_card) {
+ 		.name = "SM-G955N Audio",
+ 		.driver_name = "g955n-audio",

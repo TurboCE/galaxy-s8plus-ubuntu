@@ -2362,3 +2362,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   of the native DMA channel. Leave native playback and capture unchanged.
 - Select the Samsung HPOUT4 receiver route when UCM enables HiFi
   without enabling the receiver output or changing PCM assignments.
+
+### R100 separate handset receiver profile
+
+- Exposed the CS47L93 handset receiver as PCM 2 under Voice. Retained
+  the HiFi speaker and existing microphone mappings. Verified
+  profile switching and persistence after reboot.
+- Tested loudspeaker and receiver independently. Both selected their
+  intended output and completed PCM transport. The microphone did
+  not reproduce either acoustic reference.
