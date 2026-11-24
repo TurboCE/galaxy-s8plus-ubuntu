@@ -5324,3 +5324,29 @@ the AIF1 TX mix and ABOX capture transport. These checks cannot
 distinguish the digital microphone, its PDM clock and bias,
 and the codec input setup. Both device settings were restored
 and no raw recording was retained.
+
+### R100 primary microphone PDM clock and noise
+
+With unchanged IN3L digital gain, the current 3.072 MHz
+setting produced about 4,160 PCM counts RMS of quiet input.
+Temporarily setting 1.536 MHz lowered this to 3.94 counts.
+Restoring 3.072 MHz returned the original noise. The two rates
+are exposed by the standard ALSA IN3 OSR selector.
+
+Compared both rates with the same coded reference from the
+MacBook built-in speaker at 55 percent, down from 88 in the
+earlier test. The MacBook reference was detected in both runs.
+At 3.072 MHz the handset recorded 4,202.6 quiet RMS counts
+and matched 11/20 reference windows (p=0.2700). At 1.536 MHz
+it recorded 3.9 quiet RMS counts and matched 20/20 (p=0.0025).
+The test restored the MacBook output device, volume and mute.
+
+Added the 1.536 MHz setting to the native HiFi and Voice UCM
+enable sequences and verified both against the handset mixer.
+After reboot the default PipeWire source was the built-in
+microphone on PCM 1, with 1.536 MHz selected. A quiet PipeWire
+capture returned 104,448 frames with 14.23 RMS counts and
+zero clipping. The upper receiver then played the same coded
+reference. Both microphones detected all 20 windows (each
+p=0.0025). The receiver and IN3L gains remained at the original
+values. No raw recordings were kept.

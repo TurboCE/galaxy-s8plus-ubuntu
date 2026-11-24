@@ -2430,3 +2430,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   microphones. The handset captured the external code, and
   a controlled gain and routing test localized the high
   quiet-signal level to the IN3L input path.
+
+### R100 primary microphone clock
+
+- Set the native HiFi and Voice microphone profiles to use a
+  1.536 MHz IN3 PDM clock. Verified a quieter capture after
+  reboot and detection of the upper receiver reference on
+  both the handset and the MacBook microphones.
