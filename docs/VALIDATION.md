@@ -5717,3 +5717,53 @@ tested ASRC0 and 64 KiB trial module. The standard R100 module
 loads on the next boot. The electrical signal at the MAX98506
 input and the acoustic lower speaker output remain unverified
 and unresolved respectively.
+
+
+### Reviewed lower-speaker data-path and PMU comparisons
+
+An independent evidence review and a Samsung/R100 source review
+cross-checked the earlier lower-speaker results. The earlier known
+I2S words came from the optional Calliope OUT7 path with UAIF0 TX
+and UAIF4 RX enabled, so they did not qualify the ASRC0/OUT0 path.
+RDMA progress and matching control registers cannot establish the
+sample data at the amplifier.
+
+Replayed the same asymmetric stereo pattern with zero sections
+and the constant pairs 0xfca9/0x014a and 0x0357/0xfeb6. A
+read-only probe found all 16,384 sampled ALSA ring frames equal to
+the expected nonzero sample pairs in multiple active ASRC0/OUT0
+windows. On the same device boot, the ASRC0/OUT0 path and that
+path with UAIF0 TX and SIFS0 pacing added both showed clock activity
+and no changes on GPH0-7. Switching to the Calliope OUT7 path with
+the same 64 KiB ring and stimulus reproduced both expected sample
+pairs in the folded GPH0-7 reads, along with zero sections. GPH0-3
+had nearly identical edge counts in the OUT7 run. This compares
+the SoC readback paths and cannot establish the waveform at DIN.
+The same OUT7 setup completed a separate two-tone playback and
+microphone capture without the two ordered acoustic peaks.
+
+The Samsung source restores RDMA synchronizers after boot. Sending
+PCM_SYNCHRONIZE (21) for RDMA0 to itself before PCM OPEN obtained
+acknowledgment. OUT0 still had the expected ring words and no
+GPH0-7 changes. No playback repair was confirmed from that command.
+
+The #58 reference again produced the two ordered tones, recording
+from its verified internal microphone PCM (WDMA1 on device 9).
+The extra RDMA registers 0x1004, 0x1014 and 0x101c matched R100
+at 0, 0x81000000 and 0. MAX98506 0x3a matched at 0xf8. The PMU
+registers 0x1208 and 0x3048 both read zero. The GPIO mode at 0x1308
+read 1 on #58 and 0 in both R100 playback paths.
+
+Temporarily performed the vendor ABOX pad release after CA7 start:
+set bit 28 at PMU 0x3048 and then bit 0 at 0x1308. Both accesses
+succeeded and the active 0x1308 readback changed from 0 to 1.
+Tested ASRC0/OUT0 and Calliope OUT7 with the release applied.
+Both ALSA playbacks and 384,000-frame microphone captures completed.
+Neither reproduced the ordered speaker tones. OUT0 still showed
+zero GPH0-7 transitions. Removed the synchronization and PMU test
+modules and restored the previously tested ASRC0/64 KiB setup.
+
+No PCM recordings were retained. There is still no independent
+electrical measurement at MAX98506 DIN, BCLK or WS under both #58
+and R100. A matched bench measurement would distinguish delivery
+to the amplifier from its boost and output stages.

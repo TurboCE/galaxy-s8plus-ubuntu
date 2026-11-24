@@ -2534,3 +2534,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   path. Direct ALSA playback and concurrent microphone capture passed.
 - Tested the #58 amplifier settings and codec MCLK mux. The acoustic
   reference remained absent. A separate SPUM capture trial returned EIO.
+
+
+### Independent review of R100 lower-speaker signal tests
+
+- Verified the known stereo sample words in the ALSA ring. The
+  firmware OUT7 path reproduced both words in SoC GPIO readback.
+  ASRC0/OUT0 did not, including with UAIF0 transmit enabled.
+- Tested the missing Samsung RDMA0 synchronization command and the
+  PMU audio pad release sequence. Neither restored speaker output.
+  Removed both diagnostic changes.
