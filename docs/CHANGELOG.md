@@ -2287,3 +2287,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Compared ASRC0, the WDMA1 alias and the RDMA0 ring size one at a
   time. Audited the live IOMMU pages. The expected acoustic sequence
   was not recovered.
+
+### R100 side-by-side SoC PCM output
+
+- Verified zero data at the native speaker pad during nonzero test
+  PCM and confirmed the matching sample words at the Calliope pad.
+- Tested the native mixer-format field independently. The Samsung
+  16-bit stereo setting did not restore data.

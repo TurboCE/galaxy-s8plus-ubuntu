@@ -4700,3 +4700,26 @@ so the full ordered sequence was not recovered. The repository's
 older vendor audio profile requests a 64 KiB buffer, but the
 archived positive test does not include its negotiated period or
 buffer geometry. The temporary modules were withdrawn.
+
+### R100 native and Calliope PCM words at the speaker pad
+
+Fed the same 48 kHz stereo WAV to native R100 and the optional
+Calliope build, with the microphone PCM prepared first and running
+during the snapshots. Playback and capture finished in both modes.
+Both modes showed approximately 48 kHz word clocks. Native had
+no high data bins in the silent interval or either nonzero test
+interval. Calliope emitted zero during silence and reproduced
+`0xfca9/0x014a` and `0x0357/0xfeb6` in the subsequent intervals.
+The two channels decoded in the expected order with the one-bit
+I2S delay.
+
+The native mixer-format field read zero. In a one-variable native
+comparison it was set to the Samsung 16-bit stereo encoding (9).
+The setting read back during playback, but data stayed zero in
+both nonzero test intervals. Restoring the field to zero produced
+the same result. The diagnostic module was withdrawn.
+
+This comparison confirms an upstream data loss in the native path.
+The Calliope result accounts for the test words at the SoC pad;
+the MAX98506 pin levels and analog output remain unqualified.
+The earlier kernel58 acoustic capture has no matching pad trace.
