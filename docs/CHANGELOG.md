@@ -2344,3 +2344,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Confirmed during a GNOME/PipeWire playback that the MAX98506
   loudspeaker enables assert while the CS47L93 receiver remains idle.
   The current 6.18 ALSA card has no receiver playback PCM.
+
+### R100 Samsung handset mixer comparison
+
+- Identified the stock handset route from AIF1RX1/2 through HPOUT3L
+  to HPOUT4 and compared it with the R100 capture-only codec link.
+- Tested the receiver codec's tone route independently of the lower
+  speaker and restored the mixer. Recorded an OUT3 Demux error
+  propagation defect shared by Samsung's driver and Linux 6.18.

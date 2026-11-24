@@ -4924,3 +4924,31 @@ snapshots. The test confirms selection and power sequencing for
 the bottom media speaker. It does not establish sound at that
 speaker or test the unexposed receiver playback path. No persistent
 routing or volume settings were changed.
+
+### Samsung handset mixer and R100 receiver isolation
+
+The stock Android `dev-handset` mixer route selects AIF1RX1 and
+AIF1RX2 into HPOUT3L and selects HPOUT4 in OUT3 Demux. Its left-only
+variant uses AIF1RX1 and leaves the second input disconnected. The
+stock media loudspeaker instead uses DSM, SPUS OUT7 and SIFS1 to
+UAIF4/MAX98506. The R100 lower speaker uses the same physical
+UAIF4/MAX98506 endpoint by its native path.
+
+On R100, the receiver demux initially selected HPOUT3 and both
+HPOUT3L mixer inputs were disconnected. The CS47L93 AIF1 link is
+capture-only. Tested the receiver analog route in isolation by
+selecting HPOUT4 and the codec's own tone generator at -36 dB.
+The MAX98506 remained off. In a separate muted readback the CS47L93
+selected HPOUT4 (EP_SEL set), enabled SYSCLK and Tone Generator 1,
+and read output configuration 0x8030 and raw output status 0x0030.
+The ordinary output status remained 0x0000, so these reads do not
+qualify physical sound. Restored demux, mixer input, gain and
+switch values and confirmed the outputs returned to idle.
+
+Samsung 4.4 and Linux 6.18 both continue the OUT3 Demux transition
+after a failed initial enable-register read. The 6.18 path can then
+use the unread `cur` value for restore. It can also report the mux
+change despite a failed register write, since the final return is
+derived from the DAPM update and the change flag. Readback confirmed
+the actual HPOUT4 selection in this trial. There was no evidence
+that this error path was taken. No codec driver changes were made.
