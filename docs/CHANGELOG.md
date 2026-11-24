@@ -2473,3 +2473,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   PCM playback. The amplifier reported no level or fault flags and
   handset capture did not reproduce the stimulus. Restored the original
   amplifier threshold after the trial.
+
+
+### R100 Ubuntu app compatibility and live #58 speaker comparison
+
+- Enable memory-advice syscalls in the Ubuntu config. The official ARM64
+  ChatGPT package reached its sign-in screen on the handset with native
+  Wayland. Tailscale ran in userspace mode and awaited account sign-in.
+- Reproduced the ordered speaker reference on #58 while R100 did not
+  reproduce it. Captured direct amplifier reads and verified that the
+  #58 boost request alone did not recover the R100 acoustic reference.

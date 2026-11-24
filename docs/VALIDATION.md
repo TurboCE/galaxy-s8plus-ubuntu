@@ -5465,3 +5465,42 @@ The zero flags cannot distinguish a missing or undecoded signal at
 the amplifier from a power or output stage problem. Local electrical
 measurement of DIN/BCLK/LRCLK, the boost rail, and differential
 output at the speaker contacts remains the outstanding check.
+
+
+### R100 Ubuntu desktop applications and paired #58 speaker check
+
+The official ChatGPT 26.1120.41243 ARM64 package installed on Ubuntu
+24.04. The original R100 returned ENOSYS from madvise and ChatGPT
+terminated with SIGTRAP. An R100 image with CONFIG_ADVISE_SYSCALLS
+enabled returned success for the syscall. In the regular Ubuntu user
+session, the package displayed its sign-in screen with native Wayland.
+The user launcher selects Wayland. Firefox handles HTTP and HTTPS and
+ChatGPT retains the codex callback. Tailscale 1.104.7 ran with a
+loopback SOCKS5 proxy in userspace mode. The service reported
+NeedsLogin. The kernel lacks the netfilter path needed by its default
+backend. Neither app was authenticated during validation.
+
+Used a verified full R100 BOOT rollback image and performed a BOOT-only
+temporary #58 comparison on the same handset. The matched PipeWire
+stimulus used 523.25 Hz followed by 697 Hz. R100 completed PCM transport
+with 191 distinct playback positions and no matching acoustic windows.
+Two #58 trials each completed with 188 distinct playback positions.
+The handset microphone matched windows 3-5 and 6-9 in both trials.
+No microphone recordings were retained.
+
+Read MAX98506 directly with I2C combined register reads on #58. The
+amplifier global enable moved from 0x00 to 0x80. The 17 enabled samples
+agreed on 0x1a=0x40, 0x1b=0x80, 0x20=0x42, 0x21=0xc0, 0x2d=0x01,
+0x36=0x90 and 0x37=0xf0. The regmap cache reported 0x46 for 0x1a.
+The physical chip's 0x40 matches R100, so that readback does not
+explain the failure. The #58 ALC live status was zero despite acoustic
+output. The #58 playback log recorded a 6.144 MHz AUDIF request,
+1.536 MHz bit clock and 48 kHz stereo S16 playback.
+
+After verified rollback to R100, a 30-second one-boot Calliope trial
+compared the original 0x37=0x00 with the #58 request 0xf0 and then
+restored 0x00. Direct reads confirmed each transition. The R100 streams
+used 0x2d=0x67, 0x36=0x93 and 0x38=0x80. Both kernels read 0x06=0x40
+during the active samples. The #58 boost register setting alone did not
+recover the coded acoustic reference on R100. These are digital reads,
+with no independent boost rail or speaker-terminal voltage measurement.
