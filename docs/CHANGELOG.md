@@ -2194,3 +2194,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Handle bounded startup component reports and verify BOOT_DONE and RESUME.
 - Add an opt-in ERAP DSM read after validating the inherited boot clock.
+
+### Calliope silent PCM qualification
+
+- Discover the stock ERAP DSM On mixer control from its component descriptor.
+- Add an opt-in, zero-sample RDMA0 test with the stock UAIF4 selectors and
+  hardware progress checks. Stop DMA and restore routing after each trial.

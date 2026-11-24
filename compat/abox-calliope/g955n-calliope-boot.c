@@ -48,6 +48,7 @@
 #define ABOX_GICD_SGIR		0xf00
 #define ABOX_GIC_CA7		BIT(16)
 #define IPC_SYSTEM		1
+#define IPC_PCM_PLAYBACK	2
 #define IPC_RESUME		2
 #define IPC_BOOT_DONE		3
 #define IPC_CHANGE_GEAR		4
@@ -57,11 +58,33 @@
 #define ABOX_GEAR_RELEASE	12
 #define ABOX_48K_PLL_RATE	1179648000UL
 #define IPC_REPORT_COMPONENT	0xc0
+#define IPC_UPDATE_COMPONENT	0xc1
+#define IPC_READ_COMPONENT	0xc2
+#define IPC_COMPONENT_VALUE	0xc3
 #define IPC_REPORT_FAULT	0xfa
 #define IPC_ERAP		5
 #define IPC_REALTIME_EXTRA	0xea
 #define DSM_PARAMETER_WORDS	185
 #define DSM_ENABLE_WORD		1
+#define IPC_PCM_OPEN		11
+#define IPC_PCM_CLOSE		12
+#define IPC_PCM_HW_PARAMS	14
+#define IPC_PCM_HW_FREE		15
+#define IPC_PCM_PREPARE		16
+#define IPC_PCM_TRIGGER		17
+#define IPC_PCM_POINTER		18
+#define IPC_PCM_SET_BUFFER	20
+#define ABOX_RDMA0_CTRL		0x1000
+#define ABOX_RDMA0_STATUS	0x1020
+#define ABOX_RDMA_ENABLE	BIT(0)
+#define ABOX_RDMA_PROGRESS	BIT(31)
+#define ABOX_RDMA_POSITION	(GENMASK(28, 16) | GENMASK(12, 0))
+#define ABOX_UAIF4_GATE		0x2034
+#define ABOX_UAIF_GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
+#define ABOX_UAIF_GATE_ON	(BIT(21) | BIT(20))
+#define ABOX_UAIF4_CTRL0		0x540
+#define ABOX_UAIF4_CTRL1		0x544
+#define ABOX_UAIF4_BCLK		1536000UL
 #define FAULT_GPRS_SIZE		(16 * sizeof(u32))
 
 /* Samsung's IPC descriptor layout is shared with the 32-bit CA7. */
@@ -79,6 +102,24 @@ struct calliope_control {
 	__le32 max;
 };
 
+struct calliope_dsm_control {
+	u32 component_id;
+	u32 control_id;
+	bool found;
+};
+
+/* Stock SPUS OUT7 -> SIFS1 -> UAIF4, with NSRC3 selecting UAIF4 feedback. */
+static const struct {
+	u32 reg, mask, value;
+} calliope_speaker_route[] = {
+	{ 0x040, GENMASK(19, 16), 2 << 16 },
+	{ 0x044, GENMASK(15, 12), 12 << 12 },
+	{ 0x200, GENMASK(30, 29) | GENMASK(2, 1), 1 << 1 },
+	{ 0x204, GENMASK(18, 16), 7 << 16 },
+	{ ABOX_UAIF4_CTRL1, GENMASK(28, 0), (9 << 24) | BIT(23) | (1 << 18) | (15 << 12) },
+	{ ABOX_UAIF4_CTRL0, GENMASK(4, 0), BIT(2) | BIT(0) },
+};
+
 /* This trial uses the nonsecure GIC path on nonzero Exynos8895 revisions. */
 static int calliope_check_chip(void)
 {
@@ -92,8 +133,8 @@ static int calliope_check_chip(void)
 	return ret;
 }
 
-static int calliope_send(void __iomem *sram, u32 ipc, u32 message,
-			 u32 param1, u32 param2, u32 param3)
+static int calliope_send_message(void __iomem *sram, u32 ipc, u32 message,
+				 u32 param1, u32 param2, u32 param3, u32 param4)
 {
 	void __iomem *gicd;
 	u32 ack;
@@ -111,12 +152,19 @@ static int calliope_send(void __iomem *sram, u32 ipc, u32 message,
 	writel(param1, sram + IPC_TX + 12);
 	writel(param2, sram + IPC_TX + 16);
 	writel(param3, sram + IPC_TX + 20);
+	writel(param4, sram + IPC_TX + 24);
 	writel(1, sram + IPC_TX_ACK);
 	writel(ABOX_GIC_CA7 | ipc, gicd + ABOX_GICD_SGIR);
 	ret = readl_poll_timeout(sram + IPC_TX_ACK, ack, !ack, 100, 20000);
 
 	iounmap(gicd);
 	return ret;
+}
+
+static int calliope_send(void __iomem *sram, u32 ipc, u32 message,
+			 u32 param1, u32 param2, u32 param3)
+{
+	return calliope_send_message(sram, ipc, message, param1, param2, param3, 0);
 }
 
 static int calliope_report_fault(struct device *dev, void __iomem *sram,
@@ -144,11 +192,12 @@ static int calliope_report_fault(struct device *dev, void __iomem *sram,
 }
 
 static int calliope_component_report(struct device *dev, void __iomem *sram,
-				      const void *dram, u32 addr)
+				      const void *dram, u32 addr, struct calliope_dsm_control *dsm)
 {
 	struct calliope_component component;
+	struct calliope_control control;
 	size_t remaining;
-	u32 offset, count;
+	u32 offset, count, i;
 
 	if (!IS_ALIGNED(addr, sizeof(u32)))
 		return -EINVAL;
@@ -173,11 +222,29 @@ static int calliope_component_report(struct device *dev, void __iomem *sram,
 	/* The trial records the announcement without creating ALSA controls. */
 	dev_info(dev, "Calliope component id=%u name=%.16s controls=%u\n",
 		 le32_to_cpu(component.id), component.name, count);
+	if (!dsm || strncmp(component.name, "ERAP info", sizeof(component.name)))
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		offset = sizeof(component) + i * sizeof(control);
+		if (addr < CALLIOPE_DRAM_IOVA)
+			memcpy_fromio(&control, sram + addr + offset, sizeof(control));
+		else
+			memcpy(&control, dram + (addr - CALLIOPE_DRAM_IOVA) + offset, sizeof(control));
+		if (strncmp(control.name, "DSM On", sizeof(control.name)))
+			continue;
+		if (dsm->found || le32_to_cpu(control.count) != 1 ||
+		    le32_to_cpu(control.min) != 0 || le32_to_cpu(control.max) != 1)
+			return -EPROTO;
+		dsm->component_id = le32_to_cpu(component.id);
+		dsm->control_id = le32_to_cpu(control.id);
+		dsm->found = true;
+	}
 	return 0;
 }
 
 static int calliope_wait_boot(struct device *dev, void __iomem *sram,
-			      const void *dram)
+			      const void *dram, struct calliope_dsm_control *dsm)
 {
 	unsigned int attempt;
 	u32 ipc, message;
@@ -201,7 +268,7 @@ static int calliope_wait_boot(struct device *dev, void __iomem *sram,
 		if (ipc == IPC_SYSTEM && message == IPC_REPORT_COMPONENT) {
 			u32 addr = readl(sram + IPC_RX + 12);
 
-			ret = calliope_component_report(dev, sram, dram, addr);
+			ret = calliope_component_report(dev, sram, dram, addr, dsm);
 			if (ret) {
 				dev_warn(dev, "Calliope invalid component descriptor at %08x: %d\n",
 					 addr, ret);
@@ -218,8 +285,41 @@ static int calliope_wait_boot(struct device *dev, void __iomem *sram,
 	return -ETIMEDOUT;
 }
 
+static int calliope_set_dsm(struct device *dev, void __iomem *sram,
+			   const struct calliope_dsm_control *dsm, bool enable)
+{
+	u32 ack, ipc, message, current_value;
+	int ret;
+
+	if (!dsm->found)
+		return -ENODEV;
+	ret = calliope_send_message(sram, IPC_SYSTEM, IPC_UPDATE_COMPONENT,
+				    dsm->component_id, dsm->control_id, 0, enable);
+	if (ret)
+		return ret;
+	ret = calliope_send(sram, IPC_SYSTEM, IPC_READ_COMPONENT,
+			    dsm->component_id, dsm->control_id, 0);
+	if (ret)
+		return ret;
+	ret = readl_poll_timeout(sram + IPC_RX_ACK, ack, ack, 100, 130000);
+	if (ret)
+		return ret;
+	ipc = readl(sram + IPC_RX);
+	message = readl(sram + IPC_RX + 8);
+	if (ipc != IPC_SYSTEM || message != IPC_COMPONENT_VALUE)
+		return -EPROTO;
+	if (readl(sram + IPC_RX + 12) != dsm->component_id ||
+	    readl(sram + IPC_RX + 16) != dsm->control_id)
+		return -EPROTO;
+	current_value = readl(sram + IPC_RX + 24);
+	writel(0, sram + IPC_RX_ACK);
+	dev_info(dev, "Calliope ERAP DSM On=%u (requested %u)\n", current_value, enable);
+	return current_value == enable ? 0 : -EIO;
+}
+
 static int calliope_read_dsm(struct device *dev, void __iomem *sram,
-			     const void *dram, unsigned long ca7_rate)
+			     const void *dram, unsigned long ca7_rate,
+			     bool require_enabled)
 {
 	unsigned long deadline = jiffies + msecs_to_jiffies(130);
 	u32 ack, ipc, message, count, enable, gear, id, nsec;
@@ -250,7 +350,7 @@ static int calliope_read_dsm(struct device *dev, void __iomem *sram,
 			writel(0, sram + IPC_RX_ACK);
 			dev_info(dev, "Calliope returned %u DSM parameter words (enable=%u)\n",
 				 count, enable);
-			return 0;
+			return require_enabled && enable != 1 ? -EHOSTDOWN : 0;
 		}
 		if (ipc == IPC_SYSTEM && message == IPC_REPORT_FAULT)
 			return calliope_report_fault(dev, sram, dram);
@@ -281,19 +381,105 @@ static int calliope_read_dsm(struct device *dev, void __iomem *sram,
 	return -ETIMEDOUT;
 }
 
+static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
+			      void __iomem *sfr, const void *dram)
+{
+	static const struct {
+		u32 message, arg1, arg2, arg3;
+	} setup[] = {
+		{ IPC_PCM_OPEN },
+		{ IPC_PCM_SET_BUFFER, CALLIOPE_RDMA0_IOVA, CALLIOPE_PCM_PERIOD_BYTES,
+		  CALLIOPE_PCM_PERIODS },
+		{ IPC_PCM_HW_PARAMS, 48000, 16, 2 },
+		{ IPC_PCM_PREPARE },
+		{ IPC_PCM_TRIGGER, 1 },
+	};
+	unsigned long deadline;
+	u32 first = 0, pointer, ipc, message, status, initial = 0, running_status = 0;
+	bool ipc_advanced = false, dma_advanced = false;
+	int i, ret = 0, stop, release, close;
+
+	for (i = 0; i < ARRAY_SIZE(setup); i++) {
+		if (setup[i].message == IPC_PCM_TRIGGER)
+			initial = readl(sfr + ABOX_RDMA0_STATUS) & ABOX_RDMA_POSITION;
+		ret = calliope_send_message(sram, IPC_PCM_PLAYBACK, setup[i].message,
+					    0, setup[i].arg1, setup[i].arg2, setup[i].arg3);
+		if (ret) {
+			dev_warn(dev, "Calliope PCM command %u failed: %d\n", setup[i].message, ret);
+			goto cleanup;
+		}
+	}
+	dev_info(dev, "Calliope PCM programmed RDMA0 ctrl=%08x start=%08x end=%08x\n",
+		 readl(sfr + ABOX_RDMA0_CTRL), readl(sfr + ABOX_RDMA0_CTRL + 8),
+		 readl(sfr + ABOX_RDMA0_CTRL + 12));
+
+	deadline = jiffies + msecs_to_jiffies(160);
+	do {
+		running_status = readl(sfr + ABOX_RDMA0_STATUS);
+		if ((running_status & ABOX_RDMA_PROGRESS) &&
+		    (running_status & ABOX_RDMA_POSITION) != initial)
+			dma_advanced = true;
+		if (!readl(sram + IPC_RX_ACK)) {
+			usleep_range(500, 1000);
+			continue;
+		}
+		ipc = readl(sram + IPC_RX);
+		message = readl(sram + IPC_RX + 8);
+		if (ipc == IPC_SYSTEM && message == IPC_REPORT_FAULT) {
+			ret = calliope_report_fault(dev, sram, dram);
+			break;
+		}
+		if (ipc != IPC_PCM_PLAYBACK || message != IPC_PCM_POINTER ||
+		    readl(sram + IPC_RX + 12)) {
+			dev_warn(dev, "Calliope unexpected PCM IPC %u:%#x (%#x, %#x)\n",
+				 ipc, message, readl(sram + IPC_RX + 12),
+				 readl(sram + IPC_RX + 16));
+			ret = -EPROTO;
+			break;
+		}
+		pointer = readl(sram + IPC_RX + 16);
+		if (pointer < CALLIOPE_RDMA0_IOVA ||
+		    pointer - CALLIOPE_RDMA0_IOVA >= CALLIOPE_PCM_PERIOD_BYTES * CALLIOPE_PCM_PERIODS) {
+			ret = -ERANGE;
+			break;
+		}
+		writel(0, sram + IPC_RX_ACK);
+		if (!first)
+			first = pointer;
+		else if (pointer != first)
+			ipc_advanced = true;
+	} while (!ipc_advanced && time_before(jiffies, deadline));
+	if (!ret && !ipc_advanced && !dma_advanced)
+		ret = -ETIMEDOUT;
+
+cleanup:
+	stop = i >= ARRAY_SIZE(setup) - 1 ?
+		calliope_send(sram, IPC_PCM_PLAYBACK, IPC_PCM_TRIGGER, 0, 0, 0) : 0;
+	release = i >= 1 ? calliope_send(sram, IPC_PCM_PLAYBACK, IPC_PCM_HW_FREE, 0, 0, 0) : 0;
+	close = calliope_send(sram, IPC_PCM_PLAYBACK, IPC_PCM_CLOSE, 0, 0, 0);
+	status = readl(sfr + ABOX_RDMA0_STATUS);
+	dev_info(dev, "Calliope silent PCM: hardware progress=%d IPC pointer=%d RDMA0=%08x->%08x stop=%d free=%d close=%d\n",
+		 dma_advanced, ipc_advanced, running_status, status, stop, release, close);
+	return ret ?: stop ?: release ?: close;
+}
+
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		       const void *dram, bool try_resume, bool try_dsm_read,
-		       bool *keep_dma)
+		       bool try_pcm, bool *keep_dma)
 {
 	void __iomem *sysreg = NULL, *sram = NULL, *cmu = NULL, *sfr = NULL;
 	struct resource cmu_res, sfr_res;
+	struct calliope_dsm_control dsm = {};
 	struct device_node *node;
-	struct clk *pll = NULL;
+	struct clk *pll = NULL, *bclk = NULL;
 	struct regmap *pmu;
 	void *saved_sram = NULL;
 	u32 saved_l2, saved_misc, saved_syspower, state, option, power;
-	unsigned long ca7_rate = 0;
-	int ret, stop;
+	u32 saved_rdma[8];
+	u32 saved_route[ARRAY_SIZE(calliope_speaker_route)], saved_gate = 0;
+	unsigned long ca7_rate = 0, saved_bclk = 0;
+	bool route_set = false;
+	int i, ret, stop;
 
 	ret = calliope_check_chip();
 	if (ret)
@@ -313,6 +499,8 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 
 		pll = of_clk_get_from_provider(&clock);
 	}
+	if (try_pcm && !ret && !IS_ERR(pmu) && !IS_ERR(pll))
+		bclk = of_clk_get(dev->of_node, 0);
 	of_node_put(node);
 	if (ret)
 		return ret;
@@ -320,6 +508,11 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		return PTR_ERR(pmu);
 	if (IS_ERR(pll))
 		return PTR_ERR(pll);
+	if (IS_ERR(bclk)) {
+		ret = PTR_ERR(bclk);
+		bclk = NULL;
+		goto out;
+	}
 
 	ret = regmap_read(pmu, ABOX_PMU_STATE, &state);
 	if (ret || (state & 15) != 15) {
@@ -367,6 +560,36 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		}
 		ca7_rate = rate / divider;
 	}
+	if (try_pcm) {
+		if (readl(sfr + ABOX_RDMA0_STATUS) & ABOX_RDMA_PROGRESS ||
+		    readl(sfr + ABOX_RDMA0_CTRL) & ABOX_RDMA_ENABLE) {
+			ret = -EBUSY;
+			goto out;
+		}
+		for (i = 0; i < ARRAY_SIZE(saved_rdma); i++)
+			saved_rdma[i] = readl(sfr + ABOX_RDMA0_CTRL + i * sizeof(u32));
+		saved_bclk = clk_get_rate(bclk);
+		if (!saved_bclk) {
+			ret = -EIO;
+			goto out;
+		}
+		ret = clk_set_rate(bclk, ABOX_UAIF4_BCLK);
+		if (ret || clk_get_rate(bclk) != ABOX_UAIF4_BCLK) {
+			ret = ret ?: -EIO;
+			goto out;
+		}
+		saved_gate = readl(cmu + ABOX_UAIF4_GATE);
+		writel((saved_gate & ~ABOX_UAIF_GATE_MASK) | ABOX_UAIF_GATE_ON,
+		       cmu + ABOX_UAIF4_GATE);
+		for (i = 0; i < ARRAY_SIZE(calliope_speaker_route); i++) {
+			void __iomem *reg = sfr + calliope_speaker_route[i].reg;
+
+			saved_route[i] = readl(reg);
+			writel((saved_route[i] & ~calliope_speaker_route[i].mask) |
+			       calliope_speaker_route[i].value, reg);
+		}
+		route_set = true;
+	}
 
 	saved_misc = readl(sysreg + ABOX_SYSREG_MISC);
 	saved_l2 = readl(sysreg + ABOX_SYSREG_L2);
@@ -394,7 +617,7 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		ret = regmap_read_poll_timeout(pmu, CA7_STATE, state, state & CA7_RUNNING,
 					       100, 100000);
 	if (!ret) {
-		ret = calliope_wait_boot(dev, sram, dram);
+		ret = calliope_wait_boot(dev, sram, dram, try_pcm ? &dsm : NULL);
 		if (!ret && try_resume) {
 			dev_info(dev, "Calliope sending system RESUME\n");
 			ret = calliope_send(sram, IPC_SYSTEM, IPC_RESUME, 0, 0, 0);
@@ -402,7 +625,18 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 				dev_info(dev, "Calliope acknowledged system RESUME\n");
 		}
 		if (!ret && try_dsm_read)
-			ret = calliope_read_dsm(dev, sram, dram, ca7_rate);
+			ret = calliope_read_dsm(dev, sram, dram, ca7_rate, try_pcm);
+		if (!ret && try_pcm) {
+			ret = calliope_set_dsm(dev, sram, &dsm, true);
+			if (!ret) {
+				int reset;
+
+				ret = calliope_pcm_trial(dev, sram, sfr, dram);
+				reset = calliope_set_dsm(dev, sram, &dsm, false);
+				if (!ret)
+					ret = reset;
+			}
+		}
 	}
 	if (ret)
 		dev_warn(dev, "Calliope bootstrap stopped at %d, CA7=%08x PC=%08x RX=%08x:%08x ACK=%08x\n",
@@ -415,9 +649,21 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	if (!stop)
 		stop = regmap_read_poll_timeout(pmu, CA7_STATE, state, !(state & CA7_RUNNING),
 						100, 100000);
+	if (!stop && try_pcm) {
+		void __iomem *ctrl = sfr + ABOX_RDMA0_CTRL;
+
+		writel(readl(ctrl) & ~ABOX_RDMA_ENABLE, ctrl);
+		stop = readl_poll_timeout(sfr + ABOX_RDMA0_STATUS, state,
+					  !(state & ABOX_RDMA_PROGRESS), 10, 40000);
+		if (!stop) {
+			for (i = 1; i < ARRAY_SIZE(saved_rdma); i++)
+				writel(saved_rdma[i], ctrl + i * sizeof(u32));
+			writel(saved_rdma[0], ctrl);
+		}
+	}
 	if (stop) {
 		*keep_dma = true;
-		dev_crit(dev, "Calliope still active; DMA mappings retained until reboot\n");
+		dev_crit(dev, "Calliope or RDMA0 did not stop; DMA mappings retained until reboot\n");
 		ret = stop;
 		goto out;
 	}
@@ -428,6 +674,16 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	writel(saved_syspower, sfr + ABOX_SYSPOWER_CTRL);
 	dev_info(dev, "Calliope powered off; SRAM and system registers restored\n");
 out:
+	if (!*keep_dma) {
+		if (route_set) {
+			for (i = ARRAY_SIZE(calliope_speaker_route) - 1; i >= 0; i--)
+				writel(saved_route[i], sfr + calliope_speaker_route[i].reg);
+			writel(saved_gate, cmu + ABOX_UAIF4_GATE);
+		}
+		if (saved_bclk && clk_set_rate(bclk, saved_bclk) && !ret)
+			ret = -EIO;
+	}
+	clk_put(bclk);
 	clk_put(pll);
 	kvfree(saved_sram);
 	if (sysreg)

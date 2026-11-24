@@ -4249,3 +4249,30 @@ The module powered off CA7, restored SRAM and control registers, and
 released 4,736 mapped pages. R100 remained accessible over USB with
 Wayland, WirePlumber and both native ALSA devices present. The test
 started no playback or recording and made no calibration writes.
+
+### R100 silent firmware PCM and independent microphone reference
+
+The Samsung SYSTEM mixer selects ERAP DSM On, NSRC3 from UAIF4, SPUS
+OUT7 to SIFS1, and SIFS1 to UAIF4 for the media speaker. On the SM-G955N,
+the diagnostic resolved the DSM control from its live component
+descriptor, set it to 1, and read back 1. The firmware consumed the PCM
+OPEN, SET_BUFFER, HW_PARAMS, PREPARE and TRIGGER messages and programmed
+RDMA0 for the mapped 16 KiB zero-filled ring at 0x81000000.
+
+With the UAIF4 clock and selectors in place, two trials showed RDMA0
+hardware position movement. Neither observed a firmware PCM pointer
+notification during the 160 ms trial. STOP, HW_FREE and CLOSE were
+consumed, DSM On read back as 0, and the module restored its SRAM,
+clocks, selectors and DMA registers. The final trial released all 4,740
+mappings and USB remained responsive. The amplifier was not enabled.
+
+The R100 microphone PCM returned 527,712 stereo frames while the Mac
+sent 940, 1380 and 1770 Hz in sequence to its built-in output. Neither
+recorded channel reproduced the expected timed sequence. The host
+output selection was verified in software; acoustic level at the
+handset was not independently measured. No recording was retained.
+
+The stock PCM lifecycle is exercised by the one-shot module. A
+desktop ALSA stream connected through firmware, the amplifier's
+current/voltage feedback, audible output and acoustic capture remain
+unqualified.

@@ -24,6 +24,9 @@ MODULE_PARM_DESC(try_resume, "Send RESUME after BOOT_DONE; requires try_boot");
 static bool try_dsm_read;
 module_param(try_dsm_read, bool, 0400);
 MODULE_PARM_DESC(try_dsm_read, "Read DSM parameters without playback; requires try_resume");
+static bool try_pcm;
+module_param(try_pcm, bool, 0400);
+MODULE_PARM_DESC(try_pcm, "Run a silent RDMA0 firmware PCM trial; requires try_dsm_read");
 #define CALLIOPE_IVA_IOVA		0x90000000UL
 #define CALLIOPE_IVA_SIZE		SZ_512K
 #define CALLIOPE_VSS_IOVA		0xa0000000UL
@@ -132,6 +135,10 @@ static int __init g955n_calliope_stage(void)
 	struct calliope_region vss = {
 		.iova = CALLIOPE_VSS_IOVA, .size = CALLIOPE_VSS_SIZE,
 	};
+	struct calliope_region pcm = {
+		.iova = CALLIOPE_RDMA0_IOVA,
+		.size = CALLIOPE_PCM_PERIOD_BYTES * CALLIOPE_PCM_PERIODS,
+	};
 	struct iommu_domain *domain;
 	struct device *dev;
 	bool chipid_mapped = false, keep_dma = false, runtime_active = false;
@@ -140,7 +147,8 @@ static int __init g955n_calliope_stage(void)
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
 
-	if ((try_resume && !try_boot) || (try_dsm_read && !try_resume))
+	if ((try_resume && !try_boot) || (try_dsm_read && !try_resume) ||
+	    (try_pcm && !try_dsm_read))
 		return -EINVAL;
 
 	dev = bus_find_device_by_name(&platform_bus_type, NULL, "soc@0:abox-speaker");
@@ -195,6 +203,15 @@ static int __init g955n_calliope_stage(void)
 		ret = calliope_map(dev, domain, &iva);
 	if (!ret)
 		ret = calliope_map(dev, domain, &vss);
+	if (!ret && try_pcm) {
+		pcm.cpu = dma_alloc_coherent(dev, pcm.size, &pcm.dma, GFP_KERNEL);
+		if (!pcm.cpu) {
+			ret = -ENOMEM;
+			goto release;
+		}
+		memset(pcm.cpu, 0, pcm.size);
+		ret = calliope_map(dev, domain, &pcm);
+	}
 	if (!ret && try_boot) {
 		if (iommu_iova_to_phys(domain, CALLIOPE_CHIPID)) {
 			ret = -EBUSY;
@@ -207,7 +224,7 @@ static int __init g955n_calliope_stage(void)
 			goto release;
 		chipid_mapped = true;
 		ret = g955n_calliope_boot(dev, sram, dram.cpu, try_resume,
-					 try_dsm_read, &keep_dma);
+					 try_dsm_read, try_pcm, &keep_dma);
 		if (keep_dma)
 			goto out;
 	}
@@ -217,14 +234,16 @@ release:
 		dev_err(dev, "Calliope CHIPID alias teardown incomplete\n");
 		ret = -EIO;
 	}
-	cleanup = calliope_release(dev, domain, &vss);
+	cleanup = calliope_release(dev, domain, &pcm);
+	if (calliope_release(dev, domain, &vss))
+		cleanup = -EIO;
 	if (calliope_release(dev, domain, &iva))
 		cleanup = -EIO;
 	if (calliope_release(dev, domain, &dram) || cleanup)
 		ret = -EIO;
 	if (!ret) {
 		dev_info(dev, "Calliope: verified nine firmware files and %zu mapped pages; aliases released\n",
-			 (dram.mapped + iva.mapped + vss.mapped) >> PAGE_SHIFT);
+			 (dram.mapped + iva.mapped + vss.mapped + pcm.mapped) >> PAGE_SHIFT);
 		/* A completed one-shot test leaves no module or mappings resident. */
 		ret = -ECANCELED;
 	}

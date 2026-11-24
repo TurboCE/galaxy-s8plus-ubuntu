@@ -31,9 +31,18 @@ request with the actual CA7 rate. It reports the number of returned words
 and the DSM enable flag. The query runs with both ALSA streams idle and
 does not change calibration or start a stream.
 
+Add `try_pcm=1` for the bounded, silent RDMA0 test. It requires both native
+PCMs to be closed and the speaker amplifier to stay off. The diagnostic
+uses the advertised ERAP DSM On control, sets up the stock UAIF4 output
+selectors, and drives a zero-filled ring through the Samsung PCM mailbox.
+It checks the hardware position and records whether firmware also reports
+an IPC position. The module stops the DMA before restoring registers and
+releasing the ring. This test is separate from the ALSA PCM opened by
+desktop applications.
+
 The boot option exercises the Samsung nonsecure-GIC handoff available on
-the tested silicon revision. A complete IRQ handler, audio stream and DSM
-parameter IPC, and the secure-GIC path are outstanding. The module is a
+the tested silicon revision. A recurring ALSA stream, amplifier feedback,
+and the secure-GIC path are outstanding. The module is a
 diagnostic with no boot-time service or automatic loading.
 
 On the handset qualification run, powering the audio IOMMU made the CA7
