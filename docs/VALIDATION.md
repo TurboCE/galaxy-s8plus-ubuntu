@@ -5294,3 +5294,33 @@ of the earpiece at its existing gain. Earpiece pickup by the
 handset microphone was not resolved in this setup. No recordings
 were kept. The original HiFi default and Voice gain were verified
 after testing.
+
+### R100 earpiece pickup and microphone noise isolation
+
+Compared the same coded seven-second reference from the handset
+earpiece and from the MacBook built-in speaker. Both microphone
+recordings were analyzed in memory for each source. During the
+earpiece run, the MacBook matched 20/20 windows at p=0.0025 and
+the handset matched 10/20 at p=0.2550. Relative to each
+microphone's own quiet interval, the target-tone band increased
+53.7 dB on the Mac and 2.0 dB on the handset. The handset channels
+were sample-identical and both AIF1 TX inputs selected IN3L.
+
+The MacBook speaker reference was detected by both microphones.
+The handset matched 18/20 windows at p=0.0025, with 5.6 dB
+target-band lift. Its quiet capture was about -18 dBFS RMS
+in both trials, without clipping. This confirms capture of a
+strong acoustic reference while the earpiece code remains
+unresolved in handset capture.
+
+With no playback, a direct ALSA isolation test measured 4,148
+PCM RMS counts at the regular IN3L gain. Temporarily reducing
+IN3L digital gain by 24 dB reduced the measured RMS to 261.
+Setting both AIF1 TX mixers to None produced exactly zero
+samples. Restoring the original settings returned the quiet
+RMS to 4,155. This localizes the quiet signal to the IN3L
+microphone path at or before its digital gain, upstream of
+the AIF1 TX mix and ABOX capture transport. These checks cannot
+distinguish the digital microphone, its PDM clock and bias,
+and the codec input setup. Both device settings were restored
+and no raw recording was retained.

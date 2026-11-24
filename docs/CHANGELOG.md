@@ -2423,3 +2423,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - The MacBook microphone detected the complete earpiece test
   pattern in two runs at the existing Voice gain. The handset
   microphone did not reliably detect it in this setup.
+
+### R100 microphone noise isolation
+
+- Compared earpiece and external-speaker references on both
+  microphones. The handset captured the external code, and
+  a controlled gain and routing test localized the high
+  quiet-signal level to the IN3L input path.
