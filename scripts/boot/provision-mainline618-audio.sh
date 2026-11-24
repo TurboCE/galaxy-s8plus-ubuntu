@@ -1,9 +1,15 @@
 #!/bin/sh
 set -eu
 
+include_dsm=0
+if [ "${1:-}" = --with-dsm ]; then
+    include_dsm=1
+    shift
+fi
+
 if [ "$#" -ne 1 ] || [ "$(id -u)" -ne 0 ] ||
     [ "$(tr -d '\000' < /proc/device-tree/model)" != 'Samsung Galaxy S8+ (SM-G955N)' ]; then
-    echo 'Run as root on the SM-G955N with its read-only SYSTEM mountpoint' >&2
+    echo 'Usage as root on SM-G955N: provision-mainline618-audio.sh [--with-dsm] SYSTEM_MOUNT' >&2
     exit 1
 fi
 
@@ -22,6 +28,10 @@ esac
 source_dir=$stock/vendor/firmware
 firmware_dir=/usr/lib/firmware
 set -- calliope_sram.bin calliope_dram.bin calliope_iva.bin
+if [ "$include_dsm" = 1 ]; then
+    set -- "$@" dsm.bin SoundBoosterParam.bin dsm_tune.bin \
+        APBargeIn_AUDIO_SLSI.bin APBiBF_AUDIO_SLSI.bin AP_AUDIO_SLSI.bin
+fi
 for filename do
     source_file=$source_dir/$filename
     destination=$firmware_dir/$filename
@@ -45,7 +55,10 @@ for filename do
 done
 for filename do
     destination=$firmware_dir/$filename
-    mv -nT -- "$staging/$filename" "$destination"
+    if [ ! -e "$destination" ] && ! mv -nT -- "$staging/$filename" "$destination"; then
+        test -e "$destination"
+    fi
+    test ! -L "$destination"
     cmp -s "$source_dir/$filename" "$destination"
     echo "Verified $filename"
 done

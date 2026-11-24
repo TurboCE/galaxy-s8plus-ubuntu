@@ -2167,3 +2167,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Samsung LHPF1 and ASRC1IN1L route.
 - Add a separate RDMA7 trial feeding the factory SPUS OUT7 selector.
   It supplies the hardware serial path without running Calliope DSM.
+
+### Linux 6.18 Calliope and DSM bring-up
+
+- Provision the stock DSM and audio data alongside the three Calliope
+  images using the handset's read-only SYSTEM partition.
+- Add a model-specific Calliope staging and bootstrap test with fixed
+  IOMMU aliases, bounded SRAM IPC, and verified CA7 shutdown before
+  memory reclamation. The test stays outside the boot-time audio path.

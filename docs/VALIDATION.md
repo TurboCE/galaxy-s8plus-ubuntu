@@ -4156,3 +4156,37 @@ clock setup still used the failed R101 sequence. The host suite ran
 Restored the byte-identical R100 BOOT image with readback verification.
 USB serial confirmed R100 with GDM and the native audio unit active and
 both ALSA PCMs registered. The two route patches remain proposals.
+
+### R100 Calliope bootstrap and microphone PDM comparison
+
+The handset's read-only SYSTEM supplied three Calliope images and six
+DSM and other audio images. The extended provisioning script compared
+all nine installed copies against their source. The ARM64 module built
+against the R100 kernel release. The stage verified the DRAM and IVA
+translations for 3,200 pages in the active Exynos audio IOMMU and then
+released those mappings.
+
+The first opt-in attempt started CA7 and timed out without observing
+BOOT_DONE. Its shutdown did not confirm CA7 off, so the module retained
+its backing memory and the handset was rebooted. The revised attempt
+asserted the stock ABOX DRAM request before CA7 start and explicitly
+powered CA7 off before restoring SRAM and the saved control registers.
+The firmware reported a prefetch abort over SRAM system IPC with fault
+status 0x05 and address 0x910223e0. The same fault occurred with the
+stock CHIPID window mapped read-only. The handset firmware's first-level
+MMU table was examined at the fault: its 0x910 entry was zero, while the
+0x800 and 0x900 entries were populated. This is a Calliope-side boot
+failure before the ready handshake. The outbound RESUME request and DSM
+playback could not be exercised.
+
+An independent ALSA test selected IN3L and IN3R separately, temporarily
+paused WirePlumber, and verified the active muxes. An owner-assisted
+65-second recording captured 3,120,000 frames per channel. The 100 ms
+RMS baselines were 4,182 and 4,183; the maximum afterward was 4,291 for
+both. Three distinct clap transients were absent from both channels.
+No recordings were retained. The native mixer configuration and user
+service were restored.
+
+R100 and the native PCMs remained available afterward. No BOOT update
+was applied in this run. The host suite ran 167 tests with 9 skipped
+and no failures.
