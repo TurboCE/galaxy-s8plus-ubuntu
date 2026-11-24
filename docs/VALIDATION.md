@@ -4723,3 +4723,16 @@ This comparison confirms an upstream data loss in the native path.
 The Calliope result accounts for the test words at the SoC pad;
 the MAX98506 pin levels and analog output remain unqualified.
 The earlier kernel58 acoustic capture has no matching pad trace.
+
+### R100 speaker level comparison
+
+On R100, used the optional Calliope path to play the same 7-second
+48 kHz reference twice. Increased only PCM amplitude from 7,200 to
+14,400 peak, about 6 dB. MAX98506 gain, block enable and global enable
+read back as `0x67`, `0x93` and `0x80` in both streams. The Mac
+output was not used. Both ALSA playbacks exited zero, and each
+parallel microphone capture returned 337,920 frames with zero clipped
+samples in the analyzed channel. Neither run reproduced the complete
+900/1300/1780 Hz sequence in the expected intervals. The higher
+PCM level did not qualify acoustic output. The test module was
+withdrawn.

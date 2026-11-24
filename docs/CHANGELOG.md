@@ -2294,3 +2294,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   PCM and confirmed the matching sample words at the Calliope pad.
 - Tested the native mixer-format field independently. The Samsung
   16-bit stereo setting did not restore data.
+
+### R100 speaker level comparison
+
+- Doubled the Calliope test PCM level while holding amplifier
+  settings fixed. Playback completed and the handset microphone
+  did not recover the complete timed reference sequence.
