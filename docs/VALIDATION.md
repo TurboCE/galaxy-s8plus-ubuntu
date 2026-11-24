@@ -4578,3 +4578,33 @@ does not establish handset loudspeaker output. The Mac output device,
 volume and mute were restored and no raw recording was retained.
 The handset trials still leave the amplifier input, boost rail and
 speaker contacts unverified.
+
+### R100 comparison with the kernel58 AUDIF clock
+
+The archived kernel58 warm-reboot test detected the two sequenced
+stimulus frequencies in the built-in microphone capture. The archived
+result explicitly leaves human audibility unconfirmed.
+
+Samsung's UAIF hardware-parameters callback requests 6.144 MHz for
+AUDIF from a 48 kHz, stereo, 16-bit stream. Its clock arbitration
+selects the highest outstanding DAI request. R100 reported 49.152 MHz
+at boot. A one-boot comparison applied divider 192 in place of 24
+and verified that UAIF0 and UAIF4 still reported a 1.536 MHz bit
+clock. The test restored divider 24 after each stream.
+
+The lower AUDIF rate produced ALSA EIO in the duplex test. A separate
+playback-only test returned EIO with the microphone PCM closed.
+An intervening firmware log registration (system message 0x10,
+ring ID zero at 0x80b00000) also exposed a distinct mailbox failure.
+A temporary variant acknowledged the diagnostic reports and completed the
+DSM-off exchange. Playback still returned EIO at the lower clock.
+The lower clock setting is therefore experimental and was withdrawn.
+
+The tracked Calliope module now consumes optional diagnostic
+notifications while waiting for the DSM component response. During
+playback it advances the log reader only for an initialized ring
+bounded by private firmware DRAM. A separate build of this change at
+the original R100 clock completed a seven-second ALSA stream,
+captured 337,920 microphone frames, and shut down the DSP without
+the observed protocol error. The recording did not reproduce the
+ordered speaker tones. The test module is opt-in.

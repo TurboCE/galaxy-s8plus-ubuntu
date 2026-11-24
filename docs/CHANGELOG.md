@@ -2259,3 +2259,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   re-enable, and the factory amplifier input/ALC settings with low gain.
 - The handset microphone detected an external Mac reference after the
   comparisons. The handset's own speaker remained unqualified.
+
+### R100 ABOX clock comparison and DSM diagnostic handling
+
+- Compared the kernel58 48 kHz AUDIF clock request on R100. The lower
+  rate produced playback I/O errors and was withdrawn.
+- Handle asynchronous firmware diagnostic reports alongside the DSM
+  response. Verified playback transport on R100 with the existing
+  clock. Acoustic speaker output remains unresolved.

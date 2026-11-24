@@ -310,10 +310,18 @@ static int calliope_wait_boot(struct device *dev, void __iomem *sram,
 	return -ETIMEDOUT;
 }
 
+static bool calliope_diagnostic_report(u32 ipc, u32 message)
+{
+	return ipc == IPC_SYSTEM &&
+	       (message == IPC_REPORT_LOG || message == IPC_FLUSH_LOG ||
+		message == IPC_REPORT_DUMP || message == IPC_FLUSH_DUMP);
+}
+
 static int calliope_set_dsm(struct device *dev, void __iomem *sram,
 			   const struct calliope_dsm_control *dsm, bool enable)
 {
-	u32 ack, ipc, message, current_value;
+	unsigned long deadline;
+	u32 ipc, message, current_value;
 	int ret;
 
 	if (!dsm->found)
@@ -326,11 +334,22 @@ static int calliope_set_dsm(struct device *dev, void __iomem *sram,
 			    dsm->component_id, dsm->control_id, 0);
 	if (ret)
 		return ret;
-	ret = readl_poll_timeout(sram + IPC_RX_ACK, ack, ack, 100, 130000);
-	if (ret)
-		return ret;
-	ipc = readl(sram + IPC_RX);
-	message = readl(sram + IPC_RX + 8);
+	/* Diagnostic notifications can arrive ahead of the component reply. */
+	deadline = jiffies + msecs_to_jiffies(130);
+	do {
+		if (!readl(sram + IPC_RX_ACK)) {
+			usleep_range(100, 200);
+			continue;
+		}
+		ipc = readl(sram + IPC_RX);
+		message = readl(sram + IPC_RX + 8);
+		if (!calliope_diagnostic_report(ipc, message))
+			goto receive;
+		writel(0, sram + IPC_RX_ACK);
+	} while (time_before(jiffies, deadline));
+	return -ETIMEDOUT;
+
+receive:
 	if (ipc != IPC_SYSTEM || message != IPC_COMPONENT_VALUE)
 		return -EPROTO;
 	if (readl(sram + IPC_RX + 12) != dsm->component_id ||
@@ -406,19 +425,19 @@ static int calliope_read_dsm(struct device *dev, void __iomem *sram,
 	return -ETIMEDOUT;
 }
 
-static int calliope_drain_log(struct calliope_log_ring *log, size_t capacity)
+static void calliope_drain_log(struct calliope_log_ring *log, size_t capacity)
 {
 	u32 size = le32_to_cpu(READ_ONCE(log->size));
 	u32 writer;
 
 	dma_rmb();
 	writer = le32_to_cpu(READ_ONCE(log->writer));
+	/* Firmware can announce the ring before initializing its header. */
 	if (!size || size > capacity || writer >= size)
-		return -EPROTO;
-	/* These are firmware diagnostics. Keep the mailbox moving without exporting them. */
+		return;
+
 	WRITE_ONCE(log->reader, cpu_to_le32(writer));
 	dma_wmb();
-	return 0;
 }
 
 static int calliope_speaker_format(void __iomem *sram)
@@ -506,33 +525,25 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 			ret = calliope_report_fault(dev, sram, dram);
 			break;
 		}
-		if (ipc == IPC_SYSTEM && message == IPC_REPORT_LOG) {
+		if (ipc == IPC_SYSTEM && message == IPC_REPORT_LOG &&
+		    !readl(sram + IPC_RX + 12)) {
 			u32 addr = readl(sram + IPC_RX + 16);
 			u32 offset = addr - CALLIOPE_DRAM_IOVA;
 
-			if (readl(sram + IPC_RX + 12) || !IS_ALIGNED(addr, sizeof(u32)) ||
-			    addr < CALLIOPE_DRAM_IOVA || offset > CALLIOPE_DRAM_SIZE - sizeof(*log)) {
-				ret = -EPROTO;
-				break;
+			log = NULL;
+			if (IS_ALIGNED(addr, sizeof(u32)) &&
+			    addr >= CALLIOPE_DRAM_IOVA &&
+			    offset <= CALLIOPE_DRAM_SIZE - sizeof(*log)) {
+				log = dram + offset;
+				log_capacity = CALLIOPE_DRAM_SIZE - offset - sizeof(*log);
+				calliope_drain_log(log, log_capacity);
 			}
-			log = dram + offset;
-			log_capacity = CALLIOPE_DRAM_SIZE - offset - sizeof(*log);
-			ret = calliope_drain_log(log, log_capacity);
-			if (ret)
-				break;
-			writel(0, sram + IPC_RX_ACK);
-			continue;
 		}
-		if (ipc == IPC_SYSTEM && message == IPC_FLUSH_LOG && log) {
-			ret = calliope_drain_log(log, log_capacity);
-			if (ret)
-				break;
-			writel(0, sram + IPC_RX_ACK);
-			continue;
-		}
-		if (ipc == IPC_RECEIVED ||
-		    (ipc == IPC_SYSTEM && (message == IPC_REPORT_DUMP || message == IPC_FLUSH_DUMP))) {
-			/* Diagnostic buffers are optional; no address from these reports is used. */
+		if (ipc == IPC_SYSTEM && message == IPC_FLUSH_LOG && log &&
+		    !readl(sram + IPC_RX + 12))
+			calliope_drain_log(log, log_capacity);
+
+		if (ipc == IPC_RECEIVED || calliope_diagnostic_report(ipc, message)) {
 			writel(0, sram + IPC_RX_ACK);
 			continue;
 		}
