@@ -5382,3 +5382,32 @@ input, boost voltage or speaker terminal output. The VI module
 and both boot overrides were removed. The receiver gain and
 microphone clock change were retained. No raw recordings were
 kept.
+
+### R100 sustained loudspeaker stimulus and amplifier monitoring
+
+Sent a repeating 900/1300/1780 Hz reference to lower speaker
+PCM 0 with peak PCM alternating between 4,000 and 12,000 every
+five seconds. The receiver stayed muted and only the handset
+microphone was recorded. The program contained no silent test
+blocks. The firmware reported an active sensing session.
+
+Both 30-second runs completed but logged one ALSA underrun
+each. The first stream ended about 17.24 seconds after RDMA0
+start and ALSA reopened it for the remainder. A shorter
+15-second run completed without an underrun and firmware
+reported successful stop, free and close. The trace captured
+835,584 handset frames without identifying the coded reference.
+
+In that uninterrupted run, six amplifier snapshots showed
+MAX98506 block/global values 0x93/0x80 and SoC data-pad
+transitions in every window. Fault/status registers 0x02
+through 0x0a read zero. The firmware returned zero for all
+eleven DSM power queries, including both PCM levels. UAIF4
+receive status stayed 0x2 and both monitored feedback DMA
+channels stayed idle. These data confirm sustained SoC
+transmission and amplifier control state. They do not
+establish reception at MAX98506 DIN or actual analog power.
+
+Returned to the installed R100 ABOX module, verified WirePlumber,
+1.536 MHz microphone clock and receiver gain 92/92. No raw
+recordings were retained.

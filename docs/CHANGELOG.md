@@ -2445,3 +2445,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   firmware sensing comparison returned zero power and no
   running feedback DMA. Physical loudspeaker output remains
   unverified.
+
+### R100 sustained loudspeaker monitoring
+
+- Varied the loudspeaker stimulus level during an uninterrupted
+  15-second monitoring run. Amp enables and SoC data stayed
+  active. Firmware power responses remained zero at both levels
+  and no feedback DMA was observed.
