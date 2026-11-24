@@ -99,6 +99,12 @@
 #define ABOX_UAIF4_CTRL1		0x544
 #define ABOX_UAIF0_CTRL0		0x500
 #define ABOX_UAIF0_CTRL1		0x504
+#define ABOX_UAIF_ENABLES	GENMASK(1, 0)
+#define ABOX_UAIF_TX		BIT(0)
+#define ABOX_WDMA1_CTRL		0x2100
+#define ABOX_UAIF0_CLOCK_PROVIDER BIT(2)
+#define ABOX_UAIF0_FORMAT_MASK	GENMASK(28, 0)
+#define ABOX_UAIF0_S16_STEREO	((9 << 24) | BIT(23) | (1 << 18) | (15 << 12))
 #define ABOX_UAIF4_BCLK		1536000UL
 #define ABOX_SPUS_BANK(n)	(0x220 + (n) * sizeof(u32))
 #define ABOX_SPUS_BANK_MASK	(GENMASK(13, 7) | GENMASK(28, 23))
@@ -140,11 +146,23 @@ static const struct {
 	{ 0x204, GENMASK(18, 16), 7 << 16 },
 	{ ABOX_SPUS_BANK(0), ABOX_SPUS_BANK_MASK, ABOX_SPUS_S16_STEREO },
 	{ ABOX_SPUS_BANK(7), ABOX_SPUS_BANK_MASK, ABOX_SPUS_S16_STEREO },
-	{ ABOX_UAIF0_CTRL1, GENMASK(28, 0), (9 << 24) | BIT(23) | (1 << 18) | (15 << 12) },
+	{ ABOX_UAIF0_CTRL1, ABOX_UAIF0_FORMAT_MASK, ABOX_UAIF0_S16_STEREO },
 	{ ABOX_UAIF0_CTRL0, BIT(2) | BIT(0), BIT(2) | BIT(0) },
 	{ ABOX_UAIF4_CTRL1, GENMASK(28, 0), (9 << 24) | BIT(23) | (1 << 18) | (15 << 12) },
 	{ ABOX_UAIF4_CTRL0, GENMASK(4, 0), BIT(2) | BIT(0) },
 };
+
+static u32 calliope_route_mask(unsigned int index, bool host_uaif0)
+{
+	if (host_uaif0) {
+		/* Capture already owns UAIF0 format and clocks. Add only TX. */
+		if (calliope_speaker_route[index].reg == ABOX_UAIF0_CTRL0)
+			return ABOX_UAIF_TX;
+		if (calliope_speaker_route[index].reg == ABOX_UAIF0_CTRL1)
+			return 0;
+	}
+	return calliope_speaker_route[index].mask;
+}
 
 /* This trial uses the nonsecure GIC path on nonzero Exynos8895 revisions. */
 static int calliope_check_chip(void)
@@ -614,6 +632,9 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	u32 saved_route[ARRAY_SIZE(calliope_speaker_route)], saved_gate = 0, saved_sifs0_gate = 0;
 	unsigned long ca7_rate = 0, saved_bclk = 0, saved_sifs0_bclk = 0;
 	bool route_set = false;
+	spinlock_t *host_route_lock = stream ? stream->host_route_lock : NULL;
+	unsigned long route_flags = 0;
+	bool host_uaif0 = host_route_lock;
 	int i, ret, stop;
 
 	ret = calliope_check_chip();
@@ -684,10 +705,29 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		ret = -EHOSTDOWN;
 		goto out;
 	}
-	if ((readl(sfr + 0x500) | readl(sfr + 0x540)) & 3 ||
-	    (readl(sfr + 0x1000) | readl(sfr + 0x2100)) & 1) {
+	if (readl(sfr + ABOX_UAIF4_CTRL0) & ABOX_UAIF_ENABLES ||
+	    readl(sfr + ABOX_RDMA0_CTRL) & ABOX_RDMA_ENABLE ||
+	    readl(sfr + ABOX_UAIF0_CTRL0) & ABOX_UAIF_TX ||
+	    (!host_uaif0 && ((readl(sfr + ABOX_UAIF0_CTRL0) & ABOX_UAIF_ENABLES) ||
+			     (readl(sfr + ABOX_WDMA1_CTRL) & ABOX_RDMA_ENABLE)))) {
 		ret = -EBUSY;
 		goto out;
+	}
+	if (host_uaif0) {
+		unsigned long rate = clk_get_rate(sifs0_bclk);
+		u32 gate = readl(cmu + ABOX_UAIF0_GATE);
+		u32 mode = readl(sfr + ABOX_UAIF0_CTRL0);
+		u32 format = readl(sfr + ABOX_UAIF0_CTRL1);
+
+		if (rate != ABOX_UAIF4_BCLK ||
+		    (gate & ABOX_UAIF_GATE_MASK) != ABOX_UAIF_GATE_ON ||
+		    !(mode & ABOX_UAIF0_CLOCK_PROVIDER) ||
+		    (format & ABOX_UAIF0_FORMAT_MASK) != ABOX_UAIF0_S16_STEREO) {
+			dev_err(dev, "Calliope incompatible host UAIF0: %lu Hz gate=%#x mode=%#x format=%#x\n",
+				rate, gate, mode, format);
+			ret = -EIO;
+			goto out;
+		}
 	}
 	if (try_dsm_read) {
 		unsigned long rate = clk_get_rate(pll);
@@ -720,29 +760,38 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 			ret = ret ?: -EIO;
 			goto out;
 		}
-		saved_sifs0_bclk = clk_get_rate(sifs0_bclk);
-		if (!saved_sifs0_bclk) {
-			ret = -EIO;
-			goto out;
+		if (!host_uaif0) {
+			saved_sifs0_bclk = clk_get_rate(sifs0_bclk);
+			if (!saved_sifs0_bclk) {
+				ret = -EIO;
+				goto out;
+			}
+			ret = clk_set_rate(sifs0_bclk, ABOX_UAIF4_BCLK);
+			if (ret || clk_get_rate(sifs0_bclk) != ABOX_UAIF4_BCLK) {
+				ret = ret ?: -EIO;
+				goto out;
+			}
+			saved_sifs0_gate = readl(cmu + ABOX_UAIF0_GATE);
+			writel((saved_sifs0_gate & ~ABOX_UAIF_GATE_MASK) | ABOX_UAIF_GATE_ON,
+			       cmu + ABOX_UAIF0_GATE);
 		}
-		ret = clk_set_rate(sifs0_bclk, ABOX_UAIF4_BCLK);
-		if (ret || clk_get_rate(sifs0_bclk) != ABOX_UAIF4_BCLK) {
-			ret = ret ?: -EIO;
-			goto out;
-		}
-		saved_sifs0_gate = readl(cmu + ABOX_UAIF0_GATE);
-		writel((saved_sifs0_gate & ~ABOX_UAIF_GATE_MASK) | ABOX_UAIF_GATE_ON,
-		       cmu + ABOX_UAIF0_GATE);
 		saved_gate = readl(cmu + ABOX_UAIF4_GATE);
 		writel((saved_gate & ~ABOX_UAIF_GATE_MASK) | ABOX_UAIF_GATE_ON,
 		       cmu + ABOX_UAIF4_GATE);
+		if (host_route_lock)
+			spin_lock_irqsave(host_route_lock, route_flags);
 		for (i = 0; i < ARRAY_SIZE(calliope_speaker_route); i++) {
 			void __iomem *reg = sfr + calliope_speaker_route[i].reg;
+			u32 mask = calliope_route_mask(i, host_uaif0);
 
+			if (!mask)
+				continue;
 			saved_route[i] = readl(reg);
-			writel((saved_route[i] & ~calliope_speaker_route[i].mask) |
-			       calliope_speaker_route[i].value, reg);
+			writel((saved_route[i] & ~mask) |
+			       (calliope_speaker_route[i].value & mask), reg);
 		}
+		if (host_route_lock)
+			spin_unlock_irqrestore(host_route_lock, route_flags);
 		route_set = true;
 		if (try_feedback) {
 			u32 ctrl = readl(sfr + ABOX_UAIF4_CTRL0);
@@ -843,14 +892,20 @@ out:
 			if (try_feedback)
 				writel(readl(sfr + ABOX_UAIF4_CTRL0) & ~BIT(1),
 				       sfr + ABOX_UAIF4_CTRL0);
+			if (host_route_lock)
+				spin_lock_irqsave(host_route_lock, route_flags);
 			for (i = ARRAY_SIZE(calliope_speaker_route) - 1; i >= 0; i--) {
 				void __iomem *reg = sfr + calliope_speaker_route[i].reg;
-				u32 mask = calliope_speaker_route[i].mask;
+				u32 mask = calliope_route_mask(i, host_uaif0);
 
-				writel((readl(reg) & ~mask) | (saved_route[i] & mask), reg);
+				if (mask)
+					writel((readl(reg) & ~mask) | (saved_route[i] & mask), reg);
 			}
+			if (host_route_lock)
+				spin_unlock_irqrestore(host_route_lock, route_flags);
 			writel(saved_gate, cmu + ABOX_UAIF4_GATE);
-			writel(saved_sifs0_gate, cmu + ABOX_UAIF0_GATE);
+			if (!host_uaif0)
+				writel(saved_sifs0_gate, cmu + ABOX_UAIF0_GATE);
 		}
 		if (saved_sifs0_bclk && clk_set_rate(sifs0_bclk, saved_sifs0_bclk) && !ret)
 			ret = -EIO;

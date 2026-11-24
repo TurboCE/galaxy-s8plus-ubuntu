@@ -1,14 +1,13 @@
-Subject: [PATCH] ASoC: route dream2lteks loudspeaker via Calliope with receiver PCM
+Subject: [PATCH] ASoC: share UAIF0 between dream2lteks capture and Calliope
 
-Carry the firmware PCM path over to the receiver-capable ABOX driver.
-Restrict Calliope and its RDMA0 ring to the loudspeaker PCM. Share the
-route lock between stereo playback and microphone triggers and stop
-operations. Prevent other PCM setup while the firmware owns the shared
-registers. Defer microphone clock restoration when capture closes first.
+Route the loudspeaker PCM through Samsung Calliope while keeping the
+receiver and microphone native. Hold UAIF0 and ABOX power while either
+the microphone or firmware playback uses them. Restore only the
+capture-owned field of the shared route register.
 
-A failed firmware shutdown that retains its ring blocks new streams
-until reboot. The default remains native while acoustic output and
-arbitrary duplex open ordering are unqualified.
+Serialize ALSA start, stop and setup against firmware ownership.
+Prevent concurrent use of RDMA0 by the receiver and loudspeaker.
+Retain power and DMA on a failed firmware shutdown.
 
 diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
 --- a/sound/soc/samsung/g955n-abox-speaker.c
@@ -35,18 +34,45 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  #define ABOX_CMU_GATE	0x2034
  #define GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
  #define GATE_ON		(BIT(21) | BIT(20))
-@@ -108,6 +115,9 @@
+@@ -67,7 +74,7 @@
+ #define SPEAKER_SPUS_MASK GENMASK(3, 0)
+ #define SIFS1_SOURCE_MASK GENMASK(18, 16)
+ #define UAIF_STREAM_ENABLES GENMASK(1, 0)
+-#define UAIF0_MODE (BIT(2) | BIT(4))
++#define UAIF0_MODE BIT(2)
+ #define UAIF0_FORMAT ((9 << 24) | BIT(23) | (1 << 18) | (15 << 12))
+ #define RECEIVER_PCM 2
+ #define PCM_COUNT 3
+@@ -108,6 +115,8 @@
  	bool prepared;
  	bool running;
  	bool poisoned;
 +	bool dsm_active;
-+	bool restore_after_dsm;
 +	struct calliope_stream dsp;
  };
  
  struct g955n_speaker {
-@@ -140,6 +150,11 @@
+@@ -120,6 +129,7 @@
+ 	struct snd_soc_dai_link_component cpu[PCM_COUNT], codec[PCM_COUNT], platform;
+ 	struct g955n_pcm pcm[PCM_COUNT];
+ 	struct mutex prepare_lock;
++	spinlock_t route_lock;
+ 	unsigned int prepared_count;
+ 	unsigned int uaif0_users;
+ 	u32 saved_uaif0_ctrl0, saved_uaif0_ctrl1, saved_uaif0_gate;
+@@ -138,8 +148,22 @@
+ static void abox_update(void __iomem *base, u32 reg, u32 mask, u32 value)
+ {
  	writel((readl(base + reg) & ~mask) | value, base + reg);
++}
++
++static void abox_update_route(struct g955n_speaker *abox, u32 reg, u32 mask, u32 value)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&abox->route_lock, flags);
++	abox_update(abox->sfr, reg, mask, value);
++	spin_unlock_irqrestore(&abox->route_lock, flags);
  }
  
 +static bool uses_dsm(const struct g955n_pcm *pcm)
@@ -57,7 +83,25 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  static u32 dma_control(struct g955n_pcm *p)
  {
  	if (p->capture)
-@@ -206,6 +221,10 @@
+@@ -176,7 +200,7 @@
+ 	return saved_regs;
+ }
+ 
+-static int abox_power_ready(struct g955n_speaker *speaker)
++static int abox_power_ready(struct g955n_speaker *speaker, bool calliope_running)
+ {
+ 	unsigned int status, gate;
+ 	int ret;
+@@ -185,7 +209,7 @@
+ 	if (ret || (status & 15) != 15)
+ 		return ret ?: -EHOSTDOWN;
+ 	ret = regmap_read(speaker->pmu, 0x2524, &status);
+-	if (ret || (status & BIT(0)))
++	if (ret || (!!(status & BIT(0)) != calliope_running))
+ 		return ret ?: -EBUSY;
+ 	gate = readl(speaker->cmu + 0x201c);
+ 	if (gate & BIT(20) ? !(gate & BIT(21)) : (gate & BIT(28)))
+@@ -206,6 +230,10 @@
  
  	if (!READ_ONCE(pcm->running))
  		return;
@@ -68,10 +112,118 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  	status = readl(pcm->abox->sfr + dma_status(pcm));
  	offset = ((status & GENMASK(28, 16)) >> 12) + (status & GENMASK(12, 0));
  	period = offset / PERIOD_BYTES;
-@@ -300,15 +319,94 @@
- 	if (!--abox->prepared_count)
- 		writel(abox->saved_syspower, abox->sfr + SYSPOWER_CTRL);
- 	return ret;
+@@ -249,6 +277,71 @@
+ 	return 0;
+ }
+ 
++static int abox_get_uaif0(struct g955n_speaker *abox, struct clk *bclk)
++{
++	void __iomem *sfr = abox->sfr;
++	int ret;
++
++	lockdep_assert_held(&abox->prepare_lock);
++	if (abox->uaif0_users) {
++		abox->uaif0_users++;
++		return 0;
++	}
++
++	if (readl(sfr + CAP_UAIF0) & UAIF_STREAM_ENABLES)
++		return -EBUSY;
++	abox->saved_uaif0_bclk = clk_get_rate(bclk);
++	if (!abox->saved_uaif0_bclk)
++		return -EIO;
++	abox->saved_uaif0_ctrl0 = readl(sfr + CAP_UAIF0);
++	abox->saved_uaif0_ctrl1 = readl(sfr + CAP_UAIF0 + 4);
++	abox->saved_uaif0_gate = readl(abox->cmu + CAP_GATE);
++
++	ret = clk_set_rate(bclk, BCLK_RATE);
++	if (ret || clk_get_rate(bclk) != BCLK_RATE) {
++		clk_set_rate(bclk, abox->saved_uaif0_bclk);
++		return ret ?: -EIO;
++	}
++	abox_update(abox->cmu, CAP_GATE, GATE_MASK, GATE_ON);
++	abox_update(sfr, CAP_UAIF0, UAIF0_MODE, UAIF0_MODE);
++	abox_update(sfr, CAP_UAIF0 + 4, GENMASK(28, 0), UAIF0_FORMAT);
++	abox->uaif0_users++;
++	return 0;
++}
++
++static int abox_put_uaif0(struct g955n_speaker *abox, struct clk *bclk)
++{
++	int ret;
++
++	lockdep_assert_held(&abox->prepare_lock);
++	if (--abox->uaif0_users)
++		return 0;
++
++	writel(abox->saved_uaif0_ctrl1, abox->sfr + CAP_UAIF0 + 4);
++	writel(abox->saved_uaif0_ctrl0, abox->sfr + CAP_UAIF0);
++	writel(abox->saved_uaif0_gate, abox->cmu + CAP_GATE);
++	ret = clk_set_rate(bclk, abox->saved_uaif0_bclk);
++	if (!ret && clk_get_rate(bclk) != abox->saved_uaif0_bclk)
++		ret = -EIO;
++	return ret;
++}
++
++static void abox_get_stream_power(struct g955n_speaker *abox)
++{
++	lockdep_assert_held(&abox->prepare_lock);
++	if (abox->prepared_count++)
++		return;
++	abox->saved_syspower = readl(abox->sfr + SYSPOWER_CTRL);
++	abox_update(abox->sfr, SYSPOWER_CTRL, BIT(0), BIT(0));
++}
++
++static void abox_put_stream_power(struct g955n_speaker *abox)
++{
++	lockdep_assert_held(&abox->prepare_lock);
++	if (!--abox->prepared_count)
++		writel(abox->saved_syspower, abox->sfr + SYSPOWER_CTRL);
++}
++
+ static int speaker_restore(struct g955n_pcm *pcm)
+ {
+ 	struct g955n_speaker *abox = pcm->abox;
+@@ -269,6 +362,10 @@
+ 		case ROUTE_CTRL0:
+ 			mask = pcm->receiver ? RECEIVER_ROUTE_MASK : SPEAKER_ROUTE_MASK;
+ 			break;
++		case CAP_ROUTE:
++			/* Calliope uses a separate field in this register. */
++			mask = GENMASK(3, 0);
++			break;
+ 		case SPUS_CTRL0:
+ 			mask = SPEAKER_SPUS_MASK;
+ 			break;
+@@ -279,7 +376,7 @@
+ 			mask = U32_MAX;
+ 			break;
+ 		}
+-		abox_update(abox->sfr, reg, mask, pcm->saved[count] & mask);
++		abox_update_route(abox, reg, mask, pcm->saved[count] & mask);
+ 	}
+ 
+ 	if (uaif_control(pcm) == UAIF4_CTRL0) {
+@@ -287,18 +384,110 @@
+ 		ret = clk_set_rate(pcm->bclk, pcm->previous_bclk);
+ 		if (!ret && clk_get_rate(pcm->bclk) != pcm->previous_bclk)
+ 			ret = -EIO;
+-	} else if (!--abox->uaif0_users) {
+-		writel(abox->saved_uaif0_ctrl1, abox->sfr + CAP_UAIF0 + 4);
+-		writel(abox->saved_uaif0_ctrl0, abox->sfr + CAP_UAIF0);
+-		writel(abox->saved_uaif0_gate, abox->cmu + CAP_GATE);
+-		ret = clk_set_rate(pcm->bclk, abox->saved_uaif0_bclk);
+-		if (!ret && clk_get_rate(pcm->bclk) != abox->saved_uaif0_bclk)
+-			ret = -EIO;
++	} else {
++		ret = abox_put_uaif0(abox, pcm->bclk);
+ 	}
+ 
+ 	pcm->prepared = false;
+-	if (!--abox->prepared_count)
+-		writel(abox->saved_syspower, abox->sfr + SYSPOWER_CTRL);
++	abox_put_stream_power(abox);
++	return ret;
 +}
 +
 +static int speaker_dsm_worker(void *data)
@@ -85,8 +237,8 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
 +	complete_all(&dsp->running);
 +	complete(&dsp->done);
 +	return 0;
- }
- 
++}
++
 +static int speaker_dsm_stop(struct g955n_pcm *pcm)
 +{
 +	struct calliope_stream *dsp = &pcm->dsp;
@@ -104,9 +256,9 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
 +	ret = READ_ONCE(dsp->result);
 +	if (dsp->retain_ring) {
 +		pcm->poisoned = true;
-+	} else if (capture->restore_after_dsm) {
-+		capture->restore_after_dsm = false;
-+		restore_ret = speaker_restore(capture);
++	} else {
++		restore_ret = abox_put_uaif0(pcm->abox, capture->bclk);
++		abox_put_stream_power(pcm->abox);
 +	}
 +	return ret ?: restore_ret;
 +}
@@ -123,13 +275,28 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
 +static int speaker_dsm_prepare(struct g955n_pcm *pcm, unsigned int periods)
 +{
 +	struct calliope_stream *dsp = &pcm->dsp;
++	struct g955n_speaker *abox = pcm->abox;
++	struct clk *capture_bclk = abox->pcm[SNDRV_PCM_STREAM_CAPTURE].bclk;
 +	struct task_struct *worker;
++	u32 status;
 +	int ret;
 +
-+	lockdep_assert_held(&pcm->abox->prepare_lock);
-+	if (pcm->poisoned || READ_ONCE(pcm->abox->pcm[SNDRV_PCM_STREAM_CAPTURE].running))
++	lockdep_assert_held(&abox->prepare_lock);
++	if (pcm->poisoned || abox->pcm[SNDRV_PCM_STREAM_CAPTURE].poisoned)
 +		return -EBUSY;
++	ret = abox_power_ready(abox, false);
++	if (ret)
++		return ret;
++	ret = abox_get_uaif0(abox, capture_bclk);
++	if (ret)
++		return ret;
++	abox_get_stream_power(abox);
++	ret = readl_poll_timeout(abox->sfr + SYSPOWER_STATUS, status,
++				 status & BIT(0), 10, 20000);
++	if (ret)
++		goto release;
 +	dsp->dma = pcm->ring.addr;
++	dsp->host_route_lock = &abox->route_lock;
 +	dsp->mute = speaker_dsm_mute;
 +	dsp->periods = periods;
 +	dsp->stopping = false;
@@ -141,17 +308,23 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
 +	init_completion(&dsp->done);
 +
 +	worker = kthread_run(speaker_dsm_worker, pcm, "g955n-calliope");
-+	if (IS_ERR(worker))
-+		return PTR_ERR(worker);
++	if (IS_ERR(worker)) {
++		ret = PTR_ERR(worker);
++		goto release;
++	}
 +
 +	pcm->dsm_active = true;
 +	wait_for_completion(&dsp->ready);
 +	ret = READ_ONCE(dsp->result);
 +	return ret == -EINPROGRESS ? 0 : speaker_dsm_stop(pcm);
-+}
 +
- static int speaker_stop(struct g955n_pcm *pcm)
- {
++release:
++	abox_put_uaif0(abox, capture_bclk);
++	abox_put_stream_power(abox);
+ 	return ret;
+ }
+ 
+@@ -307,11 +496,14 @@
  	u32 status;
  	int ret;
  
@@ -162,14 +335,17 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
 +		return speaker_dsm_stop(pcm);
  	if (!pcm->prepared)
  		return 0;
- 	abox_update(pcm->abox->sfr, uaif_control(pcm), uaif_enable(pcm), 0);
-@@ -327,18 +425,26 @@
+-	abox_update(pcm->abox->sfr, uaif_control(pcm), uaif_enable(pcm), 0);
++	abox_update_route(pcm->abox, uaif_control(pcm), uaif_enable(pcm), 0);
+ 	abox_update(pcm->abox->sfr, dma_control(pcm), RDMA_ENABLE, 0);
+ 	ret = readl_poll_timeout(pcm->abox->sfr + dma_status(pcm), status,
+ 				 !(status & RDMA_PROGRESS), 10, 40000);
+@@ -327,18 +519,21 @@
  			 struct snd_pcm_substream *stream)
  {
  	struct g955n_pcm *pcm = abox_pcm(component, stream);
 -	int ret = speaker_stop(pcm);
-+	struct g955n_pcm *speaker = &pcm->abox->pcm[SNDRV_PCM_STREAM_PLAYBACK];
-+	int ret, restore_ret = 0;
++	int ret, restore_ret;
  
 +	scoped_guard(mutex, &pcm->abox->prepare_lock)
 +		ret = speaker_stop(pcm);
@@ -181,11 +357,7 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  		return ret;
  	mutex_lock(&pcm->abox->prepare_lock);
 -	ret = speaker_restore(pcm);
-+	/* Calliope still needs the UAIF0 clocks after microphone close. */
-+	if (pcm->capture && pcm->prepared && speaker->dsm_active)
-+		pcm->restore_after_dsm = true;
-+	else
-+		restore_ret = speaker_restore(pcm);
++	restore_ret = speaker_restore(pcm);
  	mutex_unlock(&pcm->abox->prepare_lock);
  	pm_runtime_put_sync(pcm->abox->dev);
 -	return ret;
@@ -193,7 +365,60 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  }
  
  static int abox_prepare_pcm(struct g955n_pcm *pcm, struct snd_pcm_substream *stream)
-@@ -460,34 +566,60 @@
+@@ -358,7 +553,8 @@
+ 	if (pcm->poisoned || !bytes || bytes > RING_BYTES ||
+ 	    !IS_ALIGNED(bytes, PERIOD_BYTES))
+ 		return -EINVAL;
+-	ret = abox_power_ready(abox);
++	ret = abox_power_ready(abox, pcm->capture &&
++			      abox->pcm[SNDRV_PCM_STREAM_PLAYBACK].dsm_active);
+ 	if (ret)
+ 		return ret;
+ 	if ((readl(sfr + dma) & RDMA_ENABLE) ||
+@@ -378,26 +574,22 @@
+ 	if (!shared_uaif) {
+ 		pcm->previous_bclk = previous_rate;
+ 		pcm->saved_gate = readl(abox->cmu + ABOX_CMU_GATE);
+-	} else if (!abox->uaif0_users++) {
+-		abox->saved_uaif0_bclk = previous_rate;
+-		abox->saved_uaif0_ctrl0 = readl(sfr + CAP_UAIF0);
+-		abox->saved_uaif0_ctrl1 = readl(sfr + CAP_UAIF0 + 4);
+-		abox->saved_uaif0_gate = readl(abox->cmu + CAP_GATE);
++	} else {
++		ret = abox_get_uaif0(abox, pcm->bclk);
++		if (ret)
++			return ret;
+ 	}
+-	if (!abox->prepared_count++)
+-		abox->saved_syspower = readl(sfr + SYSPOWER_CTRL);
++	abox_get_stream_power(abox);
+ 	pcm->prepared = true;
+ 
+-	if (configure_clock) {
++	if (!shared_uaif) {
+ 		ret = clk_set_rate(pcm->bclk, BCLK_RATE);
+ 		if (ret || clk_get_rate(pcm->bclk) != BCLK_RATE) {
+ 			ret = ret ?: -EIO;
+ 			goto restore;
+ 		}
+-		abox_update(abox->cmu, shared_uaif ? CAP_GATE : ABOX_CMU_GATE,
+-			    GATE_MASK, GATE_ON);
++		abox_update(abox->cmu, ABOX_CMU_GATE, GATE_MASK, GATE_ON);
+ 	}
+-	abox_update(sfr, SYSPOWER_CTRL, BIT(0), BIT(0));
+ 	ret = readl_poll_timeout(sfr + SYSPOWER_STATUS, status, status & BIT(0), 10, 20000);
+ 	if (ret)
+ 		goto restore;
+@@ -414,7 +606,7 @@
+ 		writel(0x800000, sfr + CAP_DMA + 24);
+ 		abox_update(sfr, CAP_SPUM0, BIT(4) | BIT(7), 0);
+ 		abox_update(sfr, CAP_SPUM1, GENMASK(12, 8) | GENMASK(1, 0), (9 << 8) | 1);
+-		abox_update(sfr, CAP_ROUTE, GENMASK(3, 0), 8);
++		abox_update_route(abox, CAP_ROUTE, GENMASK(3, 0), 8);
+ 		writel(lower_32_bits(addr), sfr + CAP_DMA + 8);
+ 		writel(lower_32_bits(addr) + bytes, sfr + CAP_DMA + 12);
+ 		writel(PERIOD_BYTES, sfr + CAP_DMA + 16);
+@@ -460,39 +652,65 @@
  			   struct snd_pcm_substream *stream)
  {
  	struct g955n_pcm *pcm = abox_pcm(component, stream);
@@ -211,8 +436,8 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
 +	guard(mutex)(&abox->prepare_lock);
 +	if (uses_dsm(speaker) && speaker->poisoned)
 +		return -EIO;
-+	/* Preparing a PCM can reprogram clocks and routes owned by Calliope. */
-+	if (speaker->dsm_active)
++	/* The receiver also uses the playback RDMA and UAIF0 transmitter. */
++	if (pcm->receiver && speaker->dsm_active)
 +		return -EBUSY;
  	ret = speaker_restore(pcm);
 -	if (!ret && !pcm->capture &&
@@ -264,7 +489,13 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  			return -EIO;
  		initial = readl(sfr + dma_status(pcm)) & GENMASK(28, 0);
  		dma_wmb();
-@@ -504,6 +636,7 @@
+ 		abox_update(sfr, dma_control(pcm), RDMA_ENABLE, RDMA_ENABLE);
+-		abox_update(sfr, uaif_control(pcm), uaif_enable(pcm), uaif_enable(pcm));
++		abox_update_route(pcm->abox, uaif_control(pcm), uaif_enable(pcm), uaif_enable(pcm));
+ 		if (pcm->receiver) {
+ 			ret = readl_poll_timeout(sfr + dma_status(pcm), status,
+ 				 (status & RDMA_PROGRESS) &&
+@@ -504,6 +722,7 @@
  				return ret;
  			}
  		}
@@ -272,3 +503,20 @@ diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-ab
  		pcm->period = 0;
  		WRITE_ONCE(pcm->running, true);
  		schedule_delayed_work(&pcm->period_work, msecs_to_jiffies(5));
+@@ -687,7 +906,7 @@
+ 	speaker->sfr = devm_ioremap(dev, sfr.start, resource_size(&sfr));
+ 	if (!speaker->cmu || !speaker->sfr)
+ 		return -ENOMEM;
+-	ret = abox_power_ready(speaker);
++	ret = abox_power_ready(speaker, false);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -699,6 +918,7 @@
+ 	if (ret)
+ 		return ret;
+ 	mutex_init(&speaker->prepare_lock);
++	spin_lock_init(&speaker->route_lock);
+ 	ret = abox_init_pcm(speaker, SNDRV_PCM_STREAM_PLAYBACK, "speaker");
+ 	if (ret)
+ 		return ret;

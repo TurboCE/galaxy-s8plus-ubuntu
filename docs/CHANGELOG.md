@@ -2410,3 +2410,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   activity and microphone close before playback teardown. Kept the
   firmware path opt-in because acoustic playback and capture-first
   duplex remain unresolved.
+
+### R100 Calliope duplex start order
+
+- Shared UAIF0 clocks and ABOX power across Calliope playback
+  and native microphone capture. Verified both start orders,
+  either stream finishing first, and simultaneous PipeWire
+  transport. Lower speaker audibility remains unresolved.

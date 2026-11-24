@@ -3,6 +3,7 @@
 #define G955N_CALLIOPE_H
 
 #include <linux/completion.h>
+#include <linux/spinlock_types.h>
 #include <linux/types.h>
 
 #define CALLIOPE_SRAM_IMAGE_LIMIT	0x30000
@@ -24,6 +25,7 @@ struct calliope_stream {
 	struct completion start;
 	struct completion running;
 	struct completion done;
+	spinlock_t *host_route_lock;
 	bool stopping;
 	bool retain_ring;
 	int result;

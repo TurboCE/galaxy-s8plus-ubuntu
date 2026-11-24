@@ -61,12 +61,12 @@ For the receiver-capable R100 source, append `--receiver` to the build
 command and use the RDMA0 source against which patch 0131 applies.
 This applies patches 0131 and 0133 in the output directory. Only PCM 0
 uses Calliope when enabled. PCM 1 stays on the native microphone route
-and PCM 2 on the native receiver route. For duplex, configure and
-prepare the microphone before speaker startup and start capture after
-Calliope playback starts. Firmware startup refuses a running microphone
-because the firmware configures shared audio registers. Once playback is
-running, the microphone can stop and close while the speaker keeps using
-UAIF0's clocks. The driver restores those clocks after firmware teardown.
+and PCM 2 on the native receiver route. Either PCM can start or stop first. The host holds the UAIF0 bit clock,
+format and ABOX power while either stream uses them. Calliope adds only
+the UAIF0 transmit enable and its playback route fields. The microphone
+keeps its receive route and WDMA1 buffer. This sharing applies to the
+receiver-capable driver. The older standalone and ALSA trial paths
+still require an idle ABOX before firmware startup.
 
 The R100 trial reproduced underruns when SIFS0 had no clocked sink and
 when an optional DSP dump report ended the stream. The stock UAIF0

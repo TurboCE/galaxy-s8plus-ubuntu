@@ -5236,3 +5236,45 @@ speaker output and capture-first duplex remain outstanding.
 The trial did not change the installed ABOX module, and the
 one-boot service override was withdrawn. The MAX98506 control
 settings from patch 0132 remain installed.
+
+### R100 Calliope duplex in both start orders
+
+The earlier receiver-capable trial refused to start Calliope
+while native microphone DMA was running. It also checked that
+the CA7 was off before setting up any native PCM, including a
+microphone opened after firmware playback already started.
+
+The updated patch 0133 makes the receiver-capable host driver
+hold shared UAIF0 clocks, format and ABOX power for both
+streams. Calliope leaves the host's receive lane and clock
+registers alone and controls only the shared transmitter and
+its own route fields. The host and firmware updates serialize
+register read-modify-write operations. The firmware-active
+power check admits native capture while the local playback
+worker owns CA7. The older trial interface keeps its idle-ABOX
+precondition. Both ARM64 build modes compiled.
+
+On the SM-G955N, the loaded module build ID matched the
+one-boot trial. Direct ALSA captured 480,000 frames with the
+microphone started first and both streams exited successfully.
+Starting the speaker first collected 432,000 frames and the
+microphone continued after speaker stop. Starting the speaker
+first and closing the microphone early collected 144,000
+frames and the speaker continued after capture close. Firmware
+reported RDMA0 progress and successful stop, free and close in
+all three cases.
+
+Ubuntu PipeWire also started the silent playback while
+recording. The test observed 155 playback and 228 capture
+positions, collected 218,400 post-startup frames and found
+no xruns, hardware error growth, or new audio or kernel
+faults. Receiver PCM 2 separately completed silent playback
+and Voice retained gain 92/92.
+
+With handset capture active before starting the coded speaker
+reference, playback completed in 7.541 s. The UAIF4 data pad
+showed 3,971 and 3,936 transitions during the two tone windows.
+The handset and Mac microphones captured 430,080 and 556,800
+frames. Neither reproduced the coded signal. This qualifies
+duplex PCM transport in both orders and leaves physical lower
+speaker output open. The test mode remains opt-in.
