@@ -47,6 +47,7 @@
 #define ABOX_GICD_BASE		0x13ef1000
 #define ABOX_GICD_SGIR		0xf00
 #define ABOX_GIC_CA7		BIT(16)
+#define IPC_RECEIVED		0
 #define IPC_SYSTEM		1
 #define IPC_PCM_PLAYBACK	2
 #define IPC_ABOX_CONFIG		0xa
@@ -90,10 +91,13 @@
 #define ABOX_RDMA_PROGRESS	BIT(31)
 #define ABOX_RDMA_POSITION	(GENMASK(28, 16) | GENMASK(12, 0))
 #define ABOX_UAIF4_GATE		0x2034
+#define ABOX_UAIF0_GATE		0x2024
 #define ABOX_UAIF_GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
 #define ABOX_UAIF_GATE_ON	(BIT(21) | BIT(20))
 #define ABOX_UAIF4_CTRL0		0x540
 #define ABOX_UAIF4_CTRL1		0x544
+#define ABOX_UAIF0_CTRL0		0x500
+#define ABOX_UAIF0_CTRL1		0x504
 #define ABOX_UAIF4_BCLK		1536000UL
 #define ABOX_SPUS_BANK(n)	(0x220 + (n) * sizeof(u32))
 #define ABOX_SPUS_BANK_MASK	(GENMASK(13, 7) | GENMASK(28, 23))
@@ -125,16 +129,18 @@ struct calliope_log_ring {
 	__le32 writer, reader, size;
 };
 
-/* Stock SPUS OUT7 -> SIFS1 -> UAIF4, with NSRC3 selecting UAIF4 feedback. */
+/* Stock SIFS0 clock path and SPUS OUT7 -> SIFS1 -> UAIF4. */
 static const struct {
 	u32 reg, mask, value;
 } calliope_speaker_route[] = {
-	{ 0x040, GENMASK(19, 16), 2 << 16 },
+	{ 0x040, GENMASK(19, 16) | GENMASK(3, 0), (2 << 16) | 1 },
 	{ 0x044, GENMASK(15, 12), 12 << 12 },
 	{ 0x200, GENMASK(30, 29) | GENMASK(2, 1), 1 << 1 },
 	{ 0x204, GENMASK(18, 16), 7 << 16 },
 	{ ABOX_SPUS_BANK(0), ABOX_SPUS_BANK_MASK, ABOX_SPUS_S16_STEREO },
 	{ ABOX_SPUS_BANK(7), ABOX_SPUS_BANK_MASK, ABOX_SPUS_S16_STEREO },
+	{ ABOX_UAIF0_CTRL1, GENMASK(28, 0), (9 << 24) | BIT(23) | (1 << 18) | (15 << 12) },
+	{ ABOX_UAIF0_CTRL0, BIT(2) | BIT(0), BIT(2) | BIT(0) },
 	{ ABOX_UAIF4_CTRL1, GENMASK(28, 0), (9 << 24) | BIT(23) | (1 << 18) | (15 << 12) },
 	{ ABOX_UAIF4_CTRL0, GENMASK(4, 0), BIT(2) | BIT(0) },
 };
@@ -457,7 +463,6 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 	size_t log_capacity = 0;
 	u32 first = 0, pointer, ipc, message, status, initial = 0, running_status = 0;
 	bool ipc_advanced = false, dma_advanced = false;
-	bool known_dump = false;
 	int i, ret = 0, stop, release, close;
 
 	for (i = 0; i < ARRAY_SIZE(setup); i++) {
@@ -525,23 +530,9 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 			writel(0, sram + IPC_RX_ACK);
 			continue;
 		}
-		if (ipc == IPC_SYSTEM && message == IPC_REPORT_DUMP) {
-			u32 addr = readl(sram + IPC_RX + 16);
-			u32 size = readl(sram + IPC_RX + 20);
-
-			/* The trial does not retain diagnostic audio from the DSP. */
-			if (readl(sram + IPC_RX + 12) || !size || size > CALLIOPE_DRAM_SIZE ||
-			    addr < CALLIOPE_DRAM_IOVA ||
-			    addr - CALLIOPE_DRAM_IOVA > CALLIOPE_DRAM_SIZE - size) {
-				ret = -EPROTO;
-				break;
-			}
-			known_dump = true;
-			writel(0, sram + IPC_RX_ACK);
-			continue;
-		}
-		if (ipc == IPC_SYSTEM && message == IPC_FLUSH_DUMP && known_dump &&
-		    !readl(sram + IPC_RX + 12)) {
+		if (ipc == IPC_RECEIVED ||
+		    (ipc == IPC_SYSTEM && (message == IPC_REPORT_DUMP || message == IPC_FLUSH_DUMP))) {
+			/* Diagnostic buffers are optional; no address from these reports is used. */
 			writel(0, sram + IPC_RX_ACK);
 			continue;
 		}
@@ -595,13 +586,13 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	struct resource cmu_res, sfr_res;
 	struct calliope_dsm_control dsm = {};
 	struct device_node *node;
-	struct clk *pll = NULL, *bclk = NULL;
+	struct clk *pll = NULL, *bclk = NULL, *sifs0_bclk = NULL;
 	struct regmap *pmu;
 	void *saved_sram = NULL;
 	u32 saved_l2, saved_misc, saved_syspower, state, option, power;
 	u32 saved_rdma[8];
-	u32 saved_route[ARRAY_SIZE(calliope_speaker_route)], saved_gate = 0;
-	unsigned long ca7_rate = 0, saved_bclk = 0;
+	u32 saved_route[ARRAY_SIZE(calliope_speaker_route)], saved_gate = 0, saved_sifs0_gate = 0;
+	unsigned long ca7_rate = 0, saved_bclk = 0, saved_sifs0_bclk = 0;
 	bool route_set = false;
 	int i, ret, stop;
 
@@ -625,6 +616,8 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	}
 	if (try_pcm && !ret && !IS_ERR(pmu) && !IS_ERR(pll))
 		bclk = of_clk_get(dev->of_node, 0);
+	if (bclk && !IS_ERR(bclk))
+		sifs0_bclk = of_clk_get(dev->of_node, 1);
 	of_node_put(node);
 	if (ret)
 		return ret;
@@ -635,6 +628,11 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	if (IS_ERR(bclk)) {
 		ret = PTR_ERR(bclk);
 		bclk = NULL;
+		goto out;
+	}
+	if (IS_ERR(sifs0_bclk)) {
+		ret = PTR_ERR(sifs0_bclk);
+		sifs0_bclk = NULL;
 		goto out;
 	}
 
@@ -702,6 +700,19 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 			ret = ret ?: -EIO;
 			goto out;
 		}
+		saved_sifs0_bclk = clk_get_rate(sifs0_bclk);
+		if (!saved_sifs0_bclk) {
+			ret = -EIO;
+			goto out;
+		}
+		ret = clk_set_rate(sifs0_bclk, ABOX_UAIF4_BCLK);
+		if (ret || clk_get_rate(sifs0_bclk) != ABOX_UAIF4_BCLK) {
+			ret = ret ?: -EIO;
+			goto out;
+		}
+		saved_sifs0_gate = readl(cmu + ABOX_UAIF0_GATE);
+		writel((saved_sifs0_gate & ~ABOX_UAIF_GATE_MASK) | ABOX_UAIF_GATE_ON,
+		       cmu + ABOX_UAIF0_GATE);
 		saved_gate = readl(cmu + ABOX_UAIF4_GATE);
 		writel((saved_gate & ~ABOX_UAIF_GATE_MASK) | ABOX_UAIF_GATE_ON,
 		       cmu + ABOX_UAIF4_GATE);
@@ -809,13 +820,24 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 out:
 	if (!*keep_dma) {
 		if (route_set) {
-			for (i = ARRAY_SIZE(calliope_speaker_route) - 1; i >= 0; i--)
-				writel(saved_route[i], sfr + calliope_speaker_route[i].reg);
+			if (try_feedback)
+				writel(readl(sfr + ABOX_UAIF4_CTRL0) & ~BIT(1),
+				       sfr + ABOX_UAIF4_CTRL0);
+			for (i = ARRAY_SIZE(calliope_speaker_route) - 1; i >= 0; i--) {
+				void __iomem *reg = sfr + calliope_speaker_route[i].reg;
+				u32 mask = calliope_speaker_route[i].mask;
+
+				writel((readl(reg) & ~mask) | (saved_route[i] & mask), reg);
+			}
 			writel(saved_gate, cmu + ABOX_UAIF4_GATE);
+			writel(saved_sifs0_gate, cmu + ABOX_UAIF0_GATE);
 		}
+		if (saved_sifs0_bclk && clk_set_rate(sifs0_bclk, saved_sifs0_bclk) && !ret)
+			ret = -EIO;
 		if (saved_bclk && clk_set_rate(bclk, saved_bclk) && !ret)
 			ret = -EIO;
 	}
+	clk_put(sifs0_bclk);
 	clk_put(bclk);
 	clk_put(pll);
 	kvfree(saved_sram);

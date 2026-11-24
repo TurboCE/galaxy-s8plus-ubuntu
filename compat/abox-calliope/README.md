@@ -58,9 +58,11 @@ ALSA ring as an IOMMU alias and waits for the firmware preparation and
 trigger acknowledgments. Prepare the microphone PCM first when testing
 simultaneous playback and capture.
 
-The R100 trial started playback DMA, but its position advanced in bursts
-and normal ALSA applications could not complete playback. Keep this
-driver opt-in until PCM timing and speaker output are qualified.
+The R100 trial reproduced underruns when SIFS0 had no clocked sink and
+when an optional DSP dump report ended the stream. The stock UAIF0
+clock path and mailbox handling let normal ALSA playback complete at
+48 kHz. Keep this driver opt-in until acoustic output and live
+amplifier feedback are qualified.
 
 The boot option exercises the Samsung nonsecure-GIC handoff available on
 the tested silicon revision. A recurring ALSA stream, amplifier feedback,

@@ -2215,3 +2215,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   ring into the firmware's PCM window and manages the mailbox lifecycle.
 - Handle firmware log and dump notifications during streaming and restore
   the speaker route and amplifier monitor configuration at teardown.
+
+### Pace DSM-backed playback with the SIFS0 clock
+
+- Restore the matching stock UAIF0/SIFS0 clock path alongside the
+  UAIF4 speaker route. Restore only the serializer fields owned by
+  the test so a prepared microphone can continue to capture.
+- Keep ALSA playing when Calliope reports optional dump buffers.
+  Acknowledge those notifications without reading the buffers.

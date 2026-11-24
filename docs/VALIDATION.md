@@ -4330,3 +4330,33 @@ Installed GNOME Disks, GNOME Logs, HardInfo, lshw, v4l-utils, evtest,
 libdrm-tests and lm-sensors via the Ubuntu 24.04 package repositories.
 All eight requested packages and their commands were present. APT
 reported zero upgrades and zero removals.
+
+### R100 DSM underrun isolation and acoustic comparison
+
+A read-only comparison used the same 48 kHz stereo ring on the R100
+native path and the opt-in DSM driver. Buffer geometry matched. The
+native path advanced one 4 KiB period in about 21 ms, while the
+unclocked DSM mix path advanced by a period in about 4 ms in many
+samples. Enabling the stock UAIF0 transmit clock and SIFS0 selection,
+alongside the UAIF4 output, restored the native position cadence.
+A remaining short stream failed at a Calliope REPORT_DUMP notification.
+The driver now acknowledges unused dump messages without touching their
+buffers.
+
+On the SM-G955N, two seven-second aplay streams completed without an
+underrun. Each simultaneous microphone recording returned 337,920
+frames. Raising the stimulus level did not produce the three expected
+tones in order. While active, MAX98506 readback showed global output,
+speaker and boost enabled as well as VMON and IMON configured. A separate
+read-only ERAP telemetry trial returned zero for all six DSM speaker
+power queries through the silence and tone windows. RDMA7 was idle on
+the normal trial. A comparison using PCM channel 7 did not start its
+DMA; toggling UAIF4 mode did not recover the acoustic sequence either.
+An optional VI Sensing control request produced a system-clock request
+outside the diagnostic's supported handling. Those comparison changes
+were excluded from the driver. No audio recordings were retained.
+
+This qualifies ALSA DMA timing and teardown on the tested DSM path.
+Acoustic speaker output and live amplifier feedback are still open.
+The device was restored to the previously installed audio module
+after the one-boot experiments.
