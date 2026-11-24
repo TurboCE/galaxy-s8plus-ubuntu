@@ -5350,3 +5350,35 @@ zero clipping. The upper receiver then played the same coded
 reference. Both microphones detected all 20 windows (each
 p=0.0025). The receiver and IN3L gains remained at the original
 values. No raw recordings were kept.
+
+### R100 loudspeaker retest after the microphone clock fix
+
+Replayed a seven-second coded tone through lower speaker PCM 0
+with the updated 1.536 MHz microphone setting and the receiver
+muted. The verified Calliope duplex module completed playback
+in 7.568 s. The recording did not match the tone on the handset
+or MacBook. Three read-only hardware samples showed sustained
+SoC data activity on GPH0-7 and MAX98506 block/global enables
+of 0x93/0x80. UAIF4 receive status stayed 0x2 and WDMA3 and
+WDMA4 status read zero.
+
+A second one-boot comparison requested firmware VI Sensing and
+sampled Samsung DSM power parameter 136 during the same nonzero
+audio. At the owner's request only the handset microphone was
+captured in that run. Playback completed in 7.564 s. The
+microphone captured 430,080 frames, with approximately three
+quiet RMS counts per 250 ms window after the initial 0.5 s.
+It did not match the tone (p=0.7450). UAIF4 data activity and
+amplifier enables remained present. Firmware acknowledged the
+sensing request, but all four returned power values were zero,
+the receive status remained 0x2, and neither feedback DMA ran.
+The firmware's 286 MHz MIF request was observed without
+changing that clock.
+
+The Samsung speaker pin group describes three pins and provides
+no separately verified feedback-pin mapping here. The register
+and DMA readings therefore do not qualify physical amplifier
+input, boost voltage or speaker terminal output. The VI module
+and both boot overrides were removed. The receiver gain and
+microphone clock change were retained. No raw recordings were
+kept.

@@ -2437,3 +2437,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   1.536 MHz IN3 PDM clock. Verified a quieter capture after
   reboot and detection of the upper receiver reference on
   both the handset and the MacBook microphones.
+
+### R100 audible loudspeaker and feedback retest
+
+- Replayed coded tones with the quieter microphone setting.
+  Confirmed SoC output activity and amplifier enables. The
+  firmware sensing comparison returned zero power and no
+  running feedback DMA. Physical loudspeaker output remains
+  unverified.
