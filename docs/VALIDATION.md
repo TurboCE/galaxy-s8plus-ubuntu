@@ -4276,3 +4276,29 @@ The stock PCM lifecycle is exercised by the one-shot module. A
 desktop ALSA stream connected through firmware, the amplifier's
 current/voltage feedback, audible output and acoustic capture remain
 unqualified.
+
+### R100 microphone acoustic reference and muted MAX98506 feedback
+
+The Mac's normal output was NanoKVM-Pro. The built-in speakers were
+muted with their saved level at 64%. Temporarily selected the built-in
+speakers, cleared mute, and set the output to 88%. Restored both the
+built-in volume/mute settings and the original default output after
+each run.
+
+At 48 kHz, each native ALSA microphone recording returned 527,712 stereo
+frames. The Mac emitted 940, 1380 and 1770 Hz separated by silence. The
+first capture peaked at 3.50, 5.75 and 7.75 seconds for those frequencies
+and the repeat peaked at 3.75, 5.75 and 8.00 seconds. On the repeat, the
+three spectral amplitudes rose from baselines 61, 97 and 48 to 257, 305
+and 154. Both PCM channels carried the same mono signal. This qualifies
+acoustic input through the existing R100 microphone PCM. It does not
+qualify independent stereo microphones. No recordings were retained.
+
+The muted PCM test used the live MAX98506's parent codec phandle and
+read back the stock current and voltage monitor slots and output
+high-impedance mask. The VMON and IMON ADC enable bits were set and
+UAIF4 receive was enabled. Firmware still started RDMA0 and the hardware
+position advanced. After the trial the driver restored monitor registers
+and verified the amplifier remained disabled. This checks the feedback
+configuration; amplifier feedback with a driven speaker, a persistent
+ALSA-to-DSM stream, and audible speaker output remain open.

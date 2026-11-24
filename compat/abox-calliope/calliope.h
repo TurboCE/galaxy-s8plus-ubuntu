@@ -17,6 +17,6 @@ struct firmware;
 
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		       const void *dram, bool try_resume, bool try_dsm_read,
-		       bool try_pcm, bool *keep_dma);
+		       bool try_pcm, bool try_feedback, bool *keep_dma);
 
 #endif

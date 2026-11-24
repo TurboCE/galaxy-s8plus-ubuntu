@@ -2200,3 +2200,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Discover the stock ERAP DSM On mixer control from its component descriptor.
 - Add an opt-in, zero-sample RDMA0 test with the stock UAIF4 selectors and
   hardware progress checks. Stop DMA and restore routing after each trial.
+
+### R100 acoustic microphone and muted speaker feedback verification
+
+- Repeated the physical microphone reference after correcting Mac output
+  selection and increasing playback volume. Both recordings followed
+  the reference sequence.
+- Add an optional muted MAX98506 monitor setup and UAIF4 receive check
+  to the Calliope PCM diagnostic.

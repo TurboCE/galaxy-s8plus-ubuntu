@@ -465,7 +465,7 @@ cleanup:
 
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		       const void *dram, bool try_resume, bool try_dsm_read,
-		       bool try_pcm, bool *keep_dma)
+		       bool try_pcm, bool try_feedback, bool *keep_dma)
 {
 	void __iomem *sysreg = NULL, *sram = NULL, *cmu = NULL, *sfr = NULL;
 	struct resource cmu_res, sfr_res;
@@ -589,6 +589,13 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 			       calliope_speaker_route[i].value, reg);
 		}
 		route_set = true;
+		if (try_feedback) {
+			u32 ctrl = readl(sfr + ABOX_UAIF4_CTRL0);
+
+			writel(ctrl | BIT(1), sfr + ABOX_UAIF4_CTRL0);
+			dev_info(dev, "Calliope UAIF4 feedback input enabled, CTRL0=%08x\n",
+				 readl(sfr + ABOX_UAIF4_CTRL0));
+		}
 	}
 
 	saved_misc = readl(sysreg + ABOX_SYSREG_MISC);

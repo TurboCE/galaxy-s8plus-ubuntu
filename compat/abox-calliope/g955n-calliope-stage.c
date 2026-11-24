@@ -5,12 +5,14 @@
  */
 #include <linux/dma-mapping.h>
 #include <linux/firmware.h>
+#include <linux/i2c.h>
 #include <linux/iommu.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/sizes.h>
 
 #include "calliope.h"
@@ -27,10 +29,120 @@ MODULE_PARM_DESC(try_dsm_read, "Read DSM parameters without playback; requires t
 static bool try_pcm;
 module_param(try_pcm, bool, 0400);
 MODULE_PARM_DESC(try_pcm, "Run a silent RDMA0 firmware PCM trial; requires try_dsm_read");
+static bool try_feedback;
+module_param(try_feedback, bool, 0400);
+MODULE_PARM_DESC(try_feedback, "Check muted MAX98506 monitor configuration; requires try_pcm");
 #define CALLIOPE_IVA_IOVA		0x90000000UL
 #define CALLIOPE_IVA_SIZE		SZ_512K
 #define CALLIOPE_VSS_IOVA		0xa0000000UL
 #define CALLIOPE_VSS_SIZE		(SZ_4M + SZ_2M)
+#define MAX98506_GLOBAL_ENABLE		0x38
+#define MAX98506_ENABLE			BIT(7)
+
+/* Samsung dream2lte has VMON on slots 2–3 and IMON on slots 0–1. */
+static const struct {
+	unsigned int reg, mask, value;
+} max98506_feedback[] = {
+	{ 0x22, GENMASK(5, 0), 0x22 },
+	{ 0x23, GENMASK(5, 0), 0x20 },
+	{ 0x2a, GENMASK(7, 0), 0xf0 },
+	{ 0x36, GENMASK(1, 0), 0x03 },
+};
+
+struct calliope_feedback {
+	struct i2c_client *client;
+	struct regmap *map;
+	unsigned int saved[ARRAY_SIZE(max98506_feedback)];
+	unsigned int changed;
+};
+
+static int calliope_feedback_restore(struct calliope_feedback *feedback)
+{
+	bool changed = feedback->changed;
+	int ret = 0;
+
+	while (feedback->changed) {
+		unsigned int i = --feedback->changed;
+		unsigned int reg = max98506_feedback[i].reg;
+		unsigned int mask = max98506_feedback[i].mask;
+		unsigned int actual;
+		int err;
+
+		err = regmap_update_bits(feedback->map, reg, mask, feedback->saved[i] & mask);
+		if (!err) {
+			err = regmap_read(feedback->map, reg, &actual);
+			if (!err && (actual & mask) != (feedback->saved[i] & mask))
+				err = -EIO;
+		}
+		if (err && !ret)
+			ret = err;
+	}
+
+	if (feedback->client) {
+		if (changed && !ret) {
+			unsigned int enabled;
+
+			ret = regmap_read(feedback->map, MAX98506_GLOBAL_ENABLE, &enabled);
+			if (!ret && (enabled & MAX98506_ENABLE))
+				ret = -EIO;
+			if (!ret)
+				dev_info(&feedback->client->dev,
+					 "Calliope feedback registers restored, amplifier off\n");
+		}
+		if (ret)
+			dev_err(&feedback->client->dev, "Calliope monitor restore failed: %d\n", ret);
+		device_unlock(&feedback->client->dev);
+		put_device(&feedback->client->dev);
+	}
+	return ret;
+}
+
+static int calliope_feedback_prepare(struct device *dev, struct calliope_feedback *feedback)
+{
+	struct device_node *codec;
+	unsigned int actual, i;
+	int ret;
+
+	codec = of_parse_phandle(dev->of_node, "audio-codec", 0);
+	if (!codec)
+		return -ENODEV;
+	if (of_device_is_compatible(codec, "maxim,max98506"))
+		feedback->client = of_find_i2c_device_by_node(codec);
+	of_node_put(codec);
+	if (!feedback->client)
+		return -ENODEV;
+
+	device_lock(&feedback->client->dev);
+	feedback->map = dev_get_regmap(&feedback->client->dev, NULL);
+	if (!feedback->map)
+		return -ENODEV;
+	ret = regmap_read(feedback->map, MAX98506_GLOBAL_ENABLE, &actual);
+	if (ret || (actual & MAX98506_ENABLE))
+		return ret ?: -EBUSY;
+
+	for (i = 0; i < ARRAY_SIZE(max98506_feedback); i++) {
+		unsigned int reg = max98506_feedback[i].reg;
+		unsigned int mask = max98506_feedback[i].mask;
+		unsigned int value = max98506_feedback[i].value;
+
+		ret = regmap_read(feedback->map, reg, &feedback->saved[i]);
+		if (ret)
+			return ret;
+		feedback->changed++;
+		ret = regmap_update_bits(feedback->map, reg, mask, value);
+		if (ret)
+			return ret;
+		ret = regmap_read(feedback->map, reg, &actual);
+		if (ret || (actual & mask) != value)
+			return ret ?: -EIO;
+		dev_info(dev, "Calliope muted MAX98506 feedback reg %#x: %#x -> %#x\n",
+			 reg, feedback->saved[i], actual);
+	}
+	ret = regmap_read(feedback->map, MAX98506_GLOBAL_ENABLE, &actual);
+	if (ret || (actual & MAX98506_ENABLE))
+		return ret ?: -EIO;
+	return 0;
+}
 
 struct calliope_file {
 	const char *name;
@@ -126,6 +238,7 @@ static int calliope_release(struct device *dev, struct iommu_domain *domain,
 static int __init g955n_calliope_stage(void)
 {
 	const struct firmware *sram = NULL;
+	struct calliope_feedback feedback = {};
 	struct calliope_region dram = {
 		.iova = CALLIOPE_DRAM_IOVA, .size = CALLIOPE_DRAM_SIZE,
 	};
@@ -148,7 +261,7 @@ static int __init g955n_calliope_stage(void)
 		return -ENODEV;
 
 	if ((try_resume && !try_boot) || (try_dsm_read && !try_resume) ||
-	    (try_pcm && !try_dsm_read))
+	    (try_pcm && !try_dsm_read) || (try_feedback && !try_pcm))
 		return -EINVAL;
 
 	dev = bus_find_device_by_name(&platform_bus_type, NULL, "soc@0:abox-speaker");
@@ -223,8 +336,13 @@ static int __init g955n_calliope_stage(void)
 		if (ret)
 			goto release;
 		chipid_mapped = true;
+		if (try_feedback) {
+			ret = calliope_feedback_prepare(dev, &feedback);
+			if (ret)
+				goto release;
+		}
 		ret = g955n_calliope_boot(dev, sram, dram.cpu, try_resume,
-					 try_dsm_read, try_pcm, &keep_dma);
+					 try_dsm_read, try_pcm, try_feedback, &keep_dma);
 		if (keep_dma)
 			goto out;
 	}
@@ -248,6 +366,9 @@ release:
 		ret = -ECANCELED;
 	}
 out:
+	cleanup = calliope_feedback_restore(&feedback);
+	if (cleanup && (!ret || ret == -ECANCELED))
+		ret = cleanup;
 	release_firmware(sram);
 	if (runtime_active && !keep_dma)
 		pm_runtime_put_sync(dev);

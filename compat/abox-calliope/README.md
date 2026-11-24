@@ -40,6 +40,13 @@ an IPC position. The module stops the DMA before restoring registers and
 releasing the ring. This test is separate from the ALSA PCM opened by
 desktop applications.
 
+Add `try_feedback=1` to that silent test to verify the MAX98506 monitor
+registers and the UAIF4 receive enable. The handset's factory layout
+assigns IMON to slots 0–1 and VMON to slots 2–3. The test checks that
+MAX98506 output is disabled and restores its monitor registers afterward.
+Register readback shows that the monitor path is configured. The test uses
+no speaker load, so it does not establish valid voltage or current samples.
+
 The boot option exercises the Samsung nonsecure-GIC handoff available on
 the tested silicon revision. A recurring ALSA stream, amplifier feedback,
 and the secure-GIC path are outstanding. The module is a
