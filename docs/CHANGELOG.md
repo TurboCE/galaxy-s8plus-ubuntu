@@ -2374,3 +2374,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - The user confirmed the upper receiver's audible output. Retained the
   verified -18 dB codec gain for the Voice profile.
+
+### R100 dual-microphone lower speaker audit
+
+- Compared the native and Samsung Calliope loudspeaker paths with
+  simultaneous handset and MacBook microphone measurements. Calliope
+  preserved normal timing and SoC data pad activity. Neither path
+  produced an acoustic match. Retained the confirmed receiver setup.

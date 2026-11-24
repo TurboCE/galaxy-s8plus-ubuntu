@@ -5055,3 +5055,48 @@ stayed closed. Set Voice to the tested gain of 92/92 and verified
 the setting during a normal PipeWire stream on PCM 2. The separate
 loudspeaker listening test completed its PCM stream; acoustic
 loudspeaker output remains unconfirmed.
+
+### R100 dual-microphone loudspeaker timing comparison
+
+Used the handset microphone and MacBook Pro built-in microphone
+simultaneously with a seven-second, 48 kHz, time-coded stereo stream
+(peak 12,000 of 32,767). Raw microphone samples were analyzed in
+memory. The Mac microphone returned only zeros with the lid closed.
+After the lid was opened it produced varying samples, and the
+acoustic comparisons used that live input.
+
+In the native baseline, playback completed with 368,640 handset and
+556,800 Mac microphone frames, without a significant acoustic match
+(handset p=0.0825, Mac p=0.7900). The native speaker data pad GPH0-7
+did not change in the sampled tone intervals. Temporarily selecting
+the same SIFS1 stream for UAIF0 as well as UAIF4 produced 4,023
+GPH0-7 transitions in one active interval. It returned to zero
+transitions in the later sample. Neither microphone matched the
+reference in that trial (handset p=0.3975, Mac p=0.9275).
+
+Replayed with SIFS1 sharing enabled before start in a one-boot
+driver. The seven-second PCM buffer drained in 3.566 seconds.
+GPH0-7 again changed during the first signal window, and was idle
+in the later window. The handset match remained insignificant
+(p=0.9225), as did the Mac match (p=0.6450). The timing change
+makes sharing SIFS1 unsuitable as a permanent loudspeaker route.
+The receiver driver and Voice profile were kept on disk.
+
+The receiver-capable build also carried the trial Calliope loudspeaker
+path. The final comparison kept the receiver muted and used the
+same stimulus and both microphones. The Calliope PCM stream finished
+in 7.514 seconds from application launch, and RDMA0 advanced with
+successful firmware stop, free and close. GPH0-7 was inactive during
+the initial silence and changed 3,990 and 4,005 times in the two
+sampled tone windows. Both microphone paths captured data
+(368,640 handset frames and 556,800 Mac frames, Mac peak 119
+and no clipping). Neither detected the reference (handset
+p=0.1550, Mac p=0.7575).
+
+This comparison distinguishes the stalled or mistimed native SoC
+data path from acoustic output. The firmware route restored sustained
+activity at the SoC speaker data pad with normal transport timing.
+The signal at the MAX98506 input, the amp's boost rail and voltage
+at the speaker contacts remain unmeasured. Neither temporary driver
+was installed as the default. The verified receiver driver and
+Voice gain remain installed.
