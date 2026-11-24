@@ -5168,3 +5168,37 @@ registers 0x02 to 0x0a read zero in this silent test. This verifies
 the R100 I2C control and enable sequence. It leaves amplifier DIN,
 boost rail and speaker terminal output unqualified. The module
 only read registers, then exited; WirePlumber stayed active.
+
+### R100 Samsung MAX98506 board controls applied
+
+Built patch 0132 on top of patch 0129 for the installed R100
+kernel. Backed up the outgoing codec module with a SHA-256 record,
+then installed only the codec module and rebooted. The running
+module's build ID matched the installed binary. The receiver
+remained on PCM 2 with gain 92/92. Microphone stayed on PCM 1.
+
+On a seven-second ALSA silent stream, 128 uncached amplifier
+reads succeeded through idle, playback and stop. The active
+reads confirmed board slot mapping 0xc0, VMON/IMON 0x22/0x20,
+DOUT Hi-Z mask 0xf0, ALC 0x12 and boost limiter 0xf8. The
+speaker/boost/VI and global registers read 0x93/0x80 during
+playback and returned to zero after stop. The programmed BCLK
+source stayed selected and raw clock mode remained 0x40. The
+0 dB stereo downmix (0x67) remains in use without a qualified
+stock DSM feedback path.
+
+Then played the seven-second coded reference with peak sample
+12,000, captured 368,640 handset frames and 556,800 MacBook
+frames, and read the UAIF4 pad during the tone windows.
+ALSA completed in 7.097 s. The bit and word clock pads showed
+activity, while the UAIF4 data pad had zero transitions in both
+tone windows. Neither microphone reproduced the time-coded
+reference (handset p=0.2375, Mac p=0.0950). The Mac recording
+reported zero clipped samples. No raw recordings were kept.
+
+The new codec settings remain installed, with WirePlumber
+active and no new MAX98506 or ASoC error-priority messages.
+The native ABOX path still fails to deliver the PCM sample
+words at the SoC data pad in these windows. This change
+qualifies the amplifier control settings and leaves physical
+lower speaker output unresolved.

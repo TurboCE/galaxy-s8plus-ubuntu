@@ -2394,3 +2394,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   MAX98506 reads on R100. Verified speaker/boost and global enable
   during silent playback, and recorded the remaining configuration
   and physical measurement gaps.
+
+### R100 Samsung MAX98506 board settings
+
+- Applied Samsung mono-board slot mapping, output monitor slots,
+  ALC and boost current limiting to the installed codec module.
+  Verified the live registers and shutdown on R100. The updated
+  amplifier control did not restore native UAIF4 data or acoustic
+  loudspeaker output in the two-microphone trial.

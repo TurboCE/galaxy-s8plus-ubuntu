@@ -1,0 +1,103 @@
+Subject: [PATCH] ASoC: apply Samsung MAX98506 board controls on dream2lteks
+
+Match the Samsung mono-board slot mapping, PCM input, divider and ALC
+and boost-limiter settings. Configure VMON and IMON outputs and enable
+both ADCs with the speaker and boost blocks only during playback.
+Check their enables with the existing trigger readback.
+
+Retain the conservative 0 dB stereo-to-mono gain while Samsung DSM
+processing and current/voltage feedback are not qualified on this port.
+Keep the MDLL programming and fail-safe mute ordering unchanged.
+
+diff --git a/sound/soc/codecs/max98506.c b/sound/soc/codecs/max98506.c
+--- a/sound/soc/codecs/max98506.c
++++ b/sound/soc/codecs/max98506.c
+@@ -12,12 +12,19 @@
+ 
+ #define MAX98506_CLOCK1           0x1a
+ #define MAX98506_CLOCK2           0x1b
++#define MAX98506_CLOCK_DIV_N_LSB  0x1f
+ #define MAX98506_FORMAT           0x20
+ #define MAX98506_SLOTS            0x21
++#define MAX98506_DOUT_VMON        0x22
++#define MAX98506_DOUT_IMON        0x23
++#define MAX98506_DOUT_HIZ4        0x2a
+ #define MAX98506_FILTERS          0x2c
+ #define MAX98506_GAIN             0x2d
++#define MAX98506_SPEAKER_CONFIG   0x2f
++#define MAX98506_ALC_CONFIG       0x34
+ #define MAX98506_BLOCK_ENABLE     0x36
+ #define MAX98506_GLOBAL_ENABLE    0x38
++#define MAX98506_BOOST_LIMITER    0x3a
+ #define MAX98506_REVISION         0xff
+ 
+ #define MAX98506_CLOCK_BCLK       BIT(6)
+@@ -28,7 +35,13 @@
+ #define MAX98506_SUM_BOTH_HALVED  GENMASK(6, 5)
+ #define MAX98506_DAC_FILTERS      0xd9
+ #define MAX98506_GAIN_0_DB        7
++#define MAX98506_DOUT_MONITOR_EN  BIT(5)
++#define MAX98506_VMON_SLOT_2      2
++#define MAX98506_SLOT_DIN_DOUT    (BIT(7) | BIT(6))
++#define MAX98506_DOUT_HIZ_UPPER   GENMASK(7, 4)
+ #define MAX98506_SPEAKER_BOOST    (BIT(7) | BIT(4))
++#define MAX98506_VI_MONITORS      GENMASK(1, 0)
++#define MAX98506_PLAYBACK_BLOCKS  (MAX98506_SPEAKER_BOOST | MAX98506_VI_MONITORS)
+ #define MAX98506_ENABLE           BIT(7)
+ 
+ static int max98506_set_fmt(struct snd_soc_dai *dai, unsigned int fmt)
+@@ -54,9 +67,17 @@
+ 	static const struct reg_sequence setup[] = {
+ 		{ MAX98506_GLOBAL_ENABLE, 0 },
+ 		{ MAX98506_CLOCK2, MAX98506_RATE_48000 },
++		{ MAX98506_CLOCK_DIV_N_LSB, 0 },
+ 		{ MAX98506_FORMAT, MAX98506_FORMAT_16_I2S },
+-		{ MAX98506_SLOTS, 0xc8 },
++		{ MAX98506_SLOTS, MAX98506_SLOT_DIN_DOUT },
++		/* Samsung assigns VMON to slots 2–3 and IMON to slots 0–1. */
++		{ MAX98506_DOUT_VMON, MAX98506_DOUT_MONITOR_EN | MAX98506_VMON_SLOT_2 },
++		{ MAX98506_DOUT_IMON, MAX98506_DOUT_MONITOR_EN },
++		{ MAX98506_DOUT_HIZ4, MAX98506_DOUT_HIZ_UPPER },
+ 		{ MAX98506_FILTERS, MAX98506_DAC_FILTERS },
++		{ MAX98506_SPEAKER_CONFIG, 0 },
++		{ MAX98506_ALC_CONFIG, 0x12 }, /* Samsung ALC, auto-mute disabled */
++		{ MAX98506_BOOST_LIMITER, 0xf8 }, /* Samsung boost current limit */
+ 		{ MAX98506_GAIN, MAX98506_SUM_BOTH_HALVED | MAX98506_GAIN_0_DB },
+ 	};
+ 
+@@ -79,7 +100,7 @@
+ 		ret = regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE,
+ 					 MAX98506_ENABLE, 0);
+ 		power_ret = regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+-					       MAX98506_SPEAKER_BOOST, 0);
++					       MAX98506_PLAYBACK_BLOCKS, 0);
+ 		return ret ?: power_ret;
+ 	}
+ 
+@@ -90,7 +111,7 @@
+ 		goto mute_output;
+ 
+ 	ret = regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+-				 MAX98506_SPEAKER_BOOST, MAX98506_SPEAKER_BOOST);
++				 MAX98506_PLAYBACK_BLOCKS, MAX98506_PLAYBACK_BLOCKS);
+ 	if (ret)
+ 		goto mute_output;
+ 
+@@ -105,7 +126,7 @@
+ 	ret = regmap_read(regmap, MAX98506_GLOBAL_ENABLE, &enabled);
+ 	if (ret)
+ 		goto mute_output;
+-	if ((blocks & MAX98506_SPEAKER_BOOST) == MAX98506_SPEAKER_BOOST &&
++	if ((blocks & MAX98506_PLAYBACK_BLOCKS) == MAX98506_PLAYBACK_BLOCKS &&
+ 	    (enabled & MAX98506_ENABLE))
+ 		return 0;
+ 
+@@ -115,7 +136,7 @@
+ 
+ mute_output:
+ 	regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE, MAX98506_ENABLE, 0);
+-	regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE, MAX98506_SPEAKER_BOOST, 0);
++	regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE, MAX98506_PLAYBACK_BLOCKS, 0);
+ 	return ret;
+ }
+ 
