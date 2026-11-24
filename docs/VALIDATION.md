@@ -5049,8 +5049,8 @@ The combined clock-domain change was not installed or qualified.
 
 ### R100 receiver audibility and retained gain
 
-The user heard both short test tones from the upper receiver during
-a receiver-only ALSA run at -18 dB codec gain. The MAX98506 PCM
+The user heard sound from the upper receiver during the receiver-only
+two-tone ALSA test at -18 dB codec gain. The MAX98506 PCM
 stayed closed. Set Voice to the tested gain of 92/92 and verified
 the setting during a normal PipeWire stream on PCM 2. The separate
 loudspeaker listening test completed its PCM stream; acoustic
