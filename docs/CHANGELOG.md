@@ -2315,3 +2315,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   temporarily disabling amp DOUT nor raising the three SoC I2S
   pad drive fields one step recovered the acoustic reference.
   Restored the installed R100 audio setup.
+
+### R100 MAX98506 trigger errors
+
+- Propagated codec startup errors to ALSA and checked the amplifier's
+  hardware enables at trigger. Verified start and stop register
+  states on R100 and checked error paths with a host fault simulation.
+- Compared the stock ALC auto-mute bit on native ALSA and Calliope.
+  The diagnostic did not recover the acoustic reference and was
+  withdrawn.

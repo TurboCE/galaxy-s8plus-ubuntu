@@ -4800,3 +4800,44 @@ WirePlumber and both ALSA devices. No diagnostic module or
 audio service override remains active. The amp-side I2S
 waveform and the boost and speaker-terminal signals remain
 unmeasured.
+
+### R100 MAX98506 trigger and ALC validation
+
+Linux 6.18 ASoC's implicit trigger-time mute wrapper ignores errors
+from the codec's unmute callback. Move amplifier startup and shutdown
+into the MAX98506 DAI trigger. On startup the driver now reads the
+speaker/boost and global enable bits and returns an error if a write
+or read fails or the enables do not latch. On failure it attempts to
+mute and power down. The prepare-time unmute leaves the amplifier
+off until trigger. The gain and protection settings are unchanged.
+
+The patch applied cleanly and the ARM64 module built with the exact
+R100 release. A host fault simulation of the same functions verified
+that a non-latching enable or a failed register read returns an
+error and attempts both shutdown writes. A simulated global-disable
+write failure still attempted to clear the power blocks. The device
+rebooted with a codec module whose loaded build ID matched the build.
+Only the installed codec module file was replaced. Its original
+module was saved and verified separately.
+
+On the native R100 ALSA path, three playback/capture runs completed.
+Actual amplifier reads showed block/global enable at 0x90/0x80 in
+each run and 0x00/0x00 before and after playback. Each run recorded
+335,872 to 337,920 frames. The recordings did not reproduce the
+ordered acoustic reference. Playback also completed through the
+desktop's default PipeWire output.
+
+The stock driver clears the ALC auto-mute bit at initialization.
+A temporary single-bit comparison verified hardware readback of
+0x92, 0x12, then 0x92 on R100. On both native ALSA and the opt-in
+Calliope route all three acoustic captures completed and none
+reproduced the reference. The original ALC setting was restored.
+
+With the patched codec and the temporary Calliope playback route,
+the controlled stream completed and captured 337,920 frames.
+Block/global enable read 0x93/0x80 during playback and 0x00/0x00
+afterward. No ordered acoustic reference was detected. That trial
+boot also logged ABOX prepare errors (-EBUSY) and a close error
+(-EPROTO) separate from the successful stream. Their specific cause
+was not confirmed in that run. Rebooted to the normal native ABOX
+driver with the verified patched codec and active WirePlumber.

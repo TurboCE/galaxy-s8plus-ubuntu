@@ -1,0 +1,114 @@
+Subject: [PATCH] ASoC: report MAX98506 amplifier start errors on dream2lteks
+
+ASoC's implicit trigger-time mute wrapper discards the callback's
+error on startup. Use a codec trigger so playback fails if the amplifier
+cannot be enabled. Read back the speaker, boost and global enables once
+per start, while they are supposed to be asserted. Shut down the output
+and power blocks if a write or readback fails.
+
+Keep the mute callback for teardown and the Calliope cleanup path. An
+automatic unmute at ALSA prepare leaves the output off until trigger.
+Neither the hardware gain nor the amplifier protection setup changes.
+
+diff --git a/sound/soc/codecs/max98506.c b/sound/soc/codecs/max98506.c
+--- a/sound/soc/codecs/max98506.c
++++ b/sound/soc/codecs/max98506.c
+@@ -68,47 +68,86 @@
+ 	return regmap_multi_reg_write(regmap, setup, ARRAY_SIZE(setup));
+ }
+
+-static int max98506_mute(struct snd_soc_dai *dai, int mute, int stream)
++static int max98506_set_mute(struct snd_soc_dai *dai, bool mute)
+ {
+ 	struct regmap *regmap = dev_get_drvdata(dai->dev);
+-	int ret;
++	unsigned int blocks, enabled;
++	int ret, power_ret;
+
+ 	if (mute) {
+ 		/* Disable the output before disabling the power blocks. */
+ 		ret = regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE,
+ 					 MAX98506_ENABLE, 0);
+-		if (ret)
+-			return ret;
+-		return regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+-					  MAX98506_SPEAKER_BOOST, 0);
++		power_ret = regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
++					       MAX98506_SPEAKER_BOOST, 0);
++		return ret ?: power_ret;
+ 	}
+
+ 	/* The CPU PCM trigger has started BCLK before this callback. */
+ 	ret = regmap_update_bits(regmap, MAX98506_CLOCK1,
+ 				 MAX98506_MDLL_MASK, MAX98506_MDLL_X8);
+ 	if (ret)
+-		return ret;
++		goto mute_output;
+
+ 	ret = regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+ 				 MAX98506_SPEAKER_BOOST, MAX98506_SPEAKER_BOOST);
+ 	if (ret)
+-		return ret;
++		goto mute_output;
+
+ 	ret = regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE,
+ 				 MAX98506_ENABLE, MAX98506_ENABLE);
+ 	if (ret)
+-		regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE,
+-				   MAX98506_SPEAKER_BOOST, 0);
++		goto mute_output;
+
++	ret = regmap_read(regmap, MAX98506_BLOCK_ENABLE, &blocks);
++	if (ret)
++		goto mute_output;
++	ret = regmap_read(regmap, MAX98506_GLOBAL_ENABLE, &enabled);
++	if (ret)
++		goto mute_output;
++	if ((blocks & MAX98506_SPEAKER_BOOST) == MAX98506_SPEAKER_BOOST &&
++	    (enabled & MAX98506_ENABLE))
++		return 0;
++
++	dev_err(dai->dev, "speaker enable did not latch (blocks=%#x, global=%#x)\n",
++		blocks, enabled);
++	ret = -EIO;
++
++mute_output:
++	regmap_update_bits(regmap, MAX98506_GLOBAL_ENABLE, MAX98506_ENABLE, 0);
++	regmap_update_bits(regmap, MAX98506_BLOCK_ENABLE, MAX98506_SPEAKER_BOOST, 0);
+ 	return ret;
+ }
+
++static int max98506_mute_stream(struct snd_soc_dai *dai, int mute, int stream)
++{
++	/* An early ASoC unmute must not enable the amp before BCLK starts. */
++	return mute ? max98506_set_mute(dai, true) : 0;
++}
++
++static int max98506_trigger(struct snd_pcm_substream *substream, int cmd,
++			    struct snd_soc_dai *dai)
++{
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		return max98506_set_mute(dai, false);
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		return max98506_set_mute(dai, true);
++	default:
++		return -EINVAL;
++	}
++}
++
+ static const struct snd_soc_dai_ops max98506_ops = {
+ 	.set_fmt = max98506_set_fmt,
+ 	.hw_params = max98506_hw_params,
+-	.mute_stream = max98506_mute,
++	.trigger = max98506_trigger,
++	.mute_stream = max98506_mute_stream,
+ 	.no_capture_mute = 1,
+-	.mute_unmute_on_trigger = 1,
+ };
+
+ static struct snd_soc_dai_driver max98506_dai = {
