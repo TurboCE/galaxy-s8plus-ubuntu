@@ -5647,3 +5647,35 @@ on GPH0-7 in this comparison, including the audible #58 run.
 Therefore this GPIO method cannot decide whether valid serial words
 reach MAX98506 DIN. This test did not measure DIN at the amplifier,
 boost voltage, or differential output at the speaker contacts.
+
+
+### R100 Calliope with ASRC0 and the #58 SIFS1 route
+
+Compared the previous native ASRC0 stall with the Samsung firmware
+route. The kernel58 UCM selects ASRC0 On, SPUS OUT0 to SIFS1, and
+SIFS1 to UAIF4. The earlier opt-in R100 firmware path selected SPUS
+OUT7 for SIFS1 even with ASRC0 enabled. Patch the Calliope ALSA
+module to select the #58 route, send the 48 kHz rate and SIFS1 format
+through the vendor mailbox, and issue the firmware PCM preparation
+and trigger. Keep UAIF0 available for microphone capture. Leave
+the unused SIFS0 mixer format and UAIF4 receive disabled in this mode.
+
+With AUDIF at 6.144 MHz, the final ARM64 module verified ASRC0 and
+SIFS1 source selection after the firmware trigger. During playback,
+the simultaneous readbacks matched #58 at route 0x40=0x00020000,
+SPUS 0x200=0x00000001 and 0x204=0x00000000, and UAIF4 control
+0x540=0x01000005. RDMA0 progressed throughout both five-second
+direct ALSA runs and the stop, free and close commands returned
+zero. Both eight-second microphone recordings returned zero with
+1,536,000 bytes in each. No PCM samples were retained.
+
+The same short transient appeared in one 250 ms window of both
+the silent and coded runs. The coded play did not reproduce the
+ordered 523.25 Hz and 697 Hz tones. The test qualifies ASRC0
+transport on this firmware configuration. It does not isolate
+which firmware initialization step is required, establish the
+electrical signal at MAX98506 DIN, or resolve acoustic output.
+
+Removed the one-boot override after the final test. The temporary
+module is still loaded in that boot. The next boot selects the
+installed audio module with the 6.144 MHz AUDIF profile.

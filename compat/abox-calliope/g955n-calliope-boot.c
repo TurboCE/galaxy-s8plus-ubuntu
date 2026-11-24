@@ -106,6 +106,12 @@
 #define ABOX_UAIF0_FORMAT_MASK	GENMASK(28, 0)
 #define ABOX_UAIF0_S16_STEREO	((9 << 24) | BIT(23) | (1 << 18) | (15 << 12))
 #define ABOX_UAIF4_BCLK		1536000UL
+#define ABOX_SPEAKER_ROUTE	0x040
+#define ABOX_SPUS_CTRL0		0x200
+#define ABOX_SPUS_CTRL1		0x204
+#define ABOX_SPUS_ASRC0		BIT(0)
+#define ABOX_SPUS_OUT0_MASK	GENMASK(2, 1)
+#define ABOX_SPUS_SIFS1_SOURCE	GENMASK(18, 16)
 #define ABOX_SPUS_BANK(n)	(0x220 + (n) * sizeof(u32))
 #define ABOX_SPUS_BANK_MASK	(GENMASK(13, 7) | GENMASK(28, 23))
 #define ABOX_SPUS_S16_STEREO	(4 << 23)
@@ -136,6 +142,10 @@ struct calliope_log_ring {
 	__le32 writer, reader, size;
 };
 
+static bool kernel58_asrc0;
+module_param(kernel58_asrc0, bool, 0400);
+MODULE_PARM_DESC(kernel58_asrc0, "Use #58 ASRC0 and SPUS OUT0 for Calliope playback");
+
 /* Stock SIFS0 clock path and SPUS OUT7 -> SIFS1 -> UAIF4. */
 static const struct {
 	u32 reg, mask, value;
@@ -152,8 +162,32 @@ static const struct {
 	{ ABOX_UAIF4_CTRL0, GENMASK(4, 0), BIT(2) | BIT(0) },
 };
 
-static u32 calliope_route_mask(unsigned int index, bool host_uaif0)
+static u32 calliope_route_value(unsigned int index, bool direct)
 {
+	u32 value = calliope_speaker_route[index].value;
+
+	if (!direct)
+		return value;
+
+	switch (calliope_speaker_route[index].reg) {
+	case ABOX_SPEAKER_ROUTE:
+		return value & ~GENMASK(3, 0);
+	case ABOX_SPUS_CTRL0:
+		return (value & ~ABOX_SPUS_OUT0_MASK) | ABOX_SPUS_ASRC0;
+	case ABOX_SPUS_CTRL1:
+		return value & ~ABOX_SPUS_SIFS1_SOURCE;
+	case ABOX_UAIF0_CTRL0:
+		return value & ~ABOX_UAIF_TX;
+	default:
+		return value;
+	}
+}
+
+static u32 calliope_route_mask(unsigned int index, bool host_uaif0, bool direct)
+{
+	if (direct && calliope_speaker_route[index].reg == ABOX_SPUS_CTRL0)
+		return calliope_speaker_route[index].mask | ABOX_SPUS_ASRC0;
+
 	if (host_uaif0) {
 		/* Capture already owns UAIF0 format and clocks. Add only TX. */
 		if (calliope_speaker_route[index].reg == ABOX_UAIF0_CTRL0)
@@ -459,7 +493,7 @@ static void calliope_drain_log(struct calliope_log_ring *log, size_t capacity)
 	dma_wmb();
 }
 
-static int calliope_speaker_format(void __iomem *sram)
+static int calliope_speaker_format(void __iomem *sram, bool direct)
 {
 	static const u32 output_formats[] = {
 		IPC_MIXER_FORMAT, IPC_OUT1_FORMAT, IPC_INMUX3_FORMAT,
@@ -474,6 +508,9 @@ static int calliope_speaker_format(void __iomem *sram)
 			return ret;
 	}
 	for (i = 0; i < ARRAY_SIZE(output_formats); i++) {
+		/* Direct SIFS1 uses OUT1 format and leaves the SIFS0 mixer idle. */
+		if (direct && output_formats[i] == IPC_MIXER_FORMAT)
+			continue;
 		ret = calliope_send(sram, IPC_ABOX_CONFIG, output_formats[i], 16, 2, 0);
 		if (ret)
 			return ret;
@@ -523,6 +560,19 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 	dev_info(dev, "Calliope PCM programmed RDMA0 ctrl=%08x start=%08x end=%08x\n",
 		 readl(sfr + ABOX_RDMA0_CTRL), readl(sfr + ABOX_RDMA0_CTRL + 8),
 		 readl(sfr + ABOX_RDMA0_CTRL + 12));
+
+	if (kernel58_asrc0 && stream) {
+		u32 spus = readl(sfr + ABOX_SPUS_CTRL0);
+		u32 sifs1 = readl(sfr + ABOX_SPUS_CTRL1);
+
+		if ((spus & (ABOX_SPUS_ASRC0 | ABOX_SPUS_OUT0_MASK)) != ABOX_SPUS_ASRC0 ||
+		    (sifs1 & ABOX_SPUS_SIFS1_SOURCE)) {
+			dev_err(dev, "#58 ASRC0 route did not stay selected: SPUS=%08x/%08x\n",
+				spus, sifs1);
+			ret = -EIO;
+			goto cleanup;
+		}
+	}
 
 	deadline = jiffies + msecs_to_jiffies(CALLIOPE_PCM_START_MS);
 	do {
@@ -637,6 +687,7 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 	void *saved_sram = NULL;
 	u32 saved_l2, saved_misc, saved_syspower, state, option, power;
 	u32 saved_rdma[8];
+	bool direct = kernel58_asrc0 && stream;
 	u32 saved_route[ARRAY_SIZE(calliope_speaker_route)], saved_gate = 0, saved_sifs0_gate = 0;
 	unsigned long ca7_rate = 0, saved_bclk = 0, saved_sifs0_bclk = 0;
 	bool route_set = false;
@@ -790,18 +841,18 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 			spin_lock_irqsave(host_route_lock, route_flags);
 		for (i = 0; i < ARRAY_SIZE(calliope_speaker_route); i++) {
 			void __iomem *reg = sfr + calliope_speaker_route[i].reg;
-			u32 mask = calliope_route_mask(i, host_uaif0);
+			u32 mask = calliope_route_mask(i, host_uaif0, direct);
 
 			if (!mask)
 				continue;
 			saved_route[i] = readl(reg);
 			writel((saved_route[i] & ~mask) |
-			       (calliope_speaker_route[i].value & mask), reg);
+			       (calliope_route_value(i, direct) & mask), reg);
 		}
 		if (host_route_lock)
 			spin_unlock_irqrestore(host_route_lock, route_flags);
 		route_set = true;
-		if (try_feedback) {
+		if (try_feedback && !direct) {
 			u32 ctrl = readl(sfr + ABOX_UAIF4_CTRL0);
 
 			writel(ctrl | BIT(1), sfr + ABOX_UAIF4_CTRL0);
@@ -846,7 +897,7 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		if (!ret && try_dsm_read)
 			ret = calliope_read_dsm(dev, sram, dram, ca7_rate, try_pcm);
 		if (!ret && stream)
-			ret = calliope_speaker_format(sram);
+			ret = calliope_speaker_format(sram, direct);
 		if (!ret && try_pcm) {
 			ret = calliope_set_dsm(dev, sram, &dsm, true);
 			if (!ret) {
@@ -904,7 +955,7 @@ out:
 				spin_lock_irqsave(host_route_lock, route_flags);
 			for (i = ARRAY_SIZE(calliope_speaker_route) - 1; i >= 0; i--) {
 				void __iomem *reg = sfr + calliope_speaker_route[i].reg;
-				u32 mask = calliope_route_mask(i, host_uaif0);
+				u32 mask = calliope_route_mask(i, host_uaif0, direct);
 
 				if (mask)
 					writel((readl(reg) & ~mask) | (saved_route[i] & mask), reg);

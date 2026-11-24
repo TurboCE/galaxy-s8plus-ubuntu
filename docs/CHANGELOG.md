@@ -2517,3 +2517,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   stalled RDMA0. The bank changes alone allowed a full stream without
   acoustic output. Restored the installed audio module and kept the
   6.144 MHz AUDIF profile.
+
+
+### R100 Calliope playback through #58 ASRC0
+
+- Add an opt-in Calliope route that selects ASRC0 and SPUS OUT0
+  through SIFS1 to the lower speaker. Direct ALSA playback and
+  simultaneous microphone recording complete with ASRC0 enabled.
+- The handset capture still lacks the ordered speaker tones. A
+  short startup transient was present even with a silent PCM file.

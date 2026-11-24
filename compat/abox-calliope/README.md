@@ -74,6 +74,15 @@ clock path and mailbox handling let normal ALSA playback complete at
 48 kHz. Keep this driver opt-in until acoustic output and live
 amplifier feedback are qualified.
 
+For the #58 PCM routing comparison, load the receiver-capable module
+with `use_dsm=1 kernel58_asrc0=1` on R100 with the 6.144 MHz AUDIF
+profile. Calliope configures the output rate and format and starts
+RDMA0. The driver selects ASRC0 and SPUS OUT0 through SIFS1 to UAIF4.
+It skips the unused SIFS0 mixer format and keeps UAIF4 transmit-only.
+The route is checked after the firmware trigger. Direct ALSA playback
+and microphone capture completed together on the handset. The speaker
+test tones were still absent from the recording.
+
 The boot option exercises the Samsung nonsecure-GIC handoff available on
 the tested silicon revision. A recurring ALSA stream, amplifier feedback,
 and the secure-GIC path are outstanding. The module is a
