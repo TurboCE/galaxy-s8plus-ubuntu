@@ -2230,3 +2230,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   through the SoC speaker pads. The loudspeaker remained silent.
 - Discarded native SIFS0 routing and reset-clock comparisons that failed
   to recover output. Restored the installed R100 audio service.
+
+### R100 amplifier feedback diagnostics
+
+- Verified that WDMA1 drained the UAIF4 receive path with no reported
+  receiver error in the isolated comparison. The captured amplifier
+  feedback stayed zero during playback.
+- Recorded MAX98506 supply-monitor readback limits. Removed the one-boot
+  diagnostic modules from the normal audio startup.

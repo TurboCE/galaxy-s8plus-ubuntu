@@ -4454,3 +4454,36 @@ microphone captured 337,920 frames, with no time-ordered acoustic tone
 sequence. Clock, framing and test sample words are accounted for up to
 the SoC pads. The amplifier input levels, boost supply and analog output
 with the speaker load remain unverified. R100 stayed installed.
+
+### R100 amplifier receive and supply-sense checks
+
+With the stock DSM calibration and VI Sensing requested, six reads of
+the documented power parameter (136) returned zero. The MAX98506 global
+enable and speaker/boost/VI enables read back as 0x80 and 0x93. Five
+read-only snapshots found no nonzero amp live, state or flag bits in
+registers 0x02 through 0x0a. The ABOX UAIF4 status register at 0x54c
+reported 0x2 (receive-side error) throughout the normal comparison.
+
+In a one-boot diagnostic, temporarily routed UAIF4 receive via NSRC0 to
+the same WDMA1 path used by the main microphone. The playback finished
+without a reported underrun, WDMA replaced the initialized 0x5a5a test
+pattern, and all 337,920 received stereo frames were zero. The six
+UAIF4 status reads were zero while WDMA1 drained the input. The result
+isolates the receive-side error from the zero data. It does not
+establish whether valid feedback is present at the amplifier pins.
+
+The MAX98506 revision 0x80 acknowledged I2C writes to the stock-header
+supply monitor registers 0x24 and 0x25, but read both back as zero with
+the supply ADC bits enabled. The result was the same with the
+amplifier disabled and during an enabled silent PCM stream. The
+diagnostic restored the original ADC settings. A boot trial that
+required the programmed monitor settings rejected them before output
+started. No valid VBAT or VBST reading from the amplifier was obtained.
+The separate MAX77865 fuel gauge reported the battery present at about
+4.35 V. That reading does not measure the amplifier boost rail.
+
+Physical measurements at the amplifier I2S input, its boost supply and
+the speaker contacts remain open. The available remote readings do
+not distinguish an electrical-path fault from an amplifier or
+loudspeaker fault. No boot or vendor partitions were written. The
+temporary input routing and supply-monitor comparisons were removed.
