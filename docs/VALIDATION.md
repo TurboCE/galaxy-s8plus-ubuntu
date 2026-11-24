@@ -4360,3 +4360,35 @@ This qualifies ALSA DMA timing and teardown on the tested DSM path.
 Acoustic speaker output and live amplifier feedback are still open.
 The device was restored to the previously installed audio module
 after the one-boot experiments.
+
+### R100 physical loudspeaker isolation
+
+A seven-second, 48 kHz stereo ALSA reference stream containing 900, 1300
+and 1780 Hz tone windows completed without a reported underrun. The phone
+captured 337,920 frames through its microphone. None of the runs showed
+the expected time-ordered tones in the recording, so acoustic playback
+remains failed.
+
+During the native R100 run the RDMA playback ring contained 8,090
+nonzero samples out of 8,192, with a peak magnitude of 7,200. The speaker
+interface clock pins changed state, while the speaker data pin did not.
+With Calliope DSM and the paced SIFS0 route, the same nonzero PCM reached
+the ring and a sample of 8,192 reads recorded 3,378 transitions at the
+SoC speaker data pad. The pad reads establish activity. Their sampling
+rate is insufficient to decode the I2S frames or establish signal
+integrity at the amplifier.
+
+In an active DSM run, the MAX98506 block and global enables read back
+as 0x93 and 0x80. DSM reported zero speaker power in six active-playback
+queries with the paced route. Applying the factory amplifier input
+routing and ALC settings, and separately enabling the factory ASRC
+settings, produced no acoustic pass. Neither trial is enabled by
+default. Writes of the MDLL multiplier read back as zero in the
+multiplier field for both clock sources with the amplifier disabled.
+That observation does not isolate an amplifier clock fault.
+
+A passing playback test requires the three expected tones in order in
+the acoustic recording. ALSA completion, pad activity and readable
+enable bits are intermediate checks. The remaining fault is between the
+observed SoC output activity and acoustic output, with valid I2S framing
+at the amplifier and the speaker output stage still unverified.
