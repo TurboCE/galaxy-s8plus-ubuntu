@@ -2175,3 +2175,17 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Add a model-specific Calliope staging and bootstrap test with fixed
   IOMMU aliases, bounded SRAM IPC, and verified CA7 shutdown before
   memory reclamation. The test stays outside the boot-time audio path.
+
+### Calliope audio IOMMU runtime PM
+
+- Hold the runtime PM reference on the native ABOX client while the
+  firmware test owns DMA backing and IOMMU aliases.
+- Separate boot observation from the opt-in RESUME transaction. Report
+  unsupported startup IPC instead of acknowledging an unhandled request.
+- Map a zeroed private copy of the stock VSS address window during
+  staging and release it after the core stops.
+
+### Optional GDM startup login
+
+- Add an opt-in service drop-in for GDM automatic login on SM-G955N
+  mainline boots that use the generated GDM configuration.

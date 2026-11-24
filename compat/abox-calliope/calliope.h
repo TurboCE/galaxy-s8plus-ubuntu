@@ -13,6 +13,6 @@ struct device;
 struct firmware;
 
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
-		       const void *dram, bool *keep_dma);
+		       const void *dram, bool try_resume, bool *keep_dma);
 
 #endif

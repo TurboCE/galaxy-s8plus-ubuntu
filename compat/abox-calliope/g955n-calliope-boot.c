@@ -123,15 +123,18 @@ static int calliope_wait_boot(struct device *dev, void __iomem *sram,
 		}
 		if (ipc == IPC_SYSTEM && message == IPC_REPORT_FAULT)
 			return calliope_report_fault(dev, sram, dram);
-		if (readl(sram + IPC_RX_ACK))
-			writel(0, sram + IPC_RX_ACK);
+		if (readl(sram + IPC_RX_ACK)) {
+			dev_warn(dev, "Calliope requires unsupported startup IPC %u:%#x\n",
+				 ipc, message);
+			return -EOPNOTSUPP;
+		}
 		usleep_range(1000, 1500);
 	}
 	return -ETIMEDOUT;
 }
 
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
-		       const void *dram, bool *keep_dma)
+		       const void *dram, bool try_resume, bool *keep_dma)
 {
 	void __iomem *sysreg = NULL, *sram = NULL, *cmu = NULL, *sfr = NULL;
 	struct resource cmu_res, sfr_res;
@@ -214,7 +217,8 @@ int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 					       100, 100000);
 	if (!ret) {
 		ret = calliope_wait_boot(dev, sram, dram);
-		if (!ret) {
+		if (!ret && try_resume) {
+			dev_info(dev, "Calliope sending system RESUME\n");
 			ret = calliope_resume(sram);
 			if (!ret)
 				dev_info(dev, "Calliope acknowledged system RESUME\n");

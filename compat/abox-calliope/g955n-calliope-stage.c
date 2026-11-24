@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/sizes.h>
 
 #include "calliope.h"
@@ -17,8 +18,13 @@
 static bool try_boot;
 module_param(try_boot, bool, 0400);
 MODULE_PARM_DESC(try_boot, "Attempt one bounded Calliope boot with idle ABOX audio");
+static bool try_resume;
+module_param(try_resume, bool, 0400);
+MODULE_PARM_DESC(try_resume, "Send RESUME after BOOT_DONE; requires try_boot");
 #define CALLIOPE_IVA_IOVA		0x90000000UL
 #define CALLIOPE_IVA_SIZE		SZ_512K
+#define CALLIOPE_VSS_IOVA		0xa0000000UL
+#define CALLIOPE_VSS_SIZE		(SZ_4M + SZ_2M)
 
 struct calliope_file {
 	const char *name;
@@ -120,13 +126,19 @@ static int __init g955n_calliope_stage(void)
 	struct calliope_region iva = {
 		.iova = CALLIOPE_IVA_IOVA, .size = CALLIOPE_IVA_SIZE,
 	};
+	struct calliope_region vss = {
+		.iova = CALLIOPE_VSS_IOVA, .size = CALLIOPE_VSS_SIZE,
+	};
 	struct iommu_domain *domain;
 	struct device *dev;
-	bool chipid_mapped = false, keep_dma = false;
+	bool chipid_mapped = false, keep_dma = false, runtime_active = false;
 	int i, ret, cleanup;
 
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
+
+	if (try_resume && !try_boot)
+		return -EINVAL;
 
 	dev = bus_find_device_by_name(&platform_bus_type, NULL, "soc@0:abox-speaker");
 	if (!dev)
@@ -140,6 +152,15 @@ static int __init g955n_calliope_stage(void)
 		goto out;
 	}
 
+	/*
+	 * The device link keeps the audio IOMMU powered while the PCM
+	 * device is active. Hold the same reference during firmware access.
+	 */
+	ret = pm_runtime_resume_and_get(dev);
+	if (ret < 0)
+		goto out;
+	runtime_active = true;
+
 	ret = request_firmware(&sram, "calliope_sram.bin", dev);
 	if (ret)
 		goto out;
@@ -150,7 +171,9 @@ static int __init g955n_calliope_stage(void)
 
 	dram.cpu = dma_alloc_coherent(dev, dram.size, &dram.dma, GFP_KERNEL);
 	iva.cpu = dma_alloc_coherent(dev, iva.size, &iva.dma, GFP_KERNEL);
-	if (!dram.cpu || !iva.cpu) {
+	/* Reserve private scratch DRAM; do not expose modem shared memory. */
+	vss.cpu = dma_alloc_coherent(dev, vss.size, &vss.dma, GFP_KERNEL);
+	if (!dram.cpu || !iva.cpu || !vss.cpu) {
 		ret = -ENOMEM;
 		goto release;
 	}
@@ -167,6 +190,8 @@ static int __init g955n_calliope_stage(void)
 	ret = calliope_map(dev, domain, &dram);
 	if (!ret)
 		ret = calliope_map(dev, domain, &iva);
+	if (!ret)
+		ret = calliope_map(dev, domain, &vss);
 	if (!ret && try_boot) {
 		if (iommu_iova_to_phys(domain, CALLIOPE_CHIPID)) {
 			ret = -EBUSY;
@@ -178,7 +203,7 @@ static int __init g955n_calliope_stage(void)
 		if (ret)
 			goto release;
 		chipid_mapped = true;
-		ret = g955n_calliope_boot(dev, sram, dram.cpu, &keep_dma);
+		ret = g955n_calliope_boot(dev, sram, dram.cpu, try_resume, &keep_dma);
 		if (keep_dma)
 			goto out;
 	}
@@ -188,17 +213,21 @@ release:
 		dev_err(dev, "Calliope CHIPID alias teardown incomplete\n");
 		ret = -EIO;
 	}
-	cleanup = calliope_release(dev, domain, &iva);
+	cleanup = calliope_release(dev, domain, &vss);
+	if (calliope_release(dev, domain, &iva))
+		cleanup = -EIO;
 	if (calliope_release(dev, domain, &dram) || cleanup)
 		ret = -EIO;
 	if (!ret) {
 		dev_info(dev, "Calliope: verified nine firmware files and %zu mapped pages; aliases released\n",
-			 (dram.mapped + iva.mapped) >> PAGE_SHIFT);
+			 (dram.mapped + iva.mapped + vss.mapped) >> PAGE_SHIFT);
 		/* A completed one-shot test leaves no module or mappings resident. */
 		ret = -ECANCELED;
 	}
 out:
 	release_firmware(sram);
+	if (runtime_active && !keep_dma)
+		pm_runtime_put_sync(dev);
 	device_unlock(dev);
 	put_device(dev);
 	return ret;

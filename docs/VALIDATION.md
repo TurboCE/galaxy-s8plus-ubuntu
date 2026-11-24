@@ -4190,3 +4190,43 @@ service were restored.
 R100 and the native PCMs remained available afterward. No BOOT update
 was applied in this run. The host suite ran 167 tests with 9 skipped
 and no failures.
+
+### Calliope DRAM readback with the audio IOMMU powered
+
+The staged SRAM and DRAM image checksums matched the firmware copies
+examined offline. The Samsung reset code and live ABOX remap values
+agreed. With the vendor AUDIF divider (47, about 24.576 MHz), the
+original prefetch fault repeated at the same address and the divider
+was restored.
+
+The 6.18 native playback client and its Exynos audio IOMMU supplier
+were both runtime-suspended at idle. With the original loader, an
+SRAM-resident CA7 data probe read three zero words from the staged
+DRAM image. Adding the native client's runtime PM reference changed
+the CA7 readback to 46316860, f8b0f002, 21086860, which exactly matched
+the image at offset 0x1d4. The probe used temporary SRAM and the same
+fixed mappings as the firmware trial, then powered off and restored
+the SRAM state.
+
+The stock firmware trial with the IOMMU active stopped answering USB,
+Wi-Fi and serial. A normal restart recovered the handset on R100.
+A second trial disabled the outbound RESUME call entirely. The
+transports still disappeared and the owner subsequently confirmed
+that touch had stopped responding. The next boot recovered a pstore
+record with a write at 0xa0570000, inside the vendor VSS window at
+0xa0000000–0xa05fffff. The stage now provides private backing for that
+range. A staging-only trial checked and released all 4,736 mappings.
+With the VSS window present, a receive-only trial reached IPC 1:0xc0,
+which the Samsung ABI identifies as ABOX_REPORT_COMPONENT. The
+diagnostic stopped the core, restored its hardware state, and returned
+with USB still responsive. BOOT_DONE, DSM output and microphone capture
+remain open.
+
+### Optional GDM startup login
+
+On R100, the GDM service read the mainline initramfs-generated
+configuration under /run. Installed the opt-in service drop-in at
+/etc/systemd/system/gdm.service.d/90-g955n-autologin.conf. After an
+actual reboot, logind reported an active seat session for ubuntu with
+Service=gdm-autologin and Type=wayland, and GNOME Shell was running.
+The drop-in edits GDM's login configuration only.
