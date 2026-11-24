@@ -2,6 +2,7 @@
 #ifndef G955N_CALLIOPE_H
 #define G955N_CALLIOPE_H
 
+#include <linux/completion.h>
 #include <linux/types.h>
 
 #define CALLIOPE_SRAM_IMAGE_LIMIT	0x30000
@@ -15,8 +16,23 @@
 struct device;
 struct firmware;
 
+struct calliope_stream {
+	dma_addr_t dma;
+	unsigned int periods;
+	int (*mute)(struct calliope_stream *stream);
+	struct completion ready;
+	struct completion start;
+	struct completion running;
+	struct completion done;
+	bool stopping;
+	bool retain_ring;
+	int result;
+};
+
+int g955n_calliope_run(struct device *dev, struct calliope_stream *stream);
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
-		       const void *dram, bool try_resume, bool try_dsm_read,
-		       bool try_pcm, bool try_feedback, bool *keep_dma);
+		       void *dram, bool try_resume, bool try_dsm_read,
+		       bool try_pcm, bool try_feedback, bool *keep_dma,
+		       struct calliope_stream *stream);
 
 #endif

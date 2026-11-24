@@ -1,0 +1,4 @@
+obj-m += g955n-abox-speaker.o
+g955n-abox-speaker-y := g955n-abox-speaker-native.o g955n-calliope-stage.o g955n-calliope-boot.o
+CFLAGS_g955n-calliope-stage.o := -DG955N_CALLIOPE_ALSA
+ccflags-y += -I$(srctree)/sound/soc/samsung

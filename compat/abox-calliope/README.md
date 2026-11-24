@@ -47,6 +47,21 @@ MAX98506 output is disabled and restores its monitor registers afterward.
 Register readback shows that the monitor path is configured. The test uses
 no speaker load, so it does not establish valid voltage or current samples.
 
+## Experimental ALSA playback driver
+
+Build against the native G955N audio driver and build output for the
+same kernel release with `build-alsa-module.sh KERNEL_SOURCE KERNEL_BUILD OUTPUT_DIRECTORY`.
+The resulting module replaces `g955n-abox-speaker.ko` for a trial boot.
+Load it with `use_dsm=1` to route ALSA speaker playback through Calliope.
+The ALSA card and PCM names stay the same. Playback uses the existing
+ALSA ring as an IOMMU alias and waits for the firmware preparation and
+trigger acknowledgments. Prepare the microphone PCM first when testing
+simultaneous playback and capture.
+
+The R100 trial started playback DMA, but its position advanced in bursts
+and normal ALSA applications could not complete playback. Keep this
+driver opt-in until PCM timing and speaker output are qualified.
+
 The boot option exercises the Samsung nonsecure-GIC handoff available on
 the tested silicon revision. A recurring ALSA stream, amplifier feedback,
 and the secure-GIC path are outstanding. The module is a

@@ -2208,3 +2208,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   the reference sequence.
 - Add an optional muted MAX98506 monitor setup and UAIF4 receive check
   to the Calliope PCM diagnostic.
+
+### Experimental ALSA playback through Calliope
+
+- Add an opt-in native module build that aliases the existing ALSA playback
+  ring into the firmware's PCM window and manages the mailbox lifecycle.
+- Handle firmware log and dump notifications during streaming and restore
+  the speaker route and amplifier monitor configuration at teardown.

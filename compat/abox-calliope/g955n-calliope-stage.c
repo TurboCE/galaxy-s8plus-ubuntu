@@ -235,7 +235,7 @@ static int calliope_release(struct device *dev, struct iommu_domain *domain,
 	return 0;
 }
 
-static int __init g955n_calliope_stage(void)
+int g955n_calliope_run(struct device *dev, struct calliope_stream *stream)
 {
 	const struct firmware *sram = NULL;
 	struct calliope_feedback feedback = {};
@@ -253,22 +253,21 @@ static int __init g955n_calliope_stage(void)
 		.size = CALLIOPE_PCM_PERIOD_BYTES * CALLIOPE_PCM_PERIODS,
 	};
 	struct iommu_domain *domain;
-	struct device *dev;
 	bool chipid_mapped = false, keep_dma = false, runtime_active = false;
+	bool boot = stream || try_boot;
+	bool resume = stream || try_resume;
+	bool dsm = stream || try_dsm_read;
+	bool play = stream || try_pcm;
+	bool monitor = stream || try_feedback;
 	int i, ret, cleanup;
 
-	if (!of_machine_is_compatible("samsung,dream2lteks"))
-		return -ENODEV;
-
-	if ((try_resume && !try_boot) || (try_dsm_read && !try_resume) ||
-	    (try_pcm && !try_dsm_read) || (try_feedback && !try_pcm))
+	if ((resume && !boot) || (dsm && !resume) ||
+	    (play && !dsm) || (monitor && !play))
+		return -EINVAL;
+	if (stream && (!stream->mute || stream->periods < 2 || stream->periods > CALLIOPE_PCM_PERIODS ||
+		       !IS_ALIGNED(stream->dma, PAGE_SIZE)))
 		return -EINVAL;
 
-	dev = bus_find_device_by_name(&platform_bus_type, NULL, "soc@0:abox-speaker");
-	if (!dev)
-		return -ENODEV;
-
-	device_lock(dev);
 	domain = iommu_get_domain_for_dev(dev);
 	if (!dev->driver || !domain || !iommu_is_dma_domain(domain) ||
 	    dma_get_mask(dev) != DMA_BIT_MASK(31)) {
@@ -316,16 +315,21 @@ static int __init g955n_calliope_stage(void)
 		ret = calliope_map(dev, domain, &iva);
 	if (!ret)
 		ret = calliope_map(dev, domain, &vss);
-	if (!ret && try_pcm) {
-		pcm.cpu = dma_alloc_coherent(dev, pcm.size, &pcm.dma, GFP_KERNEL);
-		if (!pcm.cpu) {
-			ret = -ENOMEM;
-			goto release;
+	if (!ret && play) {
+		if (stream) {
+			pcm.dma = stream->dma;
+			pcm.size = stream->periods * CALLIOPE_PCM_PERIOD_BYTES;
+		} else {
+			pcm.cpu = dma_alloc_coherent(dev, pcm.size, &pcm.dma, GFP_KERNEL);
+			if (!pcm.cpu) {
+				ret = -ENOMEM;
+				goto release;
+			}
+			memset(pcm.cpu, 0, pcm.size);
 		}
-		memset(pcm.cpu, 0, pcm.size);
 		ret = calliope_map(dev, domain, &pcm);
 	}
-	if (!ret && try_boot) {
+	if (!ret && boot) {
 		if (iommu_iova_to_phys(domain, CALLIOPE_CHIPID)) {
 			ret = -EBUSY;
 			goto release;
@@ -336,13 +340,13 @@ static int __init g955n_calliope_stage(void)
 		if (ret)
 			goto release;
 		chipid_mapped = true;
-		if (try_feedback) {
+		if (monitor) {
 			ret = calliope_feedback_prepare(dev, &feedback);
 			if (ret)
 				goto release;
 		}
-		ret = g955n_calliope_boot(dev, sram, dram.cpu, try_resume,
-					 try_dsm_read, try_pcm, try_feedback, &keep_dma);
+		ret = g955n_calliope_boot(dev, sram, dram.cpu, resume,
+					 dsm, play, monitor, &keep_dma, stream);
 		if (keep_dma)
 			goto out;
 	}
@@ -353,6 +357,8 @@ release:
 		ret = -EIO;
 	}
 	cleanup = calliope_release(dev, domain, &pcm);
+	if (cleanup && stream)
+		stream->retain_ring = true;
 	if (calliope_release(dev, domain, &vss))
 		cleanup = -EIO;
 	if (calliope_release(dev, domain, &iva))
@@ -363,7 +369,8 @@ release:
 		dev_info(dev, "Calliope: verified nine firmware files and %zu mapped pages; aliases released\n",
 			 (dram.mapped + iva.mapped + vss.mapped + pcm.mapped) >> PAGE_SHIFT);
 		/* A completed one-shot test leaves no module or mappings resident. */
-		ret = -ECANCELED;
+		if (!stream)
+			ret = -ECANCELED;
 	}
 out:
 	cleanup = calliope_feedback_restore(&feedback);
@@ -372,6 +379,24 @@ out:
 	release_firmware(sram);
 	if (runtime_active && !keep_dma)
 		pm_runtime_put_sync(dev);
+	if (stream && keep_dma)
+		stream->retain_ring = true;
+	return ret;
+}
+
+#ifndef G955N_CALLIOPE_ALSA
+static int __init g955n_calliope_stage(void)
+{
+	struct device *dev;
+	int ret;
+
+	if (!of_machine_is_compatible("samsung,dream2lteks"))
+		return -ENODEV;
+	dev = bus_find_device_by_name(&platform_bus_type, NULL, "soc@0:abox-speaker");
+	if (!dev)
+		return -ENODEV;
+	device_lock(dev);
+	ret = g955n_calliope_run(dev, NULL);
 	device_unlock(dev);
 	put_device(dev);
 	return ret;
@@ -380,3 +405,4 @@ out:
 module_init(g955n_calliope_stage);
 MODULE_DESCRIPTION("SM-G955N Calliope firmware and IOMMU staging test");
 MODULE_LICENSE("GPL");
+#endif

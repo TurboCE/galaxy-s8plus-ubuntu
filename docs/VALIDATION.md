@@ -4302,3 +4302,31 @@ position advanced. After the trial the driver restored monitor registers
 and verified the amplifier remained disabled. This checks the feedback
 configuration; amplifier feedback with a driven speaker, a persistent
 ALSA-to-DSM stream, and audible speaker output remain open.
+
+### R100 experimental ALSA-to-DSM playback
+
+The one-boot module was built against the R100 kernel and selected by
+the native speaker service, with automatic fallback to the installed
+module on later boots. Normal ALSA aplay opened the existing Internal
+Speaker PCM. Calliope configured RDMA0 for the actual ALSA ring, accepted
+PCM start, and advanced the hardware position. Its asynchronous log and
+dump registrations were identified during real streams. The driver
+bounds-checks the firmware diagnostic buffers, acknowledges the reports,
+and retains no diagnostic audio.
+
+Playback still underruns or fails with EIO. In one active sequence the
+RDMA position moved by roughly one 4 KiB period per 4 ms, with larger
+steps in some samples. A 48 kHz S16 stereo PCM nominally transfers
+192,000 bytes per second. Restoring the stock 48 kHz configuration and
+setting the SPUS sample banks did not complete the acoustic playback
+test. A simultaneous microphone test captured up to 19,456 frames before
+playback ended early. No complete reference sequence or normal amplifier
+feedback with an audible speaker was verified.
+
+The test module stopped firmware and DMA, restored amplifier settings,
+and released the mappings. The experimental deployment was removed.
+
+Installed GNOME Disks, GNOME Logs, HardInfo, lshw, v4l-utils, evtest,
+libdrm-tests and lm-sensors via the Ubuntu 24.04 package repositories.
+All eight requested packages and their commands were present. APT
+reported zero upgrades and zero removals.
