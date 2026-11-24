@@ -2252,3 +2252,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verified that WDMA4 selected a firmware-internal ring, separate from
   the host-provided PCM alias. Six snapshots of the internal ring were
   zero during the test stream. Speaker output remains unresolved.
+
+### R100 kernel58 speaker route comparison
+
+- Tested the earlier Ubuntu SPUS OUT0 route, a clock-settled amplifier
+  re-enable, and the factory amplifier input/ALC settings with low gain.
+- The handset microphone detected an external Mac reference after the
+  comparisons. The handset's own speaker remained unqualified.

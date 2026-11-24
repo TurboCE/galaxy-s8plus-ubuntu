@@ -4547,3 +4547,34 @@ without userspace opening the stock auxiliary nodes. The Android HAL
 difference is real, but is insufficient to attribute the silence to
 that sequence alone. The firmware PCM tests were one-boot modules.
 R100 remains the installed kernel and the normal service is restored.
+
+### R100 kernel58 speaker route and external acoustic control
+
+Kept the R100 kernel and used temporary modules to compare against the
+kernel58 UCM path. Selected SPUS OUT0 into SIFS1 and set ASRC0 On,
+leaving the R100 SIFS0 clock pacing in place. Confirmed the selectors
+while streaming. Both the original amplifier setting and a comparison
+with the factory input slots, ALC and boost-limiter registers and the
+kernel58 low gain were tried. The amplifier read back slot register
+`0xc0`, gain register `0x01`, block enable `0x93` and global
+enable `0x80` during the latter run.
+
+A separate test dropped the global enable for 50 ms after PCM had
+started, then restored and read it back while the power blocks were
+still enabled. In all three comparisons ALSA playback finished and
+the microphone captured 337,920 stereo frames. None reproduced the
+ordered acoustic reference. The additional 20-segment frequency
+pattern on the factory-settings trial matched 7 of 20 segments after
+a latency search. Shuffling the segment order produced an empirical
+p-value of 0.56. A digital reference sanity check matched 20 of 20.
+
+After removing the comparison modules and rebooting R100, both ALSA
+devices and the normal audio services were present. The first coded
+external control was inconclusive. An independent ordered reference
+from the Mac's built-in speaker then produced three clear peaks at
+940, 1380 and 1770 Hz from both ALSA capture channels in a 527,712-frame
+recording. This confirms acoustic input at the present setup and
+does not establish handset loudspeaker output. The Mac output device,
+volume and mute were restored and no raw recording was retained.
+The handset trials still leave the amplifier input, boost rail and
+speaker contacts unverified.
