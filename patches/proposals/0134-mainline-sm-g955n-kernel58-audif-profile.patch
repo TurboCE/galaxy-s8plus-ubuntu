@@ -1,0 +1,164 @@
+Subject: [PATCH] clk: select the SM-G955N #58 AUDIF clock profile
+
+Program the 6.144 MHz AUDIF rate before exposing the clock provider.
+Keep UAIF0 and UAIF4 at 1.536 MHz for 48 kHz stereo S16 streams.
+Check that the ABOX is idle and restore the inherited fields on probe
+failure or removal. Enable the board profile with kernel58_audif=1.
+
+--- a/drivers/soc/samsung/g955n-abox-power-test.c
++++ b/drivers/soc/samsung/g955n-abox-power-test.c
+@@ -39,6 +39,8 @@
+ #define ABOX_HW_ID		0x41424f58
+ #define ABOX_UAIF0_CTRL		0x0500
+ #define ABOX_UAIF4_CTRL		0x0540
++#define ABOX_UAIF_CTRL(n)	(ABOX_UAIF0_CTRL + 0x10 * (n))
++#define ABOX_UAIF_COUNT		5
+ #define ABOX_UAIF_ENABLE		GENMASK(1, 0)
+ #define ABOX_SYSMMU_GATE	0x20b0
+ #define ABOX_RDMA_CTRL(n)	(0x1000 + 0x100 * (n))
+@@ -49,6 +51,10 @@
+ module_param(probe_uaif_clock, bool, 0400);
+ MODULE_PARM_DESC(probe_uaif_clock, "Test and restore idle UAIF0 and UAIF4 dividers");
+ 
++static bool kernel58_audif;
++module_param(kernel58_audif, bool, 0400);
++MODULE_PARM_DESC(kernel58_audif, "Use the 6.144 MHz SM-G955N AUDIF clock profile");
++
+ static bool probe_power;
+ module_param(probe_power, bool, 0400);
+ MODULE_PARM_DESC(probe_power, "Exercise only the SM-G955N ABOX power domain");
+@@ -263,6 +269,121 @@
+ 	.unprepare = g955n_abox_sysmmu_unprepare,
+ };
+ 
++/*
++ * The #58 speaker mode used a 6.144 MHz AUDIF clock. Keep both native
++ * serial ports at 1.536 MHz when selecting that shared parent rate.
++ */
++static const struct {
++	unsigned int reg;
++	u32 mask;
++	u32 field;
++} g955n_kernel58_dividers[] = {
++	{ AUDIF_DIV, GENMASK(8, 0), 192 - 1 },
++	{ UAIF0_DIV, GENMASK(4, 0), 4 - 1 },
++	{ UAIF4_DIV, GENMASK(4, 0), 4 - 1 },
++};
++
++struct g955n_audif_profile {
++	struct device *dev;
++	void __iomem *cmu;
++	u32 saved[ARRAY_SIZE(g955n_kernel58_dividers)];
++};
++
++static int g955n_abox_program_divider(void __iomem *reg, u32 mask, u32 field)
++{
++	u32 value;
++	int ret;
++
++	ret = readl_poll_timeout(reg, value, !(value & AUD_DIV_BUSY), 1, 1000);
++	if (ret)
++		return ret;
++	writel((value & ~mask) | field, reg);
++	ret = readl_poll_timeout(reg, value, !(value & AUD_DIV_BUSY), 1, 1000);
++	if (ret)
++		return ret;
++	return (value & mask) == field ? 0 : -EIO;
++}
++
++static void g955n_abox_restore_dividers(void *arg)
++{
++	struct g955n_audif_profile *profile = arg;
++	int i;
++
++	for (i = ARRAY_SIZE(g955n_kernel58_dividers) - 1; i >= 0; i--)
++		if (g955n_abox_program_divider(profile->cmu + g955n_kernel58_dividers[i].reg,
++					       g955n_kernel58_dividers[i].mask, profile->saved[i]))
++			dev_err(profile->dev, "could not restore AUD divider %#x\n",
++				g955n_kernel58_dividers[i].reg);
++}
++
++static int g955n_abox_select_kernel58_audif(struct device *dev, struct regmap *pmu,
++					    void __iomem *cmu, void __iomem *sfr,
++					    struct clk_hw_onecell_data *data)
++{
++	struct g955n_audif_profile *profile;
++	struct clk *pll;
++	unsigned int i, status;
++	u32 value;
++	int ret;
++
++	if (clk_hw_get_rate(data->hws[G955N_ABOX_CLK_PLL]) / 192 != 6144000)
++		return -EINVAL;
++	ret = regmap_read(pmu, ABOX_CA7_STATUS, &status);
++	if (ret || (status & ABOX_CA7_RUNNING))
++		return ret ?: -EBUSY;
++	value = readl(cmu + ABOX_ACLK_GATE);
++	if ((value & ABOX_GATE_MANUAL ? !(value & ABOX_GATE_ACTIVE) :
++	     (value & ABOX_GATE_AUTO)) ||
++	    readl(sfr + ABOX_IP_INDEX) != ABOX_HW_ID)
++		return -ENODEV;
++	for (i = 0; i < ABOX_UAIF_COUNT; i++)
++		if (readl(sfr + ABOX_UAIF_CTRL(i)) & ABOX_UAIF_ENABLE)
++			return -EBUSY;
++	for (i = 0; i < 8; i++)
++		if (readl(sfr + ABOX_RDMA_CTRL(i)) & ABOX_DMA_ENABLE)
++			return -EBUSY;
++	for (i = 0; i < 5; i++)
++		if (readl(sfr + ABOX_WDMA_CTRL(i)) & ABOX_DMA_ENABLE)
++			return -EBUSY;
++
++	profile = devm_kzalloc(dev, sizeof(*profile), GFP_KERNEL);
++	if (!profile)
++		return -ENOMEM;
++	profile->dev = dev;
++	profile->cmu = cmu;
++	for (i = 0; i < ARRAY_SIZE(g955n_kernel58_dividers); i++) {
++		ret = readl_poll_timeout(cmu + g955n_kernel58_dividers[i].reg,
++					 value, !(value & AUD_DIV_BUSY), 1, 1000);
++		if (ret)
++			return ret;
++		profile->saved[i] = value & g955n_kernel58_dividers[i].mask;
++	}
++
++	ret = devm_add_action(dev, g955n_abox_restore_dividers, profile);
++	if (ret)
++		return ret;
++	for (i = 0; i < ARRAY_SIZE(g955n_kernel58_dividers); i++) {
++		ret = g955n_abox_program_divider(cmu + g955n_kernel58_dividers[i].reg,
++						 g955n_kernel58_dividers[i].mask,
++						 g955n_kernel58_dividers[i].field);
++		if (ret)
++			return ret;
++	}
++
++	/* Refresh the registered clock tree after programming the dividers. */
++	pll = clk_hw_get_clk(data->hws[G955N_ABOX_CLK_PLL], NULL);
++	if (IS_ERR(pll))
++		return PTR_ERR(pll);
++	clk_get_rate(pll);
++	clk_put(pll);
++	if (clk_hw_get_rate(data->hws[G955N_ABOX_CLK_AUDIF]) != 6144000 ||
++	    clk_hw_get_rate(data->hws[G955N_ABOX_CLK_UAIF0]) != 1536000 ||
++	    clk_hw_get_rate(data->hws[G955N_ABOX_CLK_UAIF4]) != 1536000)
++		return -EIO;
++
++	return 0;
++}
++
+ static int g955n_abox_register_clocks(struct device *dev, struct regmap *pmu,
+ 				    void __iomem *cmu, void __iomem *sfr)
+ {
+@@ -342,6 +463,12 @@
+ 		data->hws[i] = &clock->hw;
+ 	}
+ 
++	if (kernel58_audif) {
++		ret = g955n_abox_select_kernel58_audif(dev, pmu, cmu, sfr, data);
++		if (ret)
++			return dev_err_probe(dev, ret, "cannot select #58 AUDIF profile\n");
++	}
++
+ 	if (probe_uaif_clock) {
+ 		ret = g955n_abox_test_uaif(dev, data->hws[G955N_ABOX_CLK_UAIF0]);
+ 		if (!ret)

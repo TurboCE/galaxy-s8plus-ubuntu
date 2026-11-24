@@ -5578,3 +5578,31 @@ so this experiment establishes PCM transport with the paired
 dividers. The electrical I2S signal at the amplifier, acoustic
 output and duplex behavior under the paired settings remain
 unverified. The trial restored the original divider fields on stop.
+
+
+### R100 boot-time #58 AUDIF profile
+
+Patch 0134 programs AUDIF to divide by 192 and UAIF0 and UAIF4 to
+divide by 4 while ABOX is idle. The common clock framework reports
+6.144 MHz AUDIF and 1.536 MHz for both UAIF dividers. The inherited PLL
+reports 1,179,648,040 Hz. Divider field readbacks are checked before the
+clock provider is published. The initial trial used cached clock rates
+during verification. The final module refreshes the clock tree after
+programming the dividers and checks the refreshed rates.
+
+Five seconds of direct ALSA speaker playback and six seconds of
+simultaneous handset microphone capture both returned zero. Capture produced
+1,152,000 bytes, the full stereo S16 buffer at 48 kHz. Nine GPIO
+sampling windows reported a frame clock close to 48 kHz. Playback
+DMA advanced and direct amplifier reads showed the global enable bit.
+The capture did not reproduce the 523.25 Hz or 697 Hz acoustic reference.
+The acoustic result still matches the R100 speaker defect.
+
+The R100 handset loads the clock provider from its kernel-specific
+updates directory with `kernel58_audif=1`. The existing speaker
+module continues to provide Bottom Speaker, Earpiece, and Microphone.
+The original clock module stays installed under the normal kernel
+module directory. To revert the profile, remove
+`/etc/modprobe.d/g955n-audif-k58.conf` and the module override at
+`/lib/modules/6.18.0-g955n-usb-r100/updates/g955n-audif-k58/g955n-abox-power-test.ko`,
+refresh module dependencies for that release, and reboot.

@@ -2499,3 +2499,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   direct ALSA playback. Pairing it with the UAIF4 divider restored
   full-length PCM transport. Restored the production R100 module
   after the one-boot tests.
+
+
+### R100 #58 AUDIF profile
+
+- Add the Exynos8895 clock-provider profile for AUDIF at 6.144 MHz and
+  UAIF0/UAIF4 at 1.536 MHz. Enable it on the R100 handset at boot.
+- Direct lower-speaker PCM playback and microphone recording completed
+  simultaneously. The recording did not detect the speaker reference.
