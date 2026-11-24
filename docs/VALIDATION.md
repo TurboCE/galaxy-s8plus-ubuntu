@@ -4736,3 +4736,37 @@ samples in the analyzed channel. Neither run reproduced the complete
 900/1300/1780 Hz sequence in the expected intervals. The higher
 PCM level did not qualify acoustic output. The test module was
 withdrawn.
+
+### R100 native speaker comparisons against Samsung controls
+
+The Samsung ABOX source enables each active DAI bit clock and gate
+at startup and uses a fixed RDMA buffer alias. The kernel58 UCM
+selects OUT0 into SIFS1 and enables ASRC0. Compared those controls
+on the native R100 PCM using the same known-word WAV and read-only
+GPH0 pad sampling.
+
+With native playback only, UAIF0 was idle and both speaker clocks
+were low in the sampled windows. Enabling the UAIF0 SIFS0 pacing
+route produced both the bit clock and a word clock near 48 kHz.
+The data pad remained low during the nonzero test intervals. Turning
+the pacing route off restored the earlier clock behavior.
+
+In a separate comparison with microphone capture supplying the
+active clock, changed only the RDMA0 alias from the driver's dynamic
+allocation to the Samsung `0x81000000` and back. The live IOMMU
+snapshot matched all four RDMA pages to the same ALSA ring for each
+address. Both clocks were present, PCM completed, and the data pin
+stayed low during both nonzero intervals in all three trials.
+
+With UAIF0 pacing held on, applying the stock S16 stereo SPUS mixer
+format changed the format readback to 9. It did not recover data.
+Adding ASRC0 then caused an ALSA input/output error. On a repeat
+with Off, On, Off and the mixer format and clock held fixed, the
+off runs completed in about 4.55 seconds with 220 or more distinct
+running hardware pointer positions. The on run stopped after about
+0.37 seconds. The running hardware pointer stayed at frame 8 while
+the application pointer stayed at frame 4104. No new IOMMU fault was
+reported. This identifies the stall on this native setup when
+enabling ASRC0 without the Samsung firmware setup. It does not
+identify the amp-side fault when Calliope data is valid at the
+SoC pin. The temporary modules were withdrawn.

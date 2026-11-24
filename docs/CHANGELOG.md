@@ -2300,3 +2300,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Doubled the Calliope test PCM level while holding amplifier
   settings fixed. Playback completed and the handset microphone
   did not recover the complete timed reference sequence.
+
+### R100 Samsung native playback control comparison
+
+- Isolated UAIF0 pacing and the stock RDMA0 alias. The pacing
+  change brought up the speaker clocks, but neither change
+  recovered native PCM data at the pad.
+- Adding the stock ASRC0 bit stalled the native playback pointer
+  with the comparison mixer format and clock fixed.
