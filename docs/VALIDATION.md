@@ -4869,3 +4869,39 @@ values. It reported no stream errors or steady-state clipping.
 GNOME Shell's volume-control clients were present in the graph.
 These checks verify the user-space audio route and driver transport.
 Physical loudspeaker output remains unverified.
+
+### R100 audio startup and desktop error handling audit
+
+In the optional Calliope path, the PCM start mailbox exchange used to
+wake the ALSA trigger as soon as the firmware consumed the command.
+The trigger now waits for the RDMA0 running bit and a changed hardware
+position. If neither establishes progress within 160 ms, the worker
+runs its teardown and passes ETIMEDOUT back to ALSA. The internal
+silent PCM probe also requires hardware movement. Built the ARM64
+module for the exact R100 release. A host simulation of the startup
+loop passed for DMA advancement, a stuck hardware position, a
+changing position without the running bit, and an early stop.
+The optional module was not installed on the handset for this check.
+
+The MAX98506 driver checks the output power enables at trigger. Those
+reads qualify the amplifier control path without measuring its clock or
+serial input. The unresolved difference between the requested clock
+multiplier and earlier MAX98506 clock readback was left unchanged.
+Verified the native UCM endpoints on R100. Speaker and Mic resolved
+to PCM devices 0 and 1 respectively, and both AIF1TX inputs read back
+IN3L with the input high-pass filter enabled.
+
+The desktop diagnostic now matches pw-top counters to the actual
+selected node names, checks monitor and recorder status, and checks
+new ASoC/amp/ABOX errors separately from general kernel faults.
+On the handset Ubuntu's pw-record returned status 1 with empty
+stderr on an intentional SIGINT. The diagnostic accepts that status
+only after it sent SIGINT successfully and the recorder emitted no
+error. The host suite passed seven tests, including rejecting an
+unrequested status 1 or a recorder error during shutdown.
+
+A two-tone run on R100 again produced no acoustic match. A separate
+silent follow-up verified the corrected diagnostic. It observed
+194 playback and 226 capture pointer values, 218,400 capture frames
+after startup, zero hardware error growth, and zero new kernel faults
+or audio errors. No raw microphone recording was retained.

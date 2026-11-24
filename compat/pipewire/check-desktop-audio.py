@@ -31,13 +31,26 @@ def volume(selector):
 
 
 def stop(child):
-    if child is not None and child.poll() is None:
+    if child is None or child.poll() is not None:
+        return False
+    try:
         os.killpg(child.pid, signal.SIGINT)
-        try:
-            child.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.wait(timeout=2)
+    except ProcessLookupError:
+        child.wait(timeout=2)
+        return False
+    try:
+        child.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        os.killpg(child.pid, signal.SIGKILL)
+        child.wait(timeout=2)
+        return False
+    return True
+
+
+def capture_completed(status, interrupted, errors):
+    # Ubuntu pw-record returns 1 with empty stderr after a controlled SIGINT.
+    return status == 0 or (interrupted and not errors.strip()
+                           and status in (1, -signal.SIGINT))
 
 
 def statistics(raw):
@@ -96,15 +109,15 @@ def statistics(raw):
     return result
 
 
-def hardware_error_samples(text):
+def hardware_error_samples(text, node_names):
     """Read only active hardware counters, excluding client startup errors."""
     result = {'sink': [], 'source': []}
     for line in text.splitlines():
         columns = line.split()
         if len(columns) < 11 or columns[0] != 'R' or not columns[8].isdigit():
             continue
-        for name, prefix in [('sink', 'alsa_output.'), ('source', 'alsa_input.')]:
-            if prefix in line:
+        for name, node in node_names.items():
+            if columns[-1] == node:
                 result[name].append(int(columns[8]))
     return result
 
@@ -135,16 +148,21 @@ def check_stock_audio_plugin():
 def default_audio_devices(native):
     card_name = 'SM-G955N Audio' if native else 'Exynos8895-Madera'
     capture_device = 1 if native else 9
+    nodes = {}
     for direction, selector, device, media in [
-            ('playback', '@DEFAULT_AUDIO_SINK@', 0, 'Audio/Sink'),
-            ('capture', '@DEFAULT_AUDIO_SOURCE@', capture_device, 'Audio/Source')]:
+            ('sink', '@DEFAULT_AUDIO_SINK@', 0, 'Audio/Sink'),
+            ('source', '@DEFAULT_AUDIO_SOURCE@', capture_device, 'Audio/Source')]:
         info = command('wpctl', 'inspect', selector)
         if (card_name not in info or f'alsa.device = "{device}"' not in info
                 or f'media.class = "{media}"' not in info
                 or (native and ('api.alsa.open.ucm = "true"' not in info
                                 or f'api.alsa.path = "hw:Audio,{device}"' not in info))):
             raise RuntimeError(f'Default {direction} device does not match the built-in hardware')
-    return {
+        match = re.search(r'^\s*\*?\s*node\.name = "([^"]+)"', info, re.M)
+        if not match:
+            raise RuntimeError(f'Default {direction} has no PipeWire node name')
+        nodes[direction] = match[1]
+    return nodes, {
         'playback': Path('/proc/asound/card0/pcm0p/sub0/status'),
         'capture': Path(f'/proc/asound/card0/pcm{capture_device}c/sub0/status'),
     }
@@ -168,7 +186,7 @@ def main():
     else:
         subprocess.run(['/usr/local/libexec/g955n-wireplumber', '--check'], check=True,
                        stdout=subprocess.DEVNULL, timeout=10)
-    statuses = default_audio_devices(native)
+    nodes, statuses = default_audio_devices(native)
     kernel_before = Counter(subprocess.check_output(['dmesg'], text=True).splitlines())
     boot = Path('/proc/sys/kernel/random/boot_id').read_text()
     taint = Path('/proc/sys/kernel/tainted').read_text()
@@ -223,7 +241,7 @@ def main():
                     match = re.search(r'^hw_ptr\s*:\s*(\d+)', status.read_text(), re.M)
                     if match:
                         pointers[name].add(int(match[1]))
-            stop(record)
+            capture_interrupted = stop(record)
             drain_until = time.monotonic() + .3
             while time.monotonic() < drain_until and select.select([record.stdout], [], [], 0)[0]:
                 block = os.read(record.stdout.fileno(), 65536)
@@ -232,21 +250,25 @@ def main():
                 raw.extend(block)
             play.wait(timeout=5)
             top = monitor.communicate(timeout=5)[0].decode(errors='replace')
-            hardware_errors = hardware_error_samples(top)
+            hardware_errors = hardware_error_samples(top, nodes)
             report = statistics(raw)
             report['hardware_error_samples'] = hardware_errors
             report['hardware_error_growth'] = {
                 name: max(values) - min(values) if len(values) >= 2 else None
                 for name, values in hardware_errors.items()}
 
-            report.update(playback_exit=play.returncode,
+            report.update(playback_exit=play.returncode, capture_exit=record.returncode,
+                          monitor_exit=monitor.returncode,
                           playback_pointer_positions=len(pointers['playback']),
                           capture_pointer_positions=len(pointers['capture']),
                           microphone_audio_saved=False,
                           physical_audibility_confirmed=False)
             for stream in (record.stderr, play.stderr):
                 os.set_blocking(stream.fileno(), False)
-            errors = ((record.stderr.read() or b'') + (play.stderr.read() or b'')).decode(errors='replace')
+            capture_errors = (record.stderr.read() or b'').decode(errors='replace')
+            report['capture_completed'] = capture_completed(
+                record.returncode, capture_interrupted, capture_errors)
+            errors = capture_errors + (play.stderr.read() or b'').decode(errors='replace')
             report['xrun_reported'] = bool(re.search(r'underrun|overrun|xrun', errors, re.I))
     finally:
         stop(record)
@@ -263,13 +285,19 @@ def main():
     report['new_kernel_fault_count'] = sum(count for line, count in added.items()
         if re.search(r'WARNING:|BUG:|Call trace:|Kernel panic|Unable to handle|'
                      r'(?:SysMMU|sysmmu).*(?:fault|FAULT)', line))
+    report['new_audio_kernel_error_count'] = sum(count for line, count in added.items()
+        if re.search(r'ASoC error|(?:g955n-abox-speaker|max98506).*'
+                     r'(?:failed|error|did not stop|did not advance|did not latch)', line, re.I))
     report['pcm_transport_checks_passed'] = (report['playback_exit'] == 0
+        and report['capture_completed']
+        and report['monitor_exit'] == 0
         and report['nonconstant_signal'] and report['clipped_samples'] == 0
         and report['playback_pointer_positions'] > 1
         and report['capture_pointer_positions'] > 1 and not report['xrun_reported']
         and all(value == 0 for value in report['hardware_error_growth'].values())
         and report['volume_and_mute_restored'] and report['same_boot_and_taint']
-        and report['new_kernel_fault_count'] == 0)
+        and report['new_kernel_fault_count'] == 0
+        and report['new_audio_kernel_error_count'] == 0)
     report['acoustic_quality_requires_confirmation'] = True
     print(json.dumps(report, indent=2))
     return 0 if report['pcm_transport_checks_passed'] else 1

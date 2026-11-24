@@ -2331,3 +2331,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   card and capture PCM 1 while retaining the older card checks.
 - Verified standard ALSA UCM, PipeWire and its PulseAudio compatibility
   layer. Replaced stale WirePlumber defaults with the current device names.
+
+### R100 audio code path review
+
+- Require RDMA0 movement before reporting successful Calliope playback startup.
+- Check PipeWire errors on the selected built-in nodes only. Distinguish the
+  recorder's expected SIGINT exit from an unexpected recording failure,
+  and include new audio-specific kernel errors in the transport result.

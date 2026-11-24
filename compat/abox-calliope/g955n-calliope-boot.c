@@ -90,6 +90,7 @@
 #define ABOX_RDMA_ENABLE	BIT(0)
 #define ABOX_RDMA_PROGRESS	BIT(31)
 #define ABOX_RDMA_POSITION	(GENMASK(28, 16) | GENMASK(12, 0))
+#define CALLIOPE_PCM_START_MS	160
 #define ABOX_UAIF4_GATE		0x2034
 #define ABOX_UAIF0_GATE		0x2024
 #define ABOX_UAIF_GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
@@ -501,20 +502,27 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 			goto cleanup;
 		}
 	}
-	if (stream)
-		complete(&stream->running);
 	dev_info(dev, "Calliope PCM programmed RDMA0 ctrl=%08x start=%08x end=%08x\n",
 		 readl(sfr + ABOX_RDMA0_CTRL), readl(sfr + ABOX_RDMA0_CTRL + 8),
 		 readl(sfr + ABOX_RDMA0_CTRL + 12));
 
-	deadline = jiffies + msecs_to_jiffies(160);
+	deadline = jiffies + msecs_to_jiffies(CALLIOPE_PCM_START_MS);
 	do {
-		running_status = readl(sfr + ABOX_RDMA0_STATUS);
-		if ((running_status & ABOX_RDMA_PROGRESS) &&
-		    (running_status & ABOX_RDMA_POSITION) != initial)
-			dma_advanced = true;
 		if (stream && READ_ONCE(stream->stopping))
 			break;
+
+		running_status = readl(sfr + ABOX_RDMA0_STATUS);
+		if (!dma_advanced && (running_status & ABOX_RDMA_PROGRESS) &&
+		    (running_status & ABOX_RDMA_POSITION) != initial) {
+			dma_advanced = true;
+			if (stream)
+				complete(&stream->running);
+		}
+		if (stream && !dma_advanced && time_after_eq(jiffies, deadline)) {
+			dev_err(dev, "Calliope RDMA0 did not advance after PCM trigger\n");
+			ret = -ETIMEDOUT;
+			break;
+		}
 		if (!readl(sram + IPC_RX_ACK)) {
 			usleep_range(500, 1000);
 			continue;
@@ -566,8 +574,9 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 			first = pointer;
 		else if (pointer != first)
 			ipc_advanced = true;
-	} while (stream || (!ipc_advanced && time_before(jiffies, deadline)));
-	if (!ret && !stream && !ipc_advanced && !dma_advanced)
+	} while (stream || ((!ipc_advanced || !dma_advanced) &&
+			   time_before(jiffies, deadline)));
+	if (!ret && !stream && !dma_advanced)
 		ret = -ETIMEDOUT;
 
 cleanup:

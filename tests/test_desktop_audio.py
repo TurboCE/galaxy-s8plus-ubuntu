@@ -85,27 +85,38 @@ class DesktopAudioTests(unittest.TestCase):
             with self.subTest(card=card):
                 playback = f'{card}\nalsa.device = "0"\nmedia.class = "Audio/Sink"'
                 capture = f'{card}\nalsa.device = "{capture_device}"\nmedia.class = "Audio/Source"'
+                playback += '\n  * node.name = "alsa_output.builtin"'
+                capture += '\n  * node.name = "alsa_input.builtin"'
                 if native:
                     playback += '\napi.alsa.open.ucm = "true"\napi.alsa.path = "hw:Audio,0"'
                     capture += f'\napi.alsa.open.ucm = "true"\napi.alsa.path = "hw:Audio,{capture_device}"'
                 with patch.object(audio, 'command', side_effect=[playback, capture]):
-                    self.assertEqual(audio.default_audio_devices(native)['capture'],
+                    self.assertEqual(audio.default_audio_devices(native)[1]['capture'],
                                      Path(f'/proc/asound/card0/pcm{capture_device}c/sub0/status'))
                 with patch.object(audio, 'command', side_effect=[playback, capture.replace(
                         f'alsa.device = "{capture_device}"', 'alsa.device = "2"')]):
-                    with self.assertRaisesRegex(RuntimeError, 'Default capture'):
+                    with self.assertRaisesRegex(RuntimeError, 'Default source'):
                         audio.default_audio_devices(native)
+
+    def test_record_failure_is_not_hidden_by_the_expected_stop_status(self):
+        self.assertTrue(audio.capture_completed(0, False, ''))
+        self.assertTrue(audio.capture_completed(1, True, ''))
+        self.assertFalse(audio.capture_completed(1, False, ''))
+        self.assertFalse(audio.capture_completed(1, True, 'capture failed'))
+        self.assertFalse(audio.capture_completed(-audio.signal.SIGKILL, True, ''))
 
     def test_internal_hardware_errors_are_separate_from_client_errors(self):
         rows = '\n'.join([
             'R 49 2048 48000 1us 1us 0.00 0.00 2 S16LE 2 48000 alsa_output.platform-sound',
             'R 99 4800 48000 1us 1us 0.00 0.00 50 S16LE 2 48000 + pw-play',
             'R 49 2048 48000 1us 1us 0.00 0.00 5 S16LE 2 48000 alsa_output.platform-sound',
+            'R 64 2048 48000 1us 1us 0.00 0.00 42 S16LE 2 48000 alsa_output.other',
             'S 37 0 0 --- --- --- --- 0 alsa_input.platform-sound',
             'R 37 2048 48000 1us 1us 0.00 0.00 0 S16LE 2 48000 alsa_input.platform-sound',
         ])
-        self.assertEqual(audio.hardware_error_samples(rows), {'sink': [2, 5], 'source': [0]})
-        self.assertEqual(audio.hardware_error_samples(''), {'sink': [], 'source': []})
+        nodes = {'sink': 'alsa_output.platform-sound', 'source': 'alsa_input.platform-sound'}
+        self.assertEqual(audio.hardware_error_samples(rows, nodes), {'sink': [2, 5], 'source': [0]})
+        self.assertEqual(audio.hardware_error_samples('', nodes), {'sink': [], 'source': []})
 
 
 if __name__ == '__main__':
