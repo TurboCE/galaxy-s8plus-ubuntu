@@ -114,6 +114,9 @@ def check_kernel_scoped_audio():
     boot_log = subprocess.check_output(['dmesg'], text=True)
     if not scope.is_file() or 'SM-G955N ALSA: native RDMA0/WDMA1 audio scope active' not in boot_log:
         raise RuntimeError('Kernel ALSA endpoint scope is not active')
+
+
+def check_stock_audio_plugin():
     stock = '/usr/lib/aarch64-linux-gnu/spa-0.2/alsa/libspa-alsa.so'
     private = '/usr/local/lib/g955n/spa-0.2'
     stock_loaded = False
@@ -129,6 +132,24 @@ def check_kernel_scoped_audio():
         raise RuntimeError('The stock ALSA plugin is not mapped in the active audio graph')
 
 
+def default_audio_devices(native):
+    card_name = 'SM-G955N Audio' if native else 'Exynos8895-Madera'
+    capture_device = 1 if native else 9
+    for direction, selector, device, media in [
+            ('playback', '@DEFAULT_AUDIO_SINK@', 0, 'Audio/Sink'),
+            ('capture', '@DEFAULT_AUDIO_SOURCE@', capture_device, 'Audio/Source')]:
+        info = command('wpctl', 'inspect', selector)
+        if (card_name not in info or f'alsa.device = "{device}"' not in info
+                or f'media.class = "{media}"' not in info
+                or (native and ('api.alsa.open.ucm = "true"' not in info
+                                or f'api.alsa.path = "hw:Audio,{device}"' not in info))):
+            raise RuntimeError(f'Default {direction} device does not match the built-in hardware')
+    return {
+        'playback': Path('/proc/asound/card0/pcm0p/sub0/status'),
+        'capture': Path(f'/proc/asound/card0/pcm{capture_device}c/sub0/status'),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--test-speaker-microphone', action='store_true')
@@ -139,24 +160,20 @@ def main():
         parser.error('Requires explicit --test-speaker-microphone')
     if os.geteuid() or b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise RuntimeError('Run as root only on SM-G955N')
+    native = Path('/sys/class/sound/card0/device/driver').resolve().name == 'g955n-abox-speaker'
     if args.kernel_alsa_scope:
         check_kernel_scoped_audio()
+    if native or args.kernel_alsa_scope:
+        check_stock_audio_plugin()
     else:
         subprocess.run(['/usr/local/libexec/g955n-wireplumber', '--check'], check=True,
                        stdout=subprocess.DEVNULL, timeout=10)
-    for selector, device, media in [('@DEFAULT_AUDIO_SINK@', '0', 'Audio/Sink'),
-                                    ('@DEFAULT_AUDIO_SOURCE@', '9', 'Audio/Source')]:
-        info = command('wpctl', 'inspect', selector)
-        if ('Exynos8895-Madera' not in info or f'alsa.device = "{device}"' not in info
-                or f'media.class = "{media}"' not in info):
-            raise RuntimeError('Default device does not match the built-in hardware')
+    statuses = default_audio_devices(native)
     kernel_before = Counter(subprocess.check_output(['dmesg'], text=True).splitlines())
     boot = Path('/proc/sys/kernel/random/boot_id').read_text()
     taint = Path('/proc/sys/kernel/tainted').read_text()
     saved = {s: volume(s) for s in ('@DEFAULT_AUDIO_SINK@', '@DEFAULT_AUDIO_SOURCE@')}
     pointers = {'playback': set(), 'capture': set()}
-    statuses = {'playback': Path('/proc/asound/card0/pcm0p/sub0/status'),
-                'capture': Path('/proc/asound/card0/pcm9c/sub0/status')}
     raw = bytearray()
     record = play = monitor = None
     report = {}

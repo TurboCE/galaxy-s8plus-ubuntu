@@ -79,6 +79,23 @@ class DesktopAudioTests(unittest.TestCase):
         self.assertFalse(reversed_tones['synthetic_tone_response_detected'])
         self.assertFalse(late['synthetic_tone_response_detected'])
 
+    def test_capture_status_follows_the_actual_alsa_card(self):
+        for native, card, capture_device in [
+                (False, 'Exynos8895-Madera', 9), (True, 'SM-G955N Audio', 1)]:
+            with self.subTest(card=card):
+                playback = f'{card}\nalsa.device = "0"\nmedia.class = "Audio/Sink"'
+                capture = f'{card}\nalsa.device = "{capture_device}"\nmedia.class = "Audio/Source"'
+                if native:
+                    playback += '\napi.alsa.open.ucm = "true"\napi.alsa.path = "hw:Audio,0"'
+                    capture += f'\napi.alsa.open.ucm = "true"\napi.alsa.path = "hw:Audio,{capture_device}"'
+                with patch.object(audio, 'command', side_effect=[playback, capture]):
+                    self.assertEqual(audio.default_audio_devices(native)['capture'],
+                                     Path(f'/proc/asound/card0/pcm{capture_device}c/sub0/status'))
+                with patch.object(audio, 'command', side_effect=[playback, capture.replace(
+                        f'alsa.device = "{capture_device}"', 'alsa.device = "2"')]):
+                    with self.assertRaisesRegex(RuntimeError, 'Default capture'):
+                        audio.default_audio_devices(native)
+
     def test_internal_hardware_errors_are_separate_from_client_errors(self):
         rows = '\n'.join([
             'R 49 2048 48000 1us 1us 0.00 0.00 2 S16LE 2 48000 alsa_output.platform-sound',

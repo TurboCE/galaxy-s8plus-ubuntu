@@ -4841,3 +4841,31 @@ boot also logged ABOX prepare errors (-EBUSY) and a close error
 (-EPROTO) separate from the successful stream. Their specific cause
 was not confirmed in that run. Rebooted to the normal native ABOX
 driver with the verified patched codec and active WirePlumber.
+
+### R100 user-space audio verification
+
+With the checked MAX98506 driver loaded, a direct ALSA duplex test
+completed and captured 337,920 frames. UCM's HiFi verb resolved Speaker
+to `hw:Audio,0` and Mic to `hw:Audio,1`. WirePlumber was already
+using these running devices but saved names from the old 4.4 card as
+its configured defaults. Selected the two current built-in nodes with
+`wpctl set-default` and verified the configured defaults after a
+WirePlumber restart. The active audio processes mapped Ubuntu's
+stock ALSA SPA plugin.
+
+The updated desktop duplex diagnostic checks the native ALSA card and
+capture PCM 1. It still supports capture PCM 9 on the 4.4 card. On
+R100 the PipeWire tone playback exited successfully, and the test observed
+194 playback and 226 capture pointer values. It retained 217,376 frames
+after discarding capture startup. Hardware errors did not grow, and
+there were no steady-state clipped samples or reported underruns.
+The microphone did not detect the ordered 523.25 and 697 Hz reference.
+
+A separate PulseAudio client test through `pipewire-pulse` linked
+playback to the built-in speaker and capture to the built-in
+microphone. It drained 115,200 silent playback frames and captured
+163,200 frames, observing 98 playback and 99 capture hardware pointer
+values. It reported no stream errors or steady-state clipping.
+GNOME Shell's volume-control clients were present in the graph.
+These checks verify the user-space audio route and driver transport.
+Physical loudspeaker output remains unverified.

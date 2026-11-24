@@ -2324,3 +2324,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Compared the stock ALC auto-mute bit on native ALSA and Calliope.
   The diagnostic did not recover the acoustic reference and was
   withdrawn.
+
+### R100 desktop audio routing verification
+
+- Updated the duplex diagnostic to recognize the native R100 ALSA
+  card and capture PCM 1 while retaining the older card checks.
+- Verified standard ALSA UCM, PipeWire and its PulseAudio compatibility
+  layer. Replaced stale WirePlumber defaults with the current device names.
