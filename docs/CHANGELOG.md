@@ -2460,3 +2460,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   stream and hold its configured CA7 clock through playback. On the
   handset, the same 30-second stimulus passed the previous interruption
   point without an ALSA XRUN.
+
+### R100 sound device labels
+
+- Show Bottom Speaker and Earpiece as output routes and Microphone as the
+  shared input. Use short names for the Standard and Voice configurations.

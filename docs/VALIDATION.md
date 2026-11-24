@@ -5432,3 +5432,10 @@ close all returned zero. The same logic built in the repository helper,
 and all eight desktop audio tests passed. This trial establishes the
 cause and fix for the reproduced stream interruption. Audible lower
 speaker output remains unverified. No microphone recordings were retained.
+
+### R100 Sound device labels
+
+On the handset, WirePlumber exposed two output routes and one input route.
+Switching to Voice selected Earpiece PCM 2, and returning to Standard
+selected Bottom Speaker PCM 0. Microphone capture stayed on PCM 1 with
+both configurations. This verified route selection and exported labels.
