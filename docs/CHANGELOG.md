@@ -2465,3 +2465,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Show Bottom Speaker and Earpiece as output routes and Microphone as the
   shared input. Use short names for the Standard and Voice configurations.
+
+
+### R100 amplifier level detector comparison
+
+- Compared two MAX98506 ALC threshold settings during uninterrupted
+  PCM playback. The amplifier reported no level or fault flags and
+  handset capture did not reproduce the stimulus. Restored the original
+  amplifier threshold after the trial.

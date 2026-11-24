@@ -5439,3 +5439,29 @@ On the handset, WirePlumber exposed two output routes and one input route.
 Switching to Voice selected Earpiece PCM 2, and returning to Standard
 selected Bottom Speaker PCM 0. Microphone capture stayed on PCM 1 with
 both configurations. This verified route selection and exported labels.
+
+
+### R100 MAX98506 input level and acoustic comparison
+
+Ran the 30-second lower speaker reference on the one-boot Calliope
+module with the PCM boot gear release fix. The stream completed in
+30.497 seconds from the launcher with no reported XRUN. RDMA0 moved
+through the ring and firmware stop, free and close returned zero.
+Both channels of the handset microphone failed to match the ordered
+tone reference. No acoustic recordings were retained.
+
+Checked the MAX98506 over I2C during playback in 35 samples. The probe
+verified the original ALC threshold register (0x0a), then enabled ALC
+with threshold fields 0 and 31, reading back 0x20 and 0x3f. ALC
+auto-mute stayed disabled (configuration 0x12). Block and global
+enables stayed at 0x93 and 0x80. Live status and flag registers 0x03,
+0x04, 0x09 and 0x0a were zero for all samples. The original threshold
+read back after restoration. Gain and boost settings were not changed.
+
+Earlier decoded words establish the signal at the SoC pads in
+Calliope mode. This comparison found no positive response from the
+amplifier level detector to support reception or actual speaker drive.
+The zero flags cannot distinguish a missing or undecoded signal at
+the amplifier from a power or output stage problem. Local electrical
+measurement of DIN/BCLK/LRCLK, the boost rail, and differential
+output at the speaker contacts remains the outstanding check.
