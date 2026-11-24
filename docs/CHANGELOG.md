@@ -2387,3 +2387,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Tested SIFS2 to UAIF4 both during a stream and before start. It
   stopped playback with EIO. The installed R100 route completed the
   same silent input after a reboot. Retained the receiver setup.
+
+### R100 Samsung amplifier control comparison
+
+- Compared Samsung's codec and ABOX start sequence with uncached
+  MAX98506 reads on R100. Verified speaker/boost and global enable
+  during silent playback, and recorded the remaining configuration
+  and physical measurement gaps.

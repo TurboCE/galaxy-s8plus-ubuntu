@@ -5132,3 +5132,39 @@ completed in 7.065 s and captured 368,640 frames. WirePlumber was
 active and the separate receiver retained raw gain 92/92.
 These are codec transport checks. Physical lower speaker output
 and amplifier input and output voltages remain unverified.
+
+### R100 Samsung MAX98506 control parity
+
+Compared Samsung source at 54feaea9, the board data and the Android
+media route with current R100. Samsung enables the UAIF clocks at
+DAI startup, arbitrates the shared AUDIF rate, and enables UAIF
+transmit at trigger. Its ASoC prepare path invokes the MAX98506
+unmute callback. The codec enables the requested output mode,
+speaker, boost and configured VI monitors and then sets global
+enable. The matching Android route uses DSM, SPUS OUT7 and SIFS1
+to UAIF4. R100 uses native RDMA0 and SPUS OUT0, and checks the
+MAX98506 enable registers in the trigger callback.
+
+Read uncached MAX98506 registers directly on R100 before, twice
+during, and after a seven-second silent ALSA stream. All 128
+reads succeeded and playback completed. Block/global enable were
+0x00/0x00 at rest, 0x90/0x80 in both active samples, and 0x00/0x00
+after playback. The amplifier kept the mono-board 32-bit frame
+setting (0x1b=0x80), PCM input (0x2f=0x00), and DAC filter
+(0x2c=0xd9). Compared with Samsung's source and board settings,
+R100 used 0xc8 rather than 0xc0 for slot selection, 0x92 rather
+than 0x12 for ALC configuration, and 0x00 rather than 0xf8 for the
+boost limiter. The VI slot registers were zero and the VI ADCs
+were off on the native path. The optional previous Calliope
+comparisons applied Samsung's slot, ALC, limiter and VI settings
+without restoring acoustic output.
+
+The raw clock mode stayed 0x40 throughout. Samsung's source
+requests an MDLL value of 0x06 in the low bits, and seeds those
+bits in its cached defaults. The register has no matching uncached
+read from a running Android or #58 speaker test, so the 0x40
+observation does not identify a clock fault. Status and fault
+registers 0x02 to 0x0a read zero in this silent test. This verifies
+the R100 I2C control and enable sequence. It leaves amplifier DIN,
+boost rail and speaker terminal output unqualified. The module
+only read registers, then exited; WirePlumber stayed active.
