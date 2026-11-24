@@ -4648,3 +4648,15 @@ demonstrates effective dependence on the UAIF0 configuration in
 this topology. It does not show that this dependency explains the
 original silence at the 32-bit frame setting, or that the amplifier
 received the serial words. The temporary modules are withdrawn.
+
+In a final isolated trial, held the UAIF4 and amplifier settings
+fixed and changed the UAIF0 clock divider alone, leaving UAIF0's
+16-bit slots in place and keeping the microphone PCM closed.
+The speaker pad agreed with 3.072 MHz, and its word-clock edge
+count rose from about 640 to about 1,270 over the same 6.7 ms
+observation span, consistent with doubling from 48 to 96 kHz.
+The seven-second nominal silent WAV reached PCM stop in about
+3.54 seconds. Thus UAIF0 controls effective speaker timing in
+this setup, including at least part of the frame pacing.
+The diagnostic clock values were withdrawn, and R100's normal
+audio configuration was restored.

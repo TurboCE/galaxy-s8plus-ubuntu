@@ -2275,3 +2275,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Compared the requested and observed speaker bit clock at 64
   bits per frame. The output pin only tracked 3.072 MHz after
   changing UAIF0 as well. The experiment was withdrawn.
+
+- Isolated the UAIF0 divider. Doubling that clock alone doubled the
+  speaker word-clock edge rate and halved the PCM playback time.
