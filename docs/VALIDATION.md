@@ -4505,3 +4505,45 @@ electrical comparison: I2S at MAX98506 DIN, the amplifier's local
 boost/analog supply, and differential PWM at the speaker contacts.
 The earlier #58 acoustic pass was on this handset but predates these
 measurements. R100 remains installed.
+
+### R100 Android speaker HAL parity check
+
+Read the matching Android audio HAL from the handset's SYSTEM partition
+with a read-only, no-journal-replay mount. The HAL's speaker route calls
+`do_open_spkamp_stream`, which opens and starts board PCM devices 7,
+11, 12 and 6 in that order and attempts a 1024-byte zero write. These
+devices map to RDMA7, WDMA3, WDMA4 and RDMA6. The two playback PCMs use
+48 kHz, stereo S16, 192 frames per period and two periods. The capture
+PCMs use stereo S16 at the same rate with 960 frames per period and four
+periods. Samsung's WDMA3 trigger also submits a real-time IPC request.
+
+An isolated R100 comparison allocated a separate private coherent DMA
+region for each stock alias. WDMA4 started after the test configured
+all four streams before triggering them and sent the WDMA3 real-time
+request after the triggers. WDMA3 and RDMA6 also entered their enabled
+states. RDMA7 stayed idle. The ordered seven-second ALSA playback
+completed and the microphone returned 337,920 frames without reproducing
+the ordered reference tones. Some firmware exchanges still ended in
+`-EPROTO` on asynchronous system messages. Accepting a memory-interface
+clock message for transport did not apply a memory clock floor.
+
+The entire host WDMA4 buffer at `0x82400000` retained its initial
+`0x5a5a` pattern over six observations. A second register snapshot,
+with the stock SPUM ASRC and SIFM3 selections applied, identified the
+actual WDMA4 hardware buffer as `0x80888000..0x80888780` in the
+firmware DRAM window. Its configured period was `0x3c0` bytes. The
+untouched host alias is therefore insufficient evidence for or against
+amplifier feedback. The second trial's parallel capture returned EIO
+and did not provide another acoustic measurement.
+
+A read-only diagnostic sampled all 960 words in the firmware-selected
+ring six times at one-second intervals. Every sample was zero in all
+six windows while RDMA0 was advancing. Since the ring was read without
+writing a test pattern into firmware memory, this cannot distinguish
+no write from a write of zeros. The parallel microphone read again
+returned EIO. No acoustic recovery was demonstrated by the stock HAL
+sequence. The same handset had passed a loopback test on kernel #58
+without userspace opening the stock auxiliary nodes. The Android HAL
+difference is real, but is insufficient to attribute the silence to
+that sequence alone. The firmware PCM tests were one-boot modules.
+R100 remains the installed kernel and the normal service is restored.

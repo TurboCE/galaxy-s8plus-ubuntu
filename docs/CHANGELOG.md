@@ -2244,3 +2244,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Compared the battery fuel gauge during repeated amplifier enable and
   mute windows. The device-wide current measurement did not isolate
   the boost supply or speaker output.
+
+### R100 Android HAL and WDMA4 ring comparison
+
+- Traced the handset's Android speaker HAL auxiliary PCM sequence and
+  compared it with the R100 DSM driver on hardware.
+- Verified that WDMA4 selected a firmware-internal ring, separate from
+  the host-provided PCM alias. Six snapshots of the internal ring were
+  zero during the test stream. Speaker output remains unresolved.
