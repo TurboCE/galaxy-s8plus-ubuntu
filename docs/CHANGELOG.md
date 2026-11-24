@@ -2308,3 +2308,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   recovered native PCM data at the pad.
 - Adding the stock ASRC0 bit stalled the native playback pointer
   with the comparison mixer format and clock fixed.
+
+### R100 amplifier feedback output and speaker pin drive checks
+
+- Verified the stock amp divider low byte during playback. Neither
+  temporarily disabling amp DOUT nor raising the three SoC I2S
+  pad drive fields one step recovered the acoustic reference.
+  Restored the installed R100 audio setup.

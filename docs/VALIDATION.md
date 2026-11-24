@@ -4770,3 +4770,33 @@ reported. This identifies the stall on this native setup when
 enabling ASRC0 without the Samsung firmware setup. It does not
 identify the amp-side fault when Calliope data is valid at the
 SoC pin. The temporary modules were withdrawn.
+
+### R100 amplifier DOUT and SoC speaker pin drive comparison
+
+Using the opt-in Calliope PCM path, compared the MAX98506 digital
+feedback output enabled, disabled, and enabled again. With TX
+muted, the comparison cleared only the DAI DOUT enable bit; the
+live input-selection register read `0xc8`, `0x48`, then `0xc8`.
+DIN stayed enabled. Gain, block enable and global enable remained
+`0x67`, `0x93` and `0x80`. The same low-level 48 kHz reference
+completed all three playbacks. Each parallel capture returned
+337,920 frames without reproducing the ordered 900/1300/1780 Hz
+reference. This check does not support feedback DOUT as the
+cause of silence in the tested setup.
+
+Raw I2C reads during playback found `0x1f = 0x00`, matching the
+Samsung board's divider low-byte override. The GPH0 BCLK, LRCLK
+and DOUT pads were already muxed to function 2. Changed only the
+drive-strength fields of those three pads from 0 to 1 and
+repeated the same stimulus. The register read back `0x00005400`.
+This kernel has module unloading disabled, so a separate
+one-shot diagnostic restored and verified `0x00000000`. The
+baseline, higher drive, and restored baseline playbacks each
+completed and captured 337,920 frames. None reproduced the
+ordered acoustic reference.
+
+Rebooted to the installed R100 audio service and confirmed
+WirePlumber and both ALSA devices. No diagnostic module or
+audio service override remains active. The amp-side I2S
+waveform and the boost and speaker-terminal signals remain
+unmeasured.
