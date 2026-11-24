@@ -4122,3 +4122,37 @@ the direct RDMA0 and SPUS OUT0 path. The factory primary microphone route
 uses IN3L through LHPF1 and ASRC1IN1L before AIF1 TX; R100 routes IN3L
 directly. These differences identify comparison targets. They do not
 establish which part of either path causes the acoustic failure.
+
+### R101–R104 factory audio path trials
+
+R101 tried changing the CS47L93 AIF1 clock domain at hw_params. The
+codec rejected the change with EBUSY because its DAI was already
+active. R103 selected the domain at link initialization and captured
+45 seconds at 48 kHz. A readback showed the desktop audio policy had
+reapplied the direct IN3L mux during the first run.
+
+The isolated R103 run paused and restored WirePlumber. A register
+snapshot during recording confirmed ASYNCCLK enabled, AIF1 TX1
+selecting ASRC1IN1L (0x90), the ASRC mixer selecting LHPF1 (0x60),
+and ASRC1 lane power enabled (0x2). The owner clapped three times
+near the primary microphone. Each channel recorded 2,160,000 frames.
+The baseline 100 ms RMS was 1,301 and the largest subsequent window
+was 1,444. There were no three distinct clap transients.
+
+R104 independently fed RDMA7 through SPUS OUT7, SIFS1, and UAIF4.
+Four repeated tone groups completed, with 10 distinct playback
+hardware-pointer samples per group. The owner reported hearing none.
+The kernel error-priority journal had no entries during the R104
+trial. The CA7 run bit was clear in the boot snapshot. Full Samsung
+DSM still requires the Calliope boot/ready handshake, the audio
+IOMMU firmware mapping, and ERAP transport and parameter setup.
+The OUT7 experiment covers only the downstream hardware selector.
+
+R101, R103 and R104 booted after protected-partition backup and BOOT
+readback checks. R102 was built and skipped because its microphone
+clock setup still used the failed R101 sequence. The host suite ran
+167 tests with 9 skipped and no failures.
+
+Restored the byte-identical R100 BOOT image with readback verification.
+USB serial confirmed R100 with GDM and the native audio unit active and
+both ALSA PCMs registered. The two route patches remain proposals.

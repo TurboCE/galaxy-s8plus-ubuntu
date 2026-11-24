@@ -1,0 +1,108 @@
+Subject: [PATCH] ASoC: trial the SM-G955N stock speaker output selector
+
+The Samsung mixer selects SPUS OUT7 for SIFS1 and routes SIFS1 to
+UAIF4. Feed RDMA7 directly into that same output selector to isolate
+the downstream hardware route from the DSM firmware processing.
+Keep this diagnostic separate from the primary microphone change.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -1,10 +1,10 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /*
+- * SM-G955N mono loudspeaker via RDMA0 -> SPUS SIFS1 -> UAIF4.
++ * SM-G955N mono loudspeaker via RDMA7 -> SPUS OUT7 -> SIFS1 -> UAIF4.
+  * Samsung's Exynos8895 board and ABOX driver define the route and register
+  * layout. The direct ABOX method is documented by the Galaxy Tab Active3
+  * mainline port. The Exynos8895 sample bank fields were verified against
+  * the handset's Calliope firmware and muted RDMA0 hardware trial.
+  */
+ #include <linux/bitfield.h>
+ #include <linux/clk.h>
+@@ -39,16 +39,16 @@
+ #define SPUS_CTRL0	0x0200
+ #define SPUS_CTRL1	0x0204
+ #define SPUS_CTRL3	0x020c
+-#define SPUS_BANK0	0x0220
++#define SPUS_BANK7	(0x0220 + 7 * 4)
+ #define UAIF4_CTRL0	0x0540
+ #define UAIF4_CTRL1	0x0544
+-#define RDMA0_CTRL0	0x1000
+-#define RDMA0_START	0x1008
+-#define RDMA0_END	0x100c
+-#define RDMA0_PERIOD	0x1010
+-#define RDMA0_POINT	0x1014
+-#define RDMA0_VOL	0x1018
+-#define RDMA0_STATUS	0x1020
++#define RDMA7_CTRL0	0x1700
++#define RDMA7_START	0x1708
++#define RDMA7_END	0x170c
++#define RDMA7_PERIOD	0x1710
++#define RDMA7_POINT	0x1714
++#define RDMA7_VOL	0x1718
++#define RDMA7_STATUS	0x1720
+ #define RDMA_ENABLE	BIT(0)
+ #define RDMA_PROGRESS	BIT(31)
+ #define RING_BYTES	SZ_16K
+@@ -66,9 +66,9 @@
+ #define MICBIAS1_BYPASS		BIT(1)
+ 
+ static const u32 saved_regs[] = {
+-	ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK0,
+-	UAIF4_CTRL0, UAIF4_CTRL1, RDMA0_CTRL0, RDMA0_START, RDMA0_END,
+-	RDMA0_PERIOD, RDMA0_POINT, RDMA0_VOL,
++	ROUTE_CTRL0, SPUS_CTRL0, SPUS_CTRL1, SPUS_BANK7,
++	UAIF4_CTRL0, UAIF4_CTRL1, RDMA7_CTRL0, RDMA7_START, RDMA7_END,
++	RDMA7_PERIOD, RDMA7_POINT, RDMA7_VOL,
+ };
+ 
+ static const u32 capture_regs[] = {
+@@ -124,7 +124,7 @@
+ 
+ static u32 dma_control(struct g955n_pcm *p)
+ {
+-	return p->capture ? CAP_DMA : RDMA0_CTRL0;
++	return p->capture ? CAP_DMA : RDMA7_CTRL0;
+ }
+ 
+ static u32 dma_status(struct g955n_pcm *p)
+@@ -257,7 +257,7 @@
+ 	if (ret) {
+ 		pcm->poisoned = true;
+ 		dev_err(pcm->abox->dev, "%s did not stop; retaining DMA ring until reboot\n",
+-			pcm->capture ? "WDMA1" : "RDMA0");
++			pcm->capture ? "WDMA1" : "RDMA7");
+ 	}
+ 	return ret;
+ }
+@@ -344,20 +344,20 @@
+ 		return 0;
+ 	}
+ 
+-	abox_update(sfr, SPUS_BANK0, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
++	abox_update(sfr, SPUS_BANK7, GENMASK(13, 7) | GENMASK(28, 23), 4 << 23);
+ 	writel(BIT(0), sfr + SPUS_CTRL3);
+-	writel(0x800000, sfr + RDMA0_VOL);
+-	abox_update(sfr, SPUS_CTRL0, GENMASK(3, 0), 0);
+-	abox_update(sfr, SPUS_CTRL1, GENMASK(18, 16), 0);
++	writel(0x800000, sfr + RDMA7_VOL);
++	abox_update(sfr, SPUS_CTRL0, GENMASK(31, 28), 0);
++	abox_update(sfr, SPUS_CTRL1, GENMASK(18, 16), 7 << 16);
+ 	abox_update(sfr, ROUTE_CTRL0, GENMASK(19, 16), 2 << 16);
+ 	abox_update(sfr, UAIF4_CTRL0, GENMASK(4, 0), BIT(2));
+ 	abox_update(sfr, UAIF4_CTRL1, GENMASK(28, 0),
+ 		    (9 << 24) | BIT(23) | (1 << 18) | (15 << 12));
+-	writel(lower_32_bits(addr), sfr + RDMA0_START);
+-	writel(lower_32_bits(addr) + bytes, sfr + RDMA0_END);
+-	writel(PERIOD_BYTES, sfr + RDMA0_PERIOD);
+-	writel(lower_32_bits(addr), sfr + RDMA0_POINT);
+-	abox_update(sfr, RDMA0_CTRL0, GENMASK(22, 19) | GENMASK(18, 16) |
++	writel(lower_32_bits(addr), sfr + RDMA7_START);
++	writel(lower_32_bits(addr) + bytes, sfr + RDMA7_END);
++	writel(PERIOD_BYTES, sfr + RDMA7_PERIOD);
++	writel(lower_32_bits(addr), sfr + RDMA7_POINT);
++	abox_update(sfr, RDMA7_CTRL0, GENMASK(22, 19) | GENMASK(18, 16) |
+ 		    GENMASK(13, 8) | GENMASK(5, 4) | RDMA_ENABLE,
+ 		    (8 << 19) | (9 << 8) | BIT(5));
+ 	return 0;

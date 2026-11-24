@@ -1,0 +1,48 @@
+Subject: [PATCH] ASoC: clock the SM-G955N capture AIF1 from ASYNCCLK
+
+The Samsung primary mic mixer sends IN3L through LHPF1 and ASRC1IN1L
+before AIF1 TX. Match the asynchronous AIF1 clock domain for this route
+using the existing 98.304 MHz FLL1, which is driven by MCLK2 on this port.
+Select the DAI clock during link initialization. The codec rejects clock
+domain changes once the DAI is active.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -451,15 +451,18 @@
+ 				  MADERA_CLK_SRC_FLL1, 98304000, SND_SOC_CLOCK_IN);
+ 	if (ret)
+ 		return ret;
+-	return snd_soc_dai_set_sysclk(dai, MADERA_CLK_SYSCLK_1,
+-				      98304000, SND_SOC_CLOCK_IN);
++	/* The Samsung route feeds AIF1 from ASRC1's asynchronous domain. */
++	ret = snd_soc_component_set_sysclk(dai->component, MADERA_CLK_ASYNCCLK_1,
++					  MADERA_CLK_SRC_FLL1, 98304000, SND_SOC_CLOCK_IN);
++	return ret;
+ }
+ 
+ static const struct snd_soc_ops g955n_mic_ops = { .hw_params = g955n_mic_clock };
+ 
+ static int g955n_mic_init(struct snd_soc_pcm_runtime *rtd)
+ {
+-	struct snd_soc_component *codec = snd_soc_rtd_to_codec(rtd, 0)->component;
++	struct snd_soc_dai *dai = snd_soc_rtd_to_codec(rtd, 0);
++	struct snd_soc_component *codec = dai->component;
+ 	unsigned int pin;
+ 	int ret;
+ 
+@@ -478,8 +481,12 @@
+ 					    MICBIAS1_SOFT_START | MICBIAS1_BYPASS,
+ 					    FIELD_PREP(MADERA_MICB1_LVL_MASK, 3) |
+ 					    MICBIAS1_SOFT_START);
+-	/* IN3 is a dedicated digital input on the CS47L93. */
+-	return ret < 0 ? ret : 0;
++	if (ret < 0)
++		return ret;
++
++	/* Select the AIF1 clock domain before the codec DAI is active. */
++	return snd_soc_dai_set_sysclk(dai, MADERA_CLK_ASYNCCLK_1,
++				      98304000, SND_SOC_CLOCK_IN);
+ }
+ 
+ static const struct snd_soc_dapm_widget mic_widgets[] = {

@@ -2160,3 +2160,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   ABOX playback trigger starts the serial clock.
 - Leave the CS47L93 dedicated IN3 input mode at its codec default and
   retain the board-specific MICBIAS1A setup.
+
+### Linux 6.18 factory audio route trials
+
+- Add the CS47L93 AIF1 ASYNCCLK setup as a capture trial for the
+  Samsung LHPF1 and ASRC1IN1L route.
+- Add a separate RDMA7 trial feeding the factory SPUS OUT7 selector.
+  It supplies the hardware serial path without running Calliope DSM.
