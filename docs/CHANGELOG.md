@@ -2417,3 +2417,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   and native microphone capture. Verified both start orders,
   either stream finishing first, and simultaneous PipeWire
   transport. Lower speaker audibility remains unresolved.
+
+### R100 earpiece acoustic capture
+
+- The MacBook microphone detected the complete earpiece test
+  pattern in two runs at the existing Voice gain. The handset
+  microphone did not reliably detect it in this setup.

@@ -5278,3 +5278,19 @@ The handset and Mac microphones captured 430,080 and 556,800
 frames. Neither reproduced the coded signal. This qualifies
 duplex PCM transport in both orders and leaves physical lower
 speaker output open. The test mode remains opt-in.
+
+### R100 earpiece capture on two microphones
+
+Played the coded seven-second reference only through Voice PCM 2
+at the existing -18 dB earpiece gain. Verified the lower speaker
+PCM stayed closed throughout. Both streams completed and each
+run captured 368,640 handset frames and 556,800 MacBook frames.
+The MacBook microphone matched all 20 tone windows at both the
+original digital level and a 1.55-times amplitude repeat, each
+with empirical p=0.0025 and no clipping. The handset microphone
+did not match the code reliably at either level (11/20,
+p=0.1900 and 9/20, p=0.8300). This confirms external audibility
+of the earpiece at its existing gain. Earpiece pickup by the
+handset microphone was not resolved in this setup. No recordings
+were kept. The original HiFi default and Voice gain were verified
+after testing.
