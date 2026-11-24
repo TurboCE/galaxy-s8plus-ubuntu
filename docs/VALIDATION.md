@@ -5767,3 +5767,43 @@ No PCM recordings were retained. There is still no independent
 electrical measurement at MAX98506 DIN, BCLK or WS under both #58
 and R100. A matched bench measurement would distinguish delivery
 to the amplifier from its boost and output stages.
+
+
+### MAX98506 I2C transactions during ALSA playback
+
+A temporary observer on the Exynos I2C adapter recorded outgoing
+messages addressed to MAX98506 at 0x31 and the adapter return
+values. The observer forwarded the original transactions and
+restored the adapter callback after capture. The trace window
+starts before UCM selection and ends after PCM teardown. It does
+not cover cold boot or the first codec probe. One-byte write
+messages in combined reads only select a register and are counted
+separately. All recorded transfers returned the expected number
+of messages.
+
+Used the same five-second, 48 kHz stereo S16 WAV on the same
+handset. Playback and parallel handset capture succeeded on all
+three runs. #58 and R100 ASRC0 used the same 64 KiB ring and
+8 KiB periods. R100 default used its supported 16 KiB and 4 KiB
+geometry. The observed writes are register/value byte pairs.
+
+| Configuration | Value writes | Read selectors | Final enable sequence | Stop sequence |
+| --- | ---: | ---: | --- | --- |
+| #58 | 7 | 0 | `36 80` → `36 90` → `38 80` | `38 00` |
+| R100 default | 18 | 9 | `1a 46` → `36 93` → `38 80` | `38 00` → `36 00` |
+| R100 ASRC0 | 19 | 34 | `1a 46` → `36 93` → `38 80` | `38 00` → `36 00` |
+
+Before enable, #58 wrote gain `2d 00` then `2d 01` during UCM
+selection. Both R100 runs wrote `2d 67` during stream setup.
+Only the R100 ASRC0 run wrote `36 03` during preparation.
+The final block-enable and global-enable writes were submitted
+about 0.10 ms apart on #58 and about 4.0 ms apart on both R100
+runs. Earlier direct amp snapshots showed `37=f0` on #58 and
+`37=00` on R100. None of these captured playback runs wrote
+register 0x37. Its value difference is a pre-existing register
+state observed by readback.
+
+This test confirms different I2C command sequences. It does not
+test acoustic output or measure the amplifier's incoming I2S
+PCM. The observer modules were removed by reboot. The handset
+was returned to the previously verified R100 ASRC0 trial state.

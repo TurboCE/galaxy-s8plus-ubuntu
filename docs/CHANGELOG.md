@@ -2544,3 +2544,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Tested the missing Samsung RDMA0 synchronization command and the
   PMU audio pad release sequence. Neither restored speaker output.
   Removed both diagnostic changes.
+
+
+### MAX98506 I2C playback write comparison
+
+- Recorded the bytes submitted to the EXYNOS I2C adapter on #58,
+  stock R100 audio, and R100 Calliope ASRC0. Both R100 paths differed
+  from #58 in gain, enable sequence, and teardown writes.
