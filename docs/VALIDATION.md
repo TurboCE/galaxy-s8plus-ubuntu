@@ -4487,3 +4487,21 @@ the speaker contacts remain open. The available remote readings do
 not distinguish an electrical-path fault from an amplifier or
 loudspeaker fault. No boot or vendor partitions were written. The
 temporary input routing and supply-monitor comparisons were removed.
+
+### R100 speaker load differential
+
+During two verified silent DSM streams, alternated the MAX98506
+global enable on and off three times each and read the whole-device
+MAX77865 battery current. All six amp states read back as requested in
+each run. The measured difference changed direction across repeats.
+USB stayed attached, and the gauge measures net battery current across
+the whole handset. It cannot establish whether the amplifier's local
+boost converter or speaker output is working. The original global
+enable was restored during each stream and the amplifier disabled as
+normal at teardown. The trial audio service was then removed.
+
+The SoC output and WDMA evidence leave three checks requiring a local
+electrical comparison: I2S at MAX98506 DIN, the amplifier's local
+boost/analog supply, and differential PWM at the speaker contacts.
+The earlier #58 acoustic pass was on this handset but predates these
+measurements. R100 remains installed.

@@ -2238,3 +2238,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   feedback stayed zero during playback.
 - Recorded MAX98506 supply-monitor readback limits. Removed the one-boot
   diagnostic modules from the normal audio startup.
+
+### R100 amplifier load comparison
+
+- Compared the battery fuel gauge during repeated amplifier enable and
+  mute windows. The device-wide current measurement did not isolate
+  the boost supply or speaker output.
