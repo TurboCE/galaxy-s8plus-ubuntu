@@ -4104,3 +4104,21 @@ the microphone's acoustic response open.
 PipeWire and WirePlumber exposed the internal speaker and microphone as
 the R100 desktop defaults. The duplex test captured 461,824 frames
 and saw both PCM hardware pointers advance in 62 samples.
+
+### R100 owner-assisted acoustic test
+
+After the owner restarted the handset, the pinned USB serial and USB SSH
+paths returned. Two direct ALSA playback runs completed with three
+ascending-pitch markers per run. The owner
+reported hearing none. An independent 18-second direct ALSA capture
+returned 864,000 frames per channel while the owner clapped three times
+near the bottom microphone port. The 100 ms RMS baseline was 4,185 and
+the maximum after the baseline window was 4,304. The capture showed no
+three distinct clap transients. Only summary measurements were kept.
+
+A read-only inspection of the handset's Samsung SYSTEM mixer confirmed
+the speaker's DSM-enabled UAIF4 route via SPUS OUT7 and SIFS1. R100 uses
+the direct RDMA0 and SPUS OUT0 path. The factory primary microphone route
+uses IN3L through LHPF1 and ASRC1IN1L before AIF1 TX; R100 routes IN3L
+directly. These differences identify comparison targets. They do not
+establish which part of either path causes the acoustic failure.
