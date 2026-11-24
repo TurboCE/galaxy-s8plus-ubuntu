@@ -5546,3 +5546,35 @@ with global enable 0x80 and advancing RDMA. R100 again did not
 reproduce the ordered tones. The temporary settings and the original
 driver were restored. Microphone samples were analyzed in memory and
 not retained.
+
+
+### R100 AUDIF and UAIF4 divider comparison
+
+The Samsung Exynos8895 clock data lists AUDIF as the parent of the
+UAIF0 and UAIF4 dividers. On the handset, #58 used AUDIF register
+offset 0x1800 value 0xbf (divide by 192, 6.144 MHz). R100 used
+0x17 (divide by 24, 49.152 MHz). The synchronized playback and
+capture measurements above saw the same approximately 1.536 MHz
+bit clock on both kernels.
+
+On R100, replayed the same five-second 48 kHz S16 stereo WAV through
+the native ALSA PCM (hw:0,0, period 1024 frames, buffer 4096 frames)
+in three playback-only runs. Capture was closed and Calliope/DSM was
+disabled in all three. The test modules were built against the
+running kernel and the modified divider fields were read back.
+
+| AUDIF divider | UAIF4 divider (offset 0x1838) | ALSA result | Sampled TX-active interval |
+| --- | --- | --- | --- |
+| 24 (production R100) | 32 | Exit 0 | 5.056 s |
+| 192 | 32 | Exit 1 | 0.272 s |
+| 192 | 4 (field 0x3) | Exit 0 | 5.056 s |
+
+With the UAIF4 divisor unchanged, the lower parent rate also lowers
+the derived UAIF4 rate by a factor of eight. The paired settings
+preserve the 1.536 MHz divider target. The paired run showed RDMA0
+progress and amplifier global enable. GPIO pad polling reported no
+word-clock edges in the playback-only runs, including the control,
+so this experiment establishes PCM transport with the paired
+dividers. The electrical I2S signal at the amplifier, acoustic
+output and duplex behavior under the paired settings remain
+unverified. The trial restored the original divider fields on stop.

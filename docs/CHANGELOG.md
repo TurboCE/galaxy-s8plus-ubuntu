@@ -2491,3 +2491,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   MAX98506 reads during a matched test. Matching the amplifier start
   order and applying the measured #58 amplifier settings in separate
   R100 trials did not recover the ordered acoustic reference.
+
+
+### R100 native speaker AUDIF divider comparison
+
+- On the handset, matching the #58 AUDIF divider alone interrupted
+  direct ALSA playback. Pairing it with the UAIF4 divider restored
+  full-length PCM transport. Restored the production R100 module
+  after the one-boot tests.
