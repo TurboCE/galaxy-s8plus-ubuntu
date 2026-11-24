@@ -2338,3 +2338,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Check PipeWire errors on the selected built-in nodes only. Distinguish the
   recorder's expected SIGINT exit from an unexpected recording failure,
   and include new audio-specific kernel errors in the transport result.
+
+### R100 loudspeaker and receiver route audit
+
+- Confirmed during a GNOME/PipeWire playback that the MAX98506
+  loudspeaker enables assert while the CS47L93 receiver remains idle.
+  The current 6.18 ALSA card has no receiver playback PCM.

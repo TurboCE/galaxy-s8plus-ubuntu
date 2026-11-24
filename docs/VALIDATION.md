@@ -4905,3 +4905,22 @@ silent follow-up verified the corrected diagnostic. It observed
 194 playback and 226 capture pointer values, 218,400 capture frames
 after startup, zero hardware error growth, and zero new kernel faults
 or audio errors. No raw microphone recording was retained.
+
+### R100 physical speaker route selection
+
+Samsung's dream2lte board routes the media speaker through ABOX
+UAIF4 to MAX98506 at I2C address 0x31. It routes the receiver through
+the separate CS47L93 HPOUT3/4 outputs, with UAIF0 as the codec link.
+The R100 machine driver registers MAX98506 playback as PCM 0 and
+CS47L93 AIF1 as capture-only PCM 1. Ubuntu's HiFi Speaker targets
+`hw:Audio,0` and has no separate Receiver playback device.
+
+The default PipeWire sink played the reference while a temporary
+read-only module sampled amp blocks/global and the CS47L93 receiver
+enable/status masks. The MAX98506 read 0x00/0x00 while idle,
+0x90/0x80 in three running samples, and 0x00/0x00 after playback.
+CS47L93 HPOUT3/4 enable and status masks read zero in all five
+snapshots. The test confirms selection and power sequencing for
+the bottom media speaker. It does not establish sound at that
+speaker or test the unexposed receiver playback path. No persistent
+routing or volume settings were changed.
