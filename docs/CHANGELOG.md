@@ -2278,3 +2278,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Isolated the UAIF0 divider. Doubling that clock alone doubled the
   speaker word-clock edge rate and halved the PCM playback time.
+
+### R100 controlled kernel58 audio comparison
+
+- Reject reordered or off-time test tones in the desktop acoustic
+  check. The archived kernel58 positive result still passes, and a
+  silent R100 capture that fooled the old detector is rejected.
+- Compared ASRC0, the WDMA1 alias and the RDMA0 ring size one at a
+  time. Audited the live IOMMU pages. The expected acoustic sequence
+  was not recovered.

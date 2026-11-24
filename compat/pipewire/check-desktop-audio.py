@@ -80,9 +80,17 @@ def statistics(raw):
                   channels_identical=samples[::2] == samples[1::2],
                   quarter_second_tone_amplitudes=windows)
     result['nonconstant_signal'] = result['distinct_values'] > 16 and rms >= 1
+    # Playback starts 0.8 s after capture, and the first 0.25 s is discarded.
+    # Allow for startup latency but require both tones in their own time slots.
+    tone_windows = ((2, 6), (6, 11))
+    matches = [
+        [i for i in range(first, min(last, len(windows)))
+         if windows[i][tone] > 5 and windows[i][tone] > 5 * max(windows[i][1 - tone], .01)]
+        for tone, (first, last) in enumerate(tone_windows)
+    ]
+    result['matched_tone_windows'] = matches
     result['synthetic_tone_response_detected'] = all(
-        any(pair[index] > 5 and pair[index] > 5 * max(pair[1-index], .01)
-            for pair in windows) for index in (0, 1))
+        any(b == a + 1 for a, b in zip(match, match[1:])) for match in matches)
     del mono[:]
     del samples[:]
     return result

@@ -63,6 +63,22 @@ class DesktopAudioTests(unittest.TestCase):
             self.assertLess(low, 15)
             self.assertGreater(high, 990)
 
+    def test_speaker_response_requires_the_expected_tone_order_and_timing(self):
+        def recording(tones):
+            values = [0] * (audio.RATE * 4)
+            for start, frequency in tones:
+                start = round(start * audio.RATE)
+                for i in range(audio.RATE // 2):
+                    values[start + i] = round(1000 * math.sin(2 * math.pi * frequency * i / audio.RATE))
+            return audio.statistics(stereo(values))
+
+        nominal = recording(((1.0, 523.25), (2.0, 697.0)))
+        reversed_tones = recording(((1.0, 697.0), (2.0, 523.25)))
+        late = recording(((2.75, 523.25), (3.25, 697.0)))
+        self.assertTrue(nominal['synthetic_tone_response_detected'])
+        self.assertFalse(reversed_tones['synthetic_tone_response_detected'])
+        self.assertFalse(late['synthetic_tone_response_detected'])
+
     def test_internal_hardware_errors_are_separate_from_client_errors(self):
         rows = '\n'.join([
             'R 49 2048 48000 1us 1us 0.00 0.00 2 S16LE 2 48000 alsa_output.platform-sound',

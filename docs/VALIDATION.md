@@ -4660,3 +4660,43 @@ The seven-second nominal silent WAV reached PCM stop in about
 this setup, including at least part of the frame pacing.
 The diagnostic clock values were withdrawn, and R100's normal
 audio configuration was restored.
+
+### R100 one-variable comparison with the working kernel58 audio setup
+
+The archived kernel58 PipeWire test played 523.25 Hz and 697 Hz in
+sequence at 48 kHz. Reapplying the stricter timing rule to the archive
+matches windows 3–5 and 6–9 respectively. On unmodified R100 the
+same stimulus and capture through PipeWire completed the transport
+checks, but matched only one window for the first tone and none for
+the second. The old unordered detector also reported success once
+with a silent reference on R100. Requiring two consecutive windows
+per tone within the expected intervals rejected that silent control.
+The test retained no PCM.
+
+With the current Calliope trial, applied ASRC0 Off, On, then Off.
+The SPUS readback was 0x2, 0x3, then 0x2 while the rest of the speaker
+route stayed fixed. All three direct ALSA trials completed. None
+matched the ordered reference. RDMA0 used `0x81000000..0x81004000`,
+with 4096 bytes per period. Its fixed start address agrees with the
+Samsung RDMA0 source. The read-only IOMMU audit matched four out of
+four pages to the live ALSA ring in each run. In the same runs R100
+WDMA1 used a dynamically assigned address. The Samsung driver
+requests the fixed WDMA1 alias `0x82100000`.
+
+A separate Off, On, Off address comparison kept ASRC0 Off and
+mapped the same capture allocation a second time at the Samsung
+WDMA1 alias. While it was selected, the WDMA1 bank read
+`0x82100000..0x82104000`. All four pages matched the ALSA capture
+ring, PCM finished, and the expected tone sequence was absent in
+all three runs.
+
+The playback ring comparison went from 16 KiB to 64 KiB and back,
+holding the 4096-byte period, 48 kHz timing, RDMA0 start address
+and native WDMA1 path fixed. The audit matched all 16 pages for
+the 64 KiB ring and its RDMA0 end read `0x81010000`. ALSA playback
+and capture completed at every size. The longer ring produced
+only one above-threshold window for the second reference tone,
+so the full ordered sequence was not recovered. The repository's
+older vendor audio profile requests a 64 KiB buffer, but the
+archived positive test does not include its negotiated period or
+buffer geometry. The temporary modules were withdrawn.
