@@ -2452,3 +2452,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   15-second monitoring run. Amp enables and SoC data stayed
   active. Firmware power responses remained zero at both levels
   and no feedback DMA was observed.
+
+
+### R100 Calliope playback boot gear release
+
+- Acknowledge the firmware's boot gear release during an active PCM
+  stream and hold its configured CA7 clock through playback. On the
+  handset, the same 30-second stimulus passed the previous interruption
+  point without an ALSA XRUN.

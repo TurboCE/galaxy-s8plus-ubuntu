@@ -547,6 +547,14 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 		}
 		ipc = readl(sram + IPC_RX);
 		message = readl(sram + IPC_RX + 8);
+		if (ipc == IPC_SYSTEM && message == IPC_CHANGE_GEAR &&
+		    readl(sram + IPC_RX + 12) == ABOX_GEAR_RELEASE &&
+		    readl(sram + IPC_RX + 16) == ABOX_BOOT_GEAR_ID) {
+			/* Keep the fixed CA7 clock while the PCM stream is active. */
+			writel(0, sram + IPC_RX_ACK);
+			dev_dbg(dev, "Calliope released the boot gear during PCM\n");
+			continue;
+		}
 		if (ipc == IPC_SYSTEM && message == IPC_REPORT_FAULT) {
 			ret = calliope_report_fault(dev, sram, dram);
 			break;

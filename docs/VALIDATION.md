@@ -5411,3 +5411,24 @@ establish reception at MAX98506 DIN or actual analog power.
 Returned to the installed R100 ABOX module, verified WirePlumber,
 1.536 MHz microphone clock and receiver gain 92/92. No raw
 recordings were retained.
+
+
+### R100 playback XRUN on Calliope boot gear release
+
+An R100 one-boot module recorded ALSA application and hardware frame
+positions, RDMA0 status and Calliope completion. The 30-second speaker
+fixture reproduced the interruption after about 17.22 seconds. Sampling
+before the failure gave an ALSA hardware-position rate of about 48,005
+frames per second for the 48 kHz stream. The driver reported 4,096 frames
+queued when it stopped. The firmware had sent ABOX_CHANGE_GEAR with
+gear 12 and boot request ID 0xb00d. The PCM loop returned -EPROTO, then
+the PCM worker stopped the stream as XRUN.
+
+A second one-boot module acknowledged this exact release without changing
+the active CA7 clock. It received the release at about 17.22 seconds
+and played the full waveform as one stream. Host wall time was 30.518
+seconds, including startup. There was no XRUN and firmware stop, free and
+close all returned zero. The same logic built in the repository helper,
+and all eight desktop audio tests passed. This trial establishes the
+cause and fix for the reproduced stream interruption. Audible lower
+speaker output remains unverified. No microphone recordings were retained.
