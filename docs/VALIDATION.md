@@ -5606,3 +5606,44 @@ module directory. To revert the profile, remove
 `/etc/modprobe.d/g955n-audif-k58.conf` and the module override at
 `/lib/modules/6.18.0-g955n-usb-r100/updates/g955n-audif-k58/g955n-abox-power-test.ko`,
 refresh module dependencies for that release, and reboot.
+
+
+### Lower speaker comparison with the applied #58 AUDIF profile
+
+Replayed the same five-second, 48 kHz stereo fixture through the
+lower speaker at the same PipeWire volume on the same handset. Both
+applications completed on the baseline R100 and on the temporary #58
+BOOT. The handset microphone picked up both expected frequencies in
+order on #58, with observed 523.25 Hz and 697 Hz amplitudes of about
+48 and 116 counts respectively in the sampled windows. R100 stayed
+at or below 0.04 counts in those windows. No PCM recordings were kept.
+
+Compared two active-playback snapshots per kernel. All 15 sampled
+ABOX CMU registers agreed, including the PLL, AUDIF, UAIF0 and UAIF4
+muxes, dividers and clocks. UAIF4 control and format matched at
+0x01000005 and 0x0984f000. GPH0-5 through GPH0-7 had the same mux,
+pull and drive fields. GPH0-0 was muxed and active on #58 only.
+Samsung defines that pin as the codec MCLK. The MAX98506 selected
+BCLK in both runs. The two direct amplifier dumps matched in 28 of
+31 registers from 0x1a through 0x38. The active differences were
+0x2d=0x01/0x67, 0x36=0x90/0x93 and 0x37=0xf0/0x00 for #58/R100.
+
+In two temporary native R100 trials, replayed with the same test
+settings and with the five SPUS banks at offsets 0x220–0x230 set to
+the live #58 values. With ASRC0 enabled, the amplifier enabled
+normally but RDMA0 stayed at 0x80000020 and the PipeWire stream
+stalled. The test processes were stopped after the timeout. With
+ASRC0 bypassed, playback completed and the microphone captured
+258,048 frames with no time-ordered acoustic reference. The latter
+test verified all five bank values during playback. These trials
+show that the #58 register image depends on more of the #58 ABOX
+setup than these SPUS controls alone. They do not identify which
+remaining difference causes the original R100 silence.
+
+The original R100 BOOT was restored with a full partition hash
+readback. The temporary speaker modules were removed. The applied
+6.144 MHz AUDIF profile is retained. Both kernels had low readback
+on GPH0-7 in this comparison, including the audible #58 run.
+Therefore this GPIO method cannot decide whether valid serial words
+reach MAX98506 DIN. This test did not measure DIN at the amplifier,
+boost voltage, or differential output at the speaker contacts.

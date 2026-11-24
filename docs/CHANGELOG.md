@@ -2507,3 +2507,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   UAIF0/UAIF4 at 1.536 MHz. Enable it on the R100 handset at boot.
 - Direct lower-speaker PCM playback and microphone recording completed
   simultaneously. The recording did not detect the speaker reference.
+
+
+### Paired #58/R100 lower speaker register comparison
+
+- Reproduced the acoustic reference on #58 and the silence on R100
+  with the same PipeWire stimulus on the same handset.
+- Matched the #58 SPUS banks in two R100 trial modules. Enabling ASRC0
+  stalled RDMA0. The bank changes alone allowed a full stream without
+  acoustic output. Restored the installed audio module and kept the
+  6.144 MHz AUDIF profile.
