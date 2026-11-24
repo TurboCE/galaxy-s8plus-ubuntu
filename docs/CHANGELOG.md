@@ -2352,3 +2352,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Tested the receiver codec's tone route independently of the lower
   speaker and restored the mixer. Recorded an OUT3 Demux error
   propagation defect shared by Samsung's driver and Linux 6.18.
+
+### R100 speaker and receiver driver corrections
+
+- Propagate CS47L92 OUT3 demux errors and preserve the previous hardware
+  route on programming failure when recovery succeeds. Verified the
+  patched module on the handset.
+- Read the firmware-owned RDMA0 position for Calliope playback independent
+  of the native DMA channel. Leave native playback and capture unchanged.
+- Select the Samsung HPOUT4 receiver route when UCM enables HiFi
+  without enabling the receiver output or changing PCM assignments.

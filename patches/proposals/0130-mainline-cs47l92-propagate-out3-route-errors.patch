@@ -1,0 +1,164 @@
+Subject: [PATCH] ASoC: cs47l92: propagate OUT3 demux programming errors
+
+Read the original output state before switching the analog path. Do
+not update DAPM with the requested route when register programming
+fails. Restore the previous selector, mono mode and output enables in
+that order where possible, preserving the original error.
+
+diff --git a/sound/soc/codecs/cs47l92.c b/sound/soc/codecs/cs47l92.c
+--- a/sound/soc/codecs/cs47l92.c
++++ b/sound/soc/codecs/cs47l92.c
+@@ -49,6 +49,31 @@
+ 	"HPOUT4",
+ };
+
++static int cs47l92_restore_out3(struct regmap *regmap, unsigned int outputs,
++				unsigned int mode)
++{
++	unsigned int enable_mask = MADERA_OUT3L_ENA | MADERA_OUT3R_ENA;
++	int ret;
++
++	ret = regmap_update_bits(regmap, MADERA_OUTPUT_ENABLES_1, enable_mask, 0);
++	if (ret)
++		return ret;
++
++	usleep_range(2000, 3000);
++	ret = regmap_update_bits(regmap, MADERA_OUTPUT_ENABLES_1,
++				 MADERA_EP_SEL_MASK, outputs & MADERA_EP_SEL_MASK);
++	if (ret)
++		return ret;
++
++	ret = regmap_update_bits(regmap, MADERA_OUTPUT_PATH_CONFIG_3L,
++				 MADERA_OUT1_MONO_MASK, mode & MADERA_OUT1_MONO_MASK);
++	if (ret)
++		return ret;
++
++	return regmap_update_bits(regmap, MADERA_OUTPUT_ENABLES_1,
++				  enable_mask, outputs & enable_mask);
++}
++
+ static int cs47l92_put_demux(struct snd_kcontrol *kcontrol,
+ 			     struct snd_ctl_elem_value *ucontrol)
+ {
+@@ -57,75 +82,72 @@
+ 	struct snd_soc_dapm_context *dapm =
+ 		snd_soc_component_get_dapm(component);
+ 	struct cs47l92 *cs47l92 = snd_soc_component_get_drvdata(component);
+-	struct madera_priv *priv = &cs47l92->core;
+-	struct madera *madera = priv->madera;
++	struct madera *madera = cs47l92->core.madera;
+ 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
+-	unsigned int ep_sel, mux, change, cur;
+-	bool out_mono;
+-	int ret;
++	unsigned int enable_mask = MADERA_OUT3L_ENA | MADERA_OUT3R_ENA;
++	unsigned int ep_sel, mux, outputs, mode;
++	bool change;
++	int ret, restore;
+
+-	if (ucontrol->value.enumerated.item[0] > e->items - 1)
++	mux = ucontrol->value.enumerated.item[0];
++	if (mux >= e->items)
+ 		return -EINVAL;
+
+-	mux = ucontrol->value.enumerated.item[0];
+-
++	ep_sel = mux << e->shift_l;
+ 	snd_soc_dapm_mutex_lock(dapm);
++	ret = regmap_read(madera->regmap, MADERA_OUTPUT_ENABLES_1, &outputs);
++	if (ret)
++		goto unlock;
+
+-	ep_sel = mux << e->shift_l;
+-
+-	change = snd_soc_component_test_bits(component, MADERA_OUTPUT_ENABLES_1,
+-					     MADERA_EP_SEL_MASK,
+-					     ep_sel);
++	change = (outputs & MADERA_EP_SEL_MASK) != ep_sel;
+ 	if (!change)
+-		goto end;
++		goto unlock;
+
+-	ret = regmap_read(madera->regmap, MADERA_OUTPUT_ENABLES_1, &cur);
+-	if (ret != 0)
+-		dev_warn(madera->dev, "Failed to read outputs: %d\n", ret);
+-
+-	/* EP_SEL should not be modified while HPOUT3 or 4 is enabled */
+-	ret = regmap_update_bits(madera->regmap, MADERA_OUTPUT_ENABLES_1,
+-				 MADERA_OUT3L_ENA | MADERA_OUT3R_ENA, 0);
++	ret = regmap_read(madera->regmap, MADERA_OUTPUT_PATH_CONFIG_3L, &mode);
+ 	if (ret)
+-		dev_warn(madera->dev, "Failed to disable outputs: %d\n", ret);
++		goto unlock;
+
+-	usleep_range(2000, 3000); /* wait for wseq to complete */
++	/* EP_SEL and mono mode must only change with OUT3 disabled. */
++	ret = regmap_update_bits(madera->regmap, MADERA_OUTPUT_ENABLES_1,
++				 enable_mask, 0);
++	if (ret)
++		goto rollback;
+
++	usleep_range(2000, 3000);
+ 	ret = regmap_update_bits(madera->regmap, MADERA_OUTPUT_ENABLES_1,
+-				 MADERA_EP_SEL, ep_sel);
+-	if (ret) {
+-		dev_err(madera->dev, "Failed to set OUT3 demux: %d\n", ret);
+-	} else {
+-		out_mono = madera->pdata.codec.out_mono[2 + mux];
++				 MADERA_EP_SEL_MASK, ep_sel);
++	if (ret)
++		goto rollback;
+
+-		ret = madera_set_output_mode(component, 3, out_mono);
+-		if (ret < 0)
+-			dev_warn(madera->dev,
+-				 "Failed to set output mode: %d\n", ret);
+-	}
++	ret = madera_set_output_mode(component, 3,
++				     madera->pdata.codec.out_mono[2 + mux]);
++	if (ret)
++		goto rollback;
+
+ 	ret = regmap_update_bits(madera->regmap, MADERA_OUTPUT_ENABLES_1,
+-				 MADERA_OUT3L_ENA | MADERA_OUT3R_ENA, cur);
+-	if (ret) {
+-		dev_warn(madera->dev, "Failed to restore outputs: %d\n", ret);
+-	} else {
+-		/* wait for wseq */
+-		if (cur & (MADERA_OUT3L_ENA | MADERA_OUT3R_ENA))
+-			msleep(34); /* enable delay */
+-		else
+-			usleep_range(2000, 3000); /* disable delay */
+-	}
++				 enable_mask, outputs & enable_mask);
++	if (ret)
++		goto rollback;
+
+-end:
++	if (outputs & enable_mask)
++		msleep(34);
++	else
++		usleep_range(2000, 3000);
++
++unlock:
+ 	snd_soc_dapm_mutex_unlock(dapm);
++	if (ret)
++		return ret;
+
+ 	ret = snd_soc_dapm_mux_update_power(dapm, kcontrol, mux, e, NULL);
+-	if (ret < 0) {
+-		dev_err(madera->dev, "Failed to update demux power state: %d\n", ret);
+-		return ret;
+-	}
++	return ret < 0 ? ret : change;
+
+-	return change;
++rollback:
++	restore = cs47l92_restore_out3(madera->regmap, outputs, mode);
++	if (restore)
++		dev_err(madera->dev, "Failed to restore OUT3 after route error %d: %d\n",
++			ret, restore);
++	goto unlock;
+ }
+
+ static SOC_ENUM_SINGLE_DECL(cs47l92_outdemux_enum,

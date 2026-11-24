@@ -4952,3 +4952,45 @@ change despite a failed register write, since the final return is
 derived from the DAPM update and the change flag. Readback confirmed
 the actual HPOUT4 selection in this trial. There was no evidence
 that this error path was taken. No codec driver changes were made.
+
+### R100 receiver demux and Calliope playback position
+
+The CS47L92 route control now checks the original output enable and
+mono registers before writing. It disables OUT3, selects the new
+output and mode, and restores the enable bits in that order. A failed
+register operation returns its original errno and does not advance
+the DAPM route. It attempts to restore the saved selection, mode and
+enable state. The host fault simulation covered failing reads and
+each switch write as well as success and a repeated identical route.
+
+The exact-R100 ARM64 codec module was installed with a verified copy
+of the original. The live build ID matched after reboot. With the
+receiver muted, HPOUT4, HPOUT3 and HPOUT4 read back as 0x8000,
+0x0000 and 0x8000 respectively. The default loudspeaker and
+microphone remained on PCM devices 0 and 1. The installed codec
+module remains in use.
+
+Samsung's Calliope firmware programs RDMA0, including on variants
+where the native speaker code uses RDMA7. The optional driver's
+ALSA pointer and delayed period callbacks used the native RDMA
+status for both paths. The updated compatibility patch uses RDMA0
+status for Calliope playback, retains the configured native RDMA
+status, and retains WDMA1 for capture. The patch applied on both
+native route layouts and the exact-R100 ARM64 build passed.
+A host simulation checked all three status offsets.
+
+In a one-boot Calliope test using the RDMA7-backed native code, a
+seven-second silent duplex test completed with 104 distinct ALSA
+playback positions and 337,920 microphone frames. The firmware log
+reported RDMA0 hardware progress without an IPC pointer update and
+successful stop, free and close. This qualifies the corrected
+hardware pointer path. It does not qualify acoustic playback.
+
+Installed the model-specific UCM HiFi setting for HPOUT4 on R100.
+After WirePlumber restarted, OUT3 still selected HPOUT4 and both
+receiver digital switches read off. Speaker and Mic still resolved
+to devices 0 and 1. The native desktop silent duplex test then
+passed with 194 playback positions, 226 capture positions and zero
+new ALSA hardware or audio kernel errors. The CS47L92 module and
+UCM update remain installed. The one-boot firmware trial ended
+with the native playback path as the default.

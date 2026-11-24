@@ -3,7 +3,9 @@ Subject: [PATCH] ASoC: connect the SM-G955N ALSA ring to Calliope
 For the optional DSM path, give the existing ALSA buffer to the Calliope
 worker and let its mailbox manage RDMA0. Capture can start on an already
 prepared microphone PCM; its setup stays serialized with DSM startup.
-Build with the Calliope companion code.
+Use the firmware's RDMA0 status for playback positions and period
+notifications, including when the native driver uses another RDMA
+channel. Build with the Calliope companion code.
 
 --- a/sound/soc/samsung/g955n-abox-speaker.c
 +++ b/sound/soc/samsung/g955n-abox-speaker.c
@@ -15,7 +17,7 @@ Build with the Calliope companion code.
  #include <linux/mfd/syscon.h>
  #include <linux/module.h>
  #include <linux/mutex.h>
-@@ -27,7 +28,12 @@
+@@ -27,7 +28,13 @@
  #include <linux/mfd/madera/core.h>
  #include <linux/mfd/madera/registers.h>
  #include "../codecs/madera.h"
@@ -24,6 +26,7 @@ Build with the Calliope companion code.
 +static bool use_dsm;
 +module_param(use_dsm, bool, 0400);
 +MODULE_PARM_DESC(use_dsm, "Use Samsung Calliope for playback");
++#define CALLIOPE_RDMA0_STATUS 0x1020
 +
  #define ABOX_CMU_GATE	0x2034
  #define GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
@@ -37,6 +40,14 @@ Build with the Calliope companion code.
  };
  
  struct g955n_speaker {
+@@ -131,4 +140,7 @@
+ static u32 dma_status(struct g955n_pcm *p)
+ {
++	if (use_dsm && !p->capture)
++		return CALLIOPE_RDMA0_STATUS;
++
+ 	return dma_control(p) + 0x20;
+ }
 @@ -177,6 +185,10 @@
  
  	if (!READ_ONCE(pcm->running))
