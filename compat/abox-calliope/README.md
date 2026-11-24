@@ -18,11 +18,18 @@ capture. It loads the SRAM image, asserts the firmware's DRAM request,
 starts CA7, and checks the vendor SRAM mailbox for BOOT_DONE or a fault.
 Entering the boot test holds the runtime PM reference that powers
 the audio IOMMU. With no PCM open, the software mappings alone do not
-activate the hardware page-table walker. Boot observation ends on
-unsupported firmware requests. It does not acknowledge those requests.
+activate the hardware page-table walker. Boot observation validates
+component descriptors in SRAM or DRAM and acknowledges the reports.
+An unsupported request ends the diagnostic.
 The separate `try_resume=1` option sends system RESUME only after
 BOOT_DONE and checks whether firmware clears the TX acknowledgment. It shuts down CA7 before reclaiming
 its buffers. An unconfirmed shutdown retains the mappings until reboot.
+
+Use `try_boot=1 try_resume=1 try_dsm_read=1` for the read-only DSM query.
+It checks the inherited CA7 boot clock and responds to the boot gear
+request with the actual CA7 rate. It reports the number of returned words
+and the DSM enable flag. The query runs with both ALSA streams idle and
+does not change calibration or start a stream.
 
 The boot option exercises the Samsung nonsecure-GIC handoff available on
 the tested silicon revision. A complete IRQ handler, audio stream and DSM
@@ -38,6 +45,6 @@ no CA7 start or doorbell write.
 The receive-only boot trial left a pstore record reporting a write fault
 at 0xa0570000. That address falls inside the stock six MiB VSS window.
 With private backing for that window, the handset remained responsive and
-Calliope reached IPC 1:0xc0 (ABOX_REPORT_COMPONENT in the Samsung ABI).
-The diagnostic powered the core off at that request. BOOT_DONE, DSM
-playback, and microphone capture remain unverified.
+Calliope reported two components, sent BOOT_DONE, and acknowledged RESUME.
+The DSM query returned 146 words with enable=1 at idle. Playback through
+DSM and microphone capture remain unverified.

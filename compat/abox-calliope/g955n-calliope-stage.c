@@ -21,6 +21,9 @@ MODULE_PARM_DESC(try_boot, "Attempt one bounded Calliope boot with idle ABOX aud
 static bool try_resume;
 module_param(try_resume, bool, 0400);
 MODULE_PARM_DESC(try_resume, "Send RESUME after BOOT_DONE; requires try_boot");
+static bool try_dsm_read;
+module_param(try_dsm_read, bool, 0400);
+MODULE_PARM_DESC(try_dsm_read, "Read DSM parameters without playback; requires try_resume");
 #define CALLIOPE_IVA_IOVA		0x90000000UL
 #define CALLIOPE_IVA_SIZE		SZ_512K
 #define CALLIOPE_VSS_IOVA		0xa0000000UL
@@ -137,7 +140,7 @@ static int __init g955n_calliope_stage(void)
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
 
-	if (try_resume && !try_boot)
+	if ((try_resume && !try_boot) || (try_dsm_read && !try_resume))
 		return -EINVAL;
 
 	dev = bus_find_device_by_name(&platform_bus_type, NULL, "soc@0:abox-speaker");
@@ -203,7 +206,8 @@ static int __init g955n_calliope_stage(void)
 		if (ret)
 			goto release;
 		chipid_mapped = true;
-		ret = g955n_calliope_boot(dev, sram, dram.cpu, try_resume, &keep_dma);
+		ret = g955n_calliope_boot(dev, sram, dram.cpu, try_resume,
+					 try_dsm_read, &keep_dma);
 		if (keep_dma)
 			goto out;
 	}

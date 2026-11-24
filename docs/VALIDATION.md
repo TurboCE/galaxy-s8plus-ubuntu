@@ -4230,3 +4230,22 @@ configuration under /run. Installed the opt-in service drop-in at
 actual reboot, logind reported an active seat session for ubuntu with
 Service=gdm-autologin and Type=wayland, and GNOME Shell was running.
 The drop-in edits GDM's login configuration only.
+
+### R100 Calliope ready handshake and DSM read
+
+The module was built against the R100 release and tested on SM-G955N.
+It acknowledged validated OEM and ERAP component reports and received
+BOOT_DONE version 0x43534130. A separate attempt confirmed the
+firmware consumed the system RESUME message.
+
+The DSM read first encountered the asynchronous boot gear request
+(id 0xb00d, gear 3). The Samsung clock table gives gear 3 one third of
+the 48 kHz audio PLL, with no additional INT QoS floor. The diagnostic
+verified the existing PLL rate and divider and sent CHANGED_GEAR with
+the measured CA7 clock rate. Two trials returned 146 DSM parameter
+words. The final run returned the DSM enable flag as 1.
+
+The module powered off CA7, restored SRAM and control registers, and
+released 4,736 mapped pages. R100 remained accessible over USB with
+Wayland, WirePlumber and both native ALSA devices present. The test
+started no playback or recording and made no calibration writes.

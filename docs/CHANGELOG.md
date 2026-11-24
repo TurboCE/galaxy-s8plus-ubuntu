@@ -2189,3 +2189,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Add an opt-in service drop-in for GDM automatic login on SM-G955N
   mainline boots that use the generated GDM configuration.
+
+### Calliope boot and DSM parameter read
+
+- Handle bounded startup component reports and verify BOOT_DONE and RESUME.
+- Add an opt-in ERAP DSM read after validating the inherited boot clock.
