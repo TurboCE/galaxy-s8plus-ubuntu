@@ -2381,3 +2381,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   simultaneous handset and MacBook microphone measurements. Calliope
   preserved normal timing and SoC data pad activity. Neither path
   produced an acoustic match. Retained the confirmed receiver setup.
+
+### R100 alternate ABOX loudspeaker route check
+
+- Tested SIFS2 to UAIF4 both during a stream and before start. It
+  stopped playback with EIO. The installed R100 route completed the
+  same silent input after a reboot. Retained the receiver setup.

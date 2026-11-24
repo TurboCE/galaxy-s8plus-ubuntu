@@ -5100,3 +5100,35 @@ The signal at the MAX98506 input, the amp's boost rail and voltage
 at the speaker contacts remain unmeasured. Neither temporary driver
 was installed as the default. The verified receiver driver and
 Voice gain remain installed.
+
+### R100 alternate SIFS2 loudspeaker transport
+
+Samsung's ABOX mixer exposes both SIFS1 and SIFS2 to UAIF4.
+Tested SPUS OUT0 through SIFS2 on the SM-G955N with the installed
+R100 kernel. The receiver stayed on UAIF0. The MAX98506 uses the
+PCM input and 32-bit stereo frame setting from Samsung's mono
+board setup.
+
+Changing only the loudspeaker mux during an active duplex stream
+read back the expected route. Playback returned EIO after 0.938 s
+and the data pad showed no transitions in the sampled windows.
+The handset and MacBook recordings remained live, but the PCM
+error makes this trial invalid for an acoustic comparison. The
+one-shot probe could restore a stale mux value after ALSA had
+already torn down the stream. Subsequent tests used the machine
+driver to own the routing and cleanup.
+
+A one-boot driver selected SIFS2 before triggering playback. The
+seven-second silent reference returned EIO after 0.418 s in
+standalone playback and after 0.392 s in duplex playback. In the
+standalone run only one hardware pointer value was seen. The
+duplex microphone still captured 368,640 frames. The output
+failure therefore also occurs when SIFS2 is set before playback.
+
+Removed the one-time driver override and rebooted into the
+installed R100 modules. The identical silent stream completed in
+7.066 s with 250 distinct hardware pointer values. Duplex playback
+completed in 7.065 s and captured 368,640 frames. WirePlumber was
+active and the separate receiver retained raw gain 92/92.
+These are codec transport checks. Physical lower speaker output
+and amplifier input and output voltages remain unverified.
