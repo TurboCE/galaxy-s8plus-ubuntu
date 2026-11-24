@@ -4608,3 +4608,43 @@ the original R100 clock completed a seven-second ALSA stream,
 captured 337,920 microphone frames, and shut down the DSP without
 the observed protocol error. The recording did not reproduce the
 ordered speaker tones. The test module is opt-in.
+
+### R100 amplifier decoder and physical clock checks
+
+On an otherwise silent 48 kHz Calliope playback, raw SMBus reads
+from the MAX98506 matched the normal regmap clock readback of
+`0x40`. Samsung's 4.4 driver treats this register as cacheable and
+seeds the clock multiplier to `0x06`, so its software register
+image alone cannot establish that the working boot read back
+`0x46` from the chip.
+
+With the speaker and boost blocks temporarily disabled, the
+decoder comparison enabled the clock monitor and applied normal
+and out-of-frame input slot settings. Raw reads verified both
+settings and restoration. Live, state and flag registers
+`0x04`, `0x07` and `0x0a` stayed zero in both cases. This
+did not establish whether the amplifier decoded the supplied
+serial frames. The ALSA stream completed.
+
+A 64-bit-frame comparison set the MAX98506 ratio field to 64
+and UAIF4's divider to 16 on the 49.152 MHz AUDIF parent. Two
+playback/capture trials completed without detecting the ordered
+speaker tones. During the second run, the CMU still reported the
+internal UAIF4 parent and divider 16, while UAIF0 retained
+divider 32. The SoC speaker pin's bit-clock samples tracked
+1.536 MHz far more strongly than 3.072 MHz. The word clock
+remained consistent with 48 kHz. This separates the divider
+register from the observed pad rate.
+
+Keeping UAIF4 fixed and additionally changing both the UAIF0
+divider and its slot width restored strong phase agreement at
+3.072 MHz while the measured word clock remained at 48 kHz.
+Two standalone snapshots confirmed this, and the seven-second
+silent playback completed. A tone playback with these settings
+returned 337,920 capture frames, but recorded amplitudes were
+zero at all three reference frequencies, including the baseline.
+It is not a valid acoustic comparison at this setting. The result
+demonstrates effective dependence on the UAIF0 configuration in
+this topology. It does not show that this dependency explains the
+original silence at the 32-bit frame setting, or that the amplifier
+received the serial words. The temporary modules are withdrawn.

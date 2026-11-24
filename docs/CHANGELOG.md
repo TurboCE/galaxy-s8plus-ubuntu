@@ -2267,3 +2267,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Handle asynchronous firmware diagnostic reports alongside the DSM
   response. Verified playback transport on R100 with the existing
   clock. Acoustic speaker output remains unresolved.
+
+### R100 amplifier serial clock observations
+
+- Verified raw I2C register access and restoration in a muted
+  MAX98506 input-slot comparison.
+- Compared the requested and observed speaker bit clock at 64
+  bits per frame. The output pin only tracked 3.072 MHz after
+  changing UAIF0 as well. The experiment was withdrawn.
