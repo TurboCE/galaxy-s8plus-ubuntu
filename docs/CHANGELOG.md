@@ -2526,3 +2526,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   simultaneous microphone recording complete with ASRC0 enabled.
 - The handset capture still lacks the ordered speaker tones. A
   short startup transient was present even with a silent PCM file.
+
+
+### R100 #58 RDMA geometry and remaining register comparisons
+
+- Match the #58 64 KiB ring and 8 KiB period on the opt-in ASRC0
+  path. Direct ALSA playback and concurrent microphone capture passed.
+- Tested the #58 amplifier settings and codec MCLK mux. The acoustic
+  reference remained absent. A separate SPUM capture trial returned EIO.

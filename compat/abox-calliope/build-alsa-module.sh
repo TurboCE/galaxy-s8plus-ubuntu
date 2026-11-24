@@ -25,6 +25,8 @@ if [ "${4:-}" = "--receiver" ]; then
         -i "$patches/0131-mainline-sm-g955n-receiver-pcm.patch" -o "$module_source" "$native"
     patch --batch --forward --silent --fuzz=0 \
         -i "$patches/0133-mainline-sm-g955n-calliope-with-receiver.patch" "$module_source"
+    patch --batch --forward --silent --fuzz=0 \
+        -i "$patches/0135-mainline-sm-g955n-kernel58-speaker-geometry.patch" "$module_source"
 else
     patch --batch --forward --silent --fuzz=0 \
         -i "$patches/0128-mainline-sm-g955n-alsa-calliope.patch" -o "$module_source" "$native"

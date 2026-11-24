@@ -146,6 +146,11 @@ static bool kernel58_asrc0;
 module_param(kernel58_asrc0, bool, 0400);
 MODULE_PARM_DESC(kernel58_asrc0, "Use #58 ASRC0 and SPUS OUT0 for Calliope playback");
 
+bool g955n_calliope_kernel58_route(void)
+{
+	return kernel58_asrc0;
+}
+
 /* Stock SIFS0 clock path and SPUS OUT7 -> SIFS1 -> UAIF4. */
 static const struct {
 	u32 reg, mask, value;
@@ -523,11 +528,13 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 			      struct calliope_stream *stream)
 {
 	const unsigned int periods = stream ? stream->periods : CALLIOPE_PCM_PERIODS;
+	const unsigned int period_bytes = stream && stream->period_bytes ?
+					  stream->period_bytes : CALLIOPE_PCM_PERIOD_BYTES;
 	const struct {
 		u32 message, arg1, arg2, arg3;
 	} setup[] = {
 		{ IPC_PCM_OPEN },
-		{ IPC_PCM_SET_BUFFER, CALLIOPE_RDMA0_IOVA, CALLIOPE_PCM_PERIOD_BYTES,
+		{ IPC_PCM_SET_BUFFER, CALLIOPE_RDMA0_IOVA, period_bytes,
 		  periods },
 		{ IPC_PCM_HW_PARAMS, 48000, 16, 2 },
 		{ IPC_PCM_PREPARE },
@@ -641,7 +648,7 @@ static int calliope_pcm_trial(struct device *dev, void __iomem *sram,
 		}
 		pointer = readl(sram + IPC_RX + 16);
 		if (pointer < CALLIOPE_RDMA0_IOVA ||
-		    pointer - CALLIOPE_RDMA0_IOVA >= CALLIOPE_PCM_PERIOD_BYTES * periods) {
+		    pointer - CALLIOPE_RDMA0_IOVA >= period_bytes * periods) {
 			ret = -ERANGE;
 			break;
 		}

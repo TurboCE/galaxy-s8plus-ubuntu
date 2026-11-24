@@ -259,12 +259,19 @@ int g955n_calliope_run(struct device *dev, struct calliope_stream *stream)
 	bool dsm = stream || try_dsm_read;
 	bool play = stream || try_pcm;
 	bool monitor = stream || try_feedback;
+	unsigned int period_bytes = stream && stream->period_bytes ?
+				    stream->period_bytes : CALLIOPE_PCM_PERIOD_BYTES;
+	unsigned int max_periods = CALLIOPE_PCM_PERIODS;
 	int i, ret, cleanup;
 
 	if ((resume && !boot) || (dsm && !resume) ||
 	    (play && !dsm) || (monitor && !play))
 		return -EINVAL;
-	if (stream && (!stream->mute || stream->periods < 2 || stream->periods > CALLIOPE_PCM_PERIODS ||
+	if (period_bytes == CALLIOPE_K58_PERIOD_BYTES && g955n_calliope_kernel58_route())
+		max_periods = CALLIOPE_K58_PERIODS;
+	else if (period_bytes != CALLIOPE_PCM_PERIOD_BYTES)
+		return -EINVAL;
+	if (stream && (!stream->mute || stream->periods < 2 || stream->periods > max_periods ||
 		       !IS_ALIGNED(stream->dma, PAGE_SIZE)))
 		return -EINVAL;
 
@@ -318,7 +325,7 @@ int g955n_calliope_run(struct device *dev, struct calliope_stream *stream)
 	if (!ret && play) {
 		if (stream) {
 			pcm.dma = stream->dma;
-			pcm.size = stream->periods * CALLIOPE_PCM_PERIOD_BYTES;
+			pcm.size = stream->periods * period_bytes;
 		} else {
 			pcm.cpu = dma_alloc_coherent(dev, pcm.size, &pcm.dma, GFP_KERNEL);
 			if (!pcm.cpu) {

@@ -59,7 +59,7 @@ trigger acknowledgments.
 
 For the receiver-capable R100 source, append `--receiver` to the build
 command and use the RDMA0 source against which patch 0131 applies.
-This applies patches 0131 and 0133 in the output directory. Only PCM 0
+This applies patches 0131, 0133, and 0135 in the output directory. Only PCM 0
 uses Calliope when enabled. PCM 1 stays on the native microphone route
 and PCM 2 on the native receiver route. Either PCM can start or stop first. The host holds the UAIF0 bit clock,
 format and ABOX power while either stream uses them. Calliope adds only
@@ -79,9 +79,11 @@ with `use_dsm=1 kernel58_asrc0=1` on R100 with the 6.144 MHz AUDIF
 profile. Calliope configures the output rate and format and starts
 RDMA0. The driver selects ASRC0 and SPUS OUT0 through SIFS1 to UAIF4.
 It skips the unused SIFS0 mixer format and keeps UAIF4 transmit-only.
-The route is checked after the firmware trigger. Direct ALSA playback
-and microphone capture completed together on the handset. The speaker
-test tones were still absent from the recording.
+The route is checked after the firmware trigger. The #58 route uses a
+64 KiB playback ring with eight 8 KiB periods. At 48 kHz stereo S16,
+this is a 16,384-frame buffer with 2,048 frames per period. Direct
+ALSA playback and microphone capture completed together on the
+handset. The speaker test tones were still absent from the recording.
 
 The boot option exercises the Samsung nonsecure-GIC handoff available on
 the tested silicon revision. A recurring ALSA stream, amplifier feedback,

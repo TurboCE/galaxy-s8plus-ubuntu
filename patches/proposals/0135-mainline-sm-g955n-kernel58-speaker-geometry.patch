@@ -1,0 +1,109 @@
+Subject: [PATCH] ASoC: match SM-G955N kernel58 speaker RDMA geometry
+
+Use a 64 KiB playback buffer and eight 8 KiB periods for the
+opt-in kernel58 ASRC0 profile. Use the negotiated period for ALSA
+notifications and the Calliope firmware buffer configuration.
+
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -162,6 +162,11 @@
+ static bool uses_dsm(const struct g955n_pcm *pcm)
+ {
+ 	return use_dsm && !pcm->capture && !pcm->receiver;
++}
++
++static bool uses_kernel58_geometry(const struct g955n_pcm *pcm)
++{
++	return uses_dsm(pcm) && g955n_calliope_kernel58_route();
+ }
+ 
+ static u32 dma_control(struct g955n_pcm *p)
+@@ -236,7 +241,7 @@
+ 	}
+ 	status = readl(pcm->abox->sfr + dma_status(pcm));
+ 	offset = ((status & GENMASK(28, 16)) >> 12) + (status & GENMASK(12, 0));
+-	period = offset / PERIOD_BYTES;
++	period = offset / snd_pcm_lib_period_bytes(pcm->stream);
+ 	if (period != pcm->period) {
+ 		pcm->period = period;
+ 		snd_pcm_period_elapsed(pcm->stream);
+@@ -264,6 +269,7 @@
+ 			struct snd_pcm_substream *stream)
+ {
+ 	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	struct snd_pcm_hardware hw = speaker_hw;
+ 	int ret;
+ 
+ 	if (pcm->poisoned)
+@@ -271,7 +277,14 @@
+ 	ret = pm_runtime_resume_and_get(pcm->abox->dev);
+ 	if (ret < 0)
+ 		return ret;
+-	snd_soc_set_runtime_hwparams(stream, &speaker_hw);
++	if (uses_kernel58_geometry(pcm)) {
++		hw.buffer_bytes_max = pcm->ring.bytes;
++		hw.period_bytes_min = CALLIOPE_K58_PERIOD_BYTES;
++		hw.period_bytes_max = CALLIOPE_K58_PERIOD_BYTES;
++		hw.periods_min = CALLIOPE_K58_PERIODS;
++		hw.periods_max = CALLIOPE_K58_PERIODS;
++	}
++	snd_soc_set_runtime_hwparams(stream, &hw);
+ 	pcm->stream = stream;
+ 	snd_pcm_set_runtime_buffer(stream, &pcm->ring);
+ 	return 0;
+@@ -439,7 +452,7 @@
+ 				       SNDRV_PCM_STREAM_PLAYBACK);
+ }
+ 
+-static int speaker_dsm_prepare(struct g955n_pcm *pcm, unsigned int periods)
++static int speaker_dsm_prepare(struct g955n_pcm *pcm, struct snd_pcm_substream *stream)
+ {
+ 	struct calliope_stream *dsp = &pcm->dsp;
+ 	struct g955n_speaker *abox = pcm->abox;
+@@ -465,7 +478,8 @@
+ 	dsp->dma = pcm->ring.addr;
+ 	dsp->host_route_lock = &abox->route_lock;
+ 	dsp->mute = speaker_dsm_mute;
+-	dsp->periods = periods;
++	dsp->periods = stream->runtime->periods;
++	dsp->period_bytes = snd_pcm_lib_period_bytes(stream);
+ 	dsp->stopping = false;
+ 	dsp->retain_ring = false;
+ 	dsp->result = -EINPROGRESS;
+@@ -676,7 +690,7 @@
+ 	    abox->pcm[pcm->receiver ? SNDRV_PCM_STREAM_PLAYBACK : RECEIVER_PCM].prepared)
+ 		return -EBUSY;
+ 	if (uses_dsm(pcm))
+-		return speaker_dsm_prepare(pcm, stream->runtime->periods);
++		return speaker_dsm_prepare(pcm, stream);
+ 	return abox_prepare_pcm(pcm, stream);
+ }
+ 
+@@ -833,7 +847,7 @@
+ 	struct g955n_pcm *pcm = data;
+ 
+ 	if (!pcm->poisoned)
+-		dma_free_coherent(pcm->abox->dev, RING_BYTES, pcm->ring.area, pcm->ring.addr);
++		dma_free_coherent(pcm->abox->dev, pcm->ring.bytes, pcm->ring.area, pcm->ring.addr);
+ }
+ 
+ static int abox_init_pcm(struct g955n_speaker *abox, int direction, const char *clock)
+@@ -851,14 +865,15 @@
+ 
+ 	pcm->ring.dev.type = SNDRV_DMA_TYPE_DEV;
+ 	pcm->ring.dev.dev = dev;
+-	pcm->ring.bytes = RING_BYTES;
+-	pcm->ring.area = dma_alloc_coherent(dev, RING_BYTES, &pcm->ring.addr, GFP_KERNEL);
++	pcm->ring.bytes = uses_kernel58_geometry(pcm) ?
++			  CALLIOPE_K58_PERIOD_BYTES * CALLIOPE_K58_PERIODS : RING_BYTES;
++	pcm->ring.area = dma_alloc_coherent(dev, pcm->ring.bytes, &pcm->ring.addr, GFP_KERNEL);
+ 	if (!pcm->ring.area)
+ 		return -ENOMEM;
+ 	ret = devm_add_action_or_reset(dev, speaker_release_ring, pcm);
+ 	if (ret)
+ 		return ret;
+-	if (!IS_ALIGNED(pcm->ring.addr, 16) || pcm->ring.addr > U32_MAX - RING_BYTES)
++	if (!IS_ALIGNED(pcm->ring.addr, 16) || pcm->ring.addr > U32_MAX - pcm->ring.bytes)
+ 		return -ERANGE;
+ 	INIT_DELAYED_WORK(&pcm->period_work, speaker_tick);
+ 	return 0;

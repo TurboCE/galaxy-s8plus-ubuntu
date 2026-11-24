@@ -5679,3 +5679,41 @@ electrical signal at MAX98506 DIN, or resolve acoustic output.
 Removed the one-boot override after the final test. The temporary
 module is still loaded in that boot. The next boot selects the
 installed audio module with the 6.144 MHz AUDIF profile.
+
+
+### R100 #58 RDMA geometry, amplifier, and codec mux comparison
+
+The receiver-capable build applies patch 0135. The opt-in #58 ASRC0
+speaker route now negotiates eight 8 KiB periods in a 64 KiB buffer.
+The live RDMA0 registers matched #58 during playback: start
+0x81000000, end 0x81010000 and period 0x2000. The ALSA period
+callback uses the negotiated size. Native playback, the receiver
+and the microphone retain their original buffer geometry.
+
+Five seconds of direct 48 kHz stereo playback and eight seconds of
+concurrent handset capture completed with the larger buffer. With
+the same geometry, separately matched the live #58 amplifier gain,
+block and boost registers at 0x2d=0x01, 0x36=0x90 and 0x37=0xf0.
+Direct reads confirmed these values while the global enable was
+0x80. Then repeated with the GPH0-0 codec MCLK mux set to the #58
+function as well. The amplifier settings and mux were restored
+and their live return was logged. All three captures contained
+384,000 frames and did not reproduce the ordered speaker tones.
+Raw recordings were not retained.
+
+With the amplifier and mux matched, 69 out of 71 sampled register
+entries agreed with #58 at the same playback stage. The two
+remaining differences were capture-side SPUM 0x300 and 0x304.
+A separate R100 capture trial set them during preparation to the
+#58 fields (0x12 and 0x900). Playback still completed. Capture
+failed with EIO and zero bytes, so it could not qualify acoustic
+output. The later playback snapshot showed 0x300=0 and
+0x304=0x900 after capture had stopped. The SPUM trial was removed
+and normal microphone capture verified in the codec MCLK trial.
+
+The ARM64 standalone diagnostic also compiled. The temporary
+service override was removed. The current boot retains the
+tested ASRC0 and 64 KiB trial module. The standard R100 module
+loads on the next boot. The electrical signal at the MAX98506
+input and the acoustic lower speaker output remain unverified
+and unresolved respectively.

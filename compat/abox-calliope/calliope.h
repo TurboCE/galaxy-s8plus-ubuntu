@@ -13,6 +13,8 @@
 #define CALLIOPE_RDMA0_IOVA		0x81000000UL
 #define CALLIOPE_PCM_PERIOD_BYTES	4096
 #define CALLIOPE_PCM_PERIODS		4
+#define CALLIOPE_K58_PERIOD_BYTES	8192
+#define CALLIOPE_K58_PERIODS		8
 
 struct device;
 struct firmware;
@@ -20,6 +22,7 @@ struct firmware;
 struct calliope_stream {
 	dma_addr_t dma;
 	unsigned int periods;
+	unsigned int period_bytes;
 	int (*mute)(struct calliope_stream *stream);
 	struct completion ready;
 	struct completion start;
@@ -31,6 +34,7 @@ struct calliope_stream {
 	int result;
 };
 
+bool g955n_calliope_kernel58_route(void);
 int g955n_calliope_run(struct device *dev, struct calliope_stream *stream);
 int g955n_calliope_boot(struct device *dev, const struct firmware *fw,
 		       void *dram, bool try_resume, bool try_dsm_read,
