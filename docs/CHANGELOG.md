@@ -2371,3 +2371,6 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Tested loudspeaker and receiver independently. Both selected their
   intended output and completed PCM transport. The microphone did
   not reproduce either acoustic reference.
+
+- The user confirmed the upper receiver's audible output. Retained the
+  verified -18 dB codec gain for the Voice profile.

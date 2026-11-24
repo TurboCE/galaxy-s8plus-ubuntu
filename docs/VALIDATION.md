@@ -5046,3 +5046,12 @@ eight host tests.
 Samsung's stock mixer also selects ASYNCCLK rate 1 for Output Rate 1.
 R100 does not expose that mixer field through the 6.18 codec controls.
 The combined clock-domain change was not installed or qualified.
+
+### R100 receiver audibility and retained gain
+
+The user heard both short test tones from the upper receiver during
+a receiver-only ALSA run at -18 dB codec gain. The MAX98506 PCM
+stayed closed. Set Voice to the tested gain of 92/92 and verified
+the setting during a normal PipeWire stream on PCM 2. The separate
+loudspeaker listening test completed its PCM stream; acoustic
+loudspeaker output remains unconfirmed.
