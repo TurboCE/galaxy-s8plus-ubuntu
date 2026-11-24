@@ -4392,3 +4392,31 @@ the acoustic recording. ALSA completion, pad activity and readable
 enable bits are intermediate checks. The remaining fault is between the
 observed SoC output activity and acoustic output, with valid I2S framing
 at the amplifier and the speaker output stage still unverified.
+
+### R100 speaker clock, factory calibration and VI comparison
+
+A timestamped read-only sample of the SoC audio pads showed coherence at
+the expected 48 kHz frame clock and 1.536 MHz bit clock. It does not
+establish signal integrity or framing at the MAX98506 pins. A one-boot
+comparison reversed the amplifier's sample edge and enabled its clock
+monitor. Both settings read back while the amplifier was enabled. Status
+registers 0x02 through 0x07 read zero, and no time-ordered acoustic
+reference was detected.
+
+The real handset's resistance and temperature calibration files were
+present under read-only EFS. A volatile Calliope trial used Samsung's
+RDC-only write command and matched both fields through a subsequent
+firmware read. EFS remained read-only. Neither that trial nor a trial
+with VI Sensing enabled as well recovered the acoustic reference. Each
+explicit seven-second playback returned zero and the parallel microphone
+captured 337,920 frames. No recordings were retained.
+
+VI Sensing requested a 286 MHz minimum memory-interface clock. The
+diagnostic observed the IPC without changing the clock. No MIF devfreq
+device was exposed by this R100 image. The request caused the earlier
+experiment to abort, but accepting the transport notification allowed
+an explicit stream to run to completion. Stream setup and teardown
+still received unhandled asynchronous messages in other opens. The VI
+result does not qualify actual current/voltage feedback or show that
+the requested memory clock was met. The comparison modules were
+withdrawn. Acoustic loudspeaker output remains unresolved.
