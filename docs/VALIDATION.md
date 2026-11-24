@@ -5202,3 +5202,37 @@ The native ABOX path still fails to deliver the PCM sample
 words at the SoC data pad in these windows. This change
 qualifies the amplifier control settings and leaves physical
 lower speaker output unresolved.
+
+### R100 Calliope path with the native receiver and microphone
+
+Built patch 0133 with patch 0131 for the exact R100 release. It
+routes only the MAX98506 PCM through Samsung Calliope, leaving
+the CS47L93 PCMs on the native routes. It also serializes
+shared ABOX state and defers restoring the native microphone's
+UAIF0 clock configuration when the microphone closes during
+firmware playback. The ARM64 module built with the receiver
+option and its loaded build ID matched the one-boot trial file.
+
+With the Samsung MAX98506 settings from patch 0132, the coded
+seven-second stream finished in 7.558 s. The lower SoC data
+pad showed zero transitions in the leading silence and 3,971
+and 3,925 in the two tone windows. The same pad stayed low in
+both windows in the prior native R100 comparison. The firmware
+logged RDMA0 progress and zero return values from stop, free and
+close. The handset microphone captured 368,640 frames and the
+MacBook microphone captured 556,800. Neither reproduced the
+coded reference (p=0.3825 and p=0.1700 respectively).
+
+Prepared the native microphone before starting Calliope, then
+closed capture after 107,520 frames while playback was still
+running. Playback finished in 7.544 s and the microphone opened
+and recorded again after teardown. A separate test with the
+microphone already running returned ASoC -EBUSY on speaker
+prepare; the microphone completed recording. Native receiver
+PCM 2 completed a silent playback with Voice gain still 92/92.
+
+The firmware path restores lower SoC data activity, but acoustic
+speaker output and capture-first duplex remain outstanding.
+The trial did not change the installed ABOX module, and the
+one-boot service override was withdrawn. The MAX98506 control
+settings from patch 0132 remain installed.

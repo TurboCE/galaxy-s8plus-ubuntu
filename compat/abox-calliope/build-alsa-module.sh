@@ -1,8 +1,9 @@
 #!/bin/sh
 set -eu
 
-if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 KERNEL_SOURCE KERNEL_BUILD OUTPUT_DIRECTORY" >&2
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ] ||
+   { [ "$#" -eq 4 ] && [ "$4" != "--receiver" ]; }; then
+    echo "Usage: $0 KERNEL_SOURCE KERNEL_BUILD OUTPUT_DIRECTORY [--receiver]" >&2
     exit 2
 fi
 
@@ -11,14 +12,23 @@ build=$(cd "$2" && pwd)
 mkdir -p "$3"
 output=$(cd "$3" && pwd)
 here=$(cd "$(dirname "$0")" && pwd)
-patch="$here/../../patches/proposals/0128-mainline-sm-g955n-alsa-calliope.patch"
+patches="$here/../../patches/proposals"
 
 test "$output" != "$source"
 test "$output" != "$build"
 test -s "$build/Module.symvers"
 
 native="$source/sound/soc/samsung/g955n-abox-speaker.c"
-patch --batch --forward --silent --fuzz=0 -i "$patch" -o "$output/g955n-abox-speaker-native.c" "$native"
+module_source="$output/g955n-abox-speaker-native.c"
+if [ "${4:-}" = "--receiver" ]; then
+    patch --batch --forward --silent --fuzz=0 \
+        -i "$patches/0131-mainline-sm-g955n-receiver-pcm.patch" -o "$module_source" "$native"
+    patch --batch --forward --silent --fuzz=0 \
+        -i "$patches/0133-mainline-sm-g955n-calliope-with-receiver.patch" "$module_source"
+else
+    patch --batch --forward --silent --fuzz=0 \
+        -i "$patches/0128-mainline-sm-g955n-alsa-calliope.patch" -o "$module_source" "$native"
+fi
 cp "$here/Makefile.alsa" "$output/Makefile"
 cp "$here/calliope.h" "$here/g955n-calliope-stage.c" "$here/g955n-calliope-boot.c" "$output/"
 make -C "$source" O="$build" M="$output" modules

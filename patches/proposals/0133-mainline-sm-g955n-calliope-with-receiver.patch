@@ -1,0 +1,274 @@
+Subject: [PATCH] ASoC: route dream2lteks loudspeaker via Calliope with receiver PCM
+
+Carry the firmware PCM path over to the receiver-capable ABOX driver.
+Restrict Calliope and its RDMA0 ring to the loudspeaker PCM. Share the
+route lock between stereo playback and microphone triggers and stop
+operations. Prevent other PCM setup while the firmware owns the shared
+registers. Defer microphone clock restoration when capture closes first.
+
+A failed firmware shutdown that retains its ring blocks new streams
+until reboot. The default remains native while acoustic output and
+arbitrary duplex open ordering are unqualified.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -12,6 +12,8 @@
+ #include <linux/workqueue.h>
+ #include <linux/iommu.h>
+ #include <linux/iopoll.h>
++#include <linux/cleanup.h>
++#include <linux/kthread.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+@@ -27,7 +29,12 @@
+ #include <linux/mfd/madera/core.h>
+ #include <linux/mfd/madera/registers.h>
+ #include "../codecs/madera.h"
++#include "calliope.h"
+ 
++static bool use_dsm;
++module_param(use_dsm, bool, 0400);
++MODULE_PARM_DESC(use_dsm, "Use Samsung Calliope for the lower loudspeaker");
++
+ #define ABOX_CMU_GATE	0x2034
+ #define GATE_MASK	(BIT(28) | BIT(21) | BIT(20))
+ #define GATE_ON		(BIT(21) | BIT(20))
+@@ -108,6 +115,9 @@
+ 	bool prepared;
+ 	bool running;
+ 	bool poisoned;
++	bool dsm_active;
++	bool restore_after_dsm;
++	struct calliope_stream dsp;
+ };
+ 
+ struct g955n_speaker {
+@@ -140,6 +150,11 @@
+ 	writel((readl(base + reg) & ~mask) | value, base + reg);
+ }
+ 
++static bool uses_dsm(const struct g955n_pcm *pcm)
++{
++	return use_dsm && !pcm->capture && !pcm->receiver;
++}
++
+ static u32 dma_control(struct g955n_pcm *p)
+ {
+ 	if (p->capture)
+@@ -206,6 +221,10 @@
+ 
+ 	if (!READ_ONCE(pcm->running))
+ 		return;
++	if (uses_dsm(pcm) && completion_done(&pcm->dsp.done)) {
++		snd_pcm_stop_xrun(pcm->stream);
++		return;
++	}
+ 	status = readl(pcm->abox->sfr + dma_status(pcm));
+ 	offset = ((status & GENMASK(28, 16)) >> 12) + (status & GENMASK(12, 0));
+ 	period = offset / PERIOD_BYTES;
+@@ -300,15 +319,94 @@
+ 	if (!--abox->prepared_count)
+ 		writel(abox->saved_syspower, abox->sfr + SYSPOWER_CTRL);
+ 	return ret;
++}
++
++static int speaker_dsm_worker(void *data)
++{
++	struct g955n_pcm *pcm = data;
++	struct calliope_stream *dsp = &pcm->dsp;
++	int ret = g955n_calliope_run(pcm->abox->dev, dsp);
++
++	WRITE_ONCE(dsp->result, ret);
++	complete_all(&dsp->ready);
++	complete_all(&dsp->running);
++	complete(&dsp->done);
++	return 0;
+ }
+ 
++static int speaker_dsm_stop(struct g955n_pcm *pcm)
++{
++	struct calliope_stream *dsp = &pcm->dsp;
++	struct g955n_pcm *capture = &pcm->abox->pcm[SNDRV_PCM_STREAM_CAPTURE];
++	int ret, restore_ret = 0;
++
++	lockdep_assert_held(&pcm->abox->prepare_lock);
++	if (!pcm->dsm_active)
++		return 0;
++
++	WRITE_ONCE(dsp->stopping, true);
++	complete(&dsp->start);
++	wait_for_completion(&dsp->done);
++	pcm->dsm_active = false;
++	ret = READ_ONCE(dsp->result);
++	if (dsp->retain_ring) {
++		pcm->poisoned = true;
++	} else if (capture->restore_after_dsm) {
++		capture->restore_after_dsm = false;
++		restore_ret = speaker_restore(capture);
++	}
++	return ret ?: restore_ret;
++}
++
++static int speaker_dsm_mute(struct calliope_stream *dsp)
++{
++	struct g955n_pcm *pcm = container_of(dsp, struct g955n_pcm, dsp);
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(pcm->stream);
++
++	return snd_soc_dai_digital_mute(snd_soc_rtd_to_codec(rtd, 0), 1,
++				       SNDRV_PCM_STREAM_PLAYBACK);
++}
++
++static int speaker_dsm_prepare(struct g955n_pcm *pcm, unsigned int periods)
++{
++	struct calliope_stream *dsp = &pcm->dsp;
++	struct task_struct *worker;
++	int ret;
++
++	lockdep_assert_held(&pcm->abox->prepare_lock);
++	if (pcm->poisoned || READ_ONCE(pcm->abox->pcm[SNDRV_PCM_STREAM_CAPTURE].running))
++		return -EBUSY;
++	dsp->dma = pcm->ring.addr;
++	dsp->mute = speaker_dsm_mute;
++	dsp->periods = periods;
++	dsp->stopping = false;
++	dsp->retain_ring = false;
++	dsp->result = -EINPROGRESS;
++	init_completion(&dsp->ready);
++	init_completion(&dsp->start);
++	init_completion(&dsp->running);
++	init_completion(&dsp->done);
++
++	worker = kthread_run(speaker_dsm_worker, pcm, "g955n-calliope");
++	if (IS_ERR(worker))
++		return PTR_ERR(worker);
++
++	pcm->dsm_active = true;
++	wait_for_completion(&dsp->ready);
++	ret = READ_ONCE(dsp->result);
++	return ret == -EINPROGRESS ? 0 : speaker_dsm_stop(pcm);
++}
++
+ static int speaker_stop(struct g955n_pcm *pcm)
+ {
+ 	u32 status;
+ 	int ret;
+ 
++	lockdep_assert_held(&pcm->abox->prepare_lock);
+ 	WRITE_ONCE(pcm->running, false);
+ 	cancel_delayed_work(&pcm->period_work);
++	if (uses_dsm(pcm))
++		return speaker_dsm_stop(pcm);
+ 	if (!pcm->prepared)
+ 		return 0;
+ 	abox_update(pcm->abox->sfr, uaif_control(pcm), uaif_enable(pcm), 0);
+@@ -327,18 +425,26 @@
+ 			 struct snd_pcm_substream *stream)
+ {
+ 	struct g955n_pcm *pcm = abox_pcm(component, stream);
+-	int ret = speaker_stop(pcm);
++	struct g955n_pcm *speaker = &pcm->abox->pcm[SNDRV_PCM_STREAM_PLAYBACK];
++	int ret, restore_ret = 0;
+ 
++	scoped_guard(mutex, &pcm->abox->prepare_lock)
++		ret = speaker_stop(pcm);
++
+ 	cancel_delayed_work_sync(&pcm->period_work);
+ 	snd_pcm_set_runtime_buffer(stream, NULL);
+ 	pcm->stream = NULL;
+ 	if (pcm->poisoned)
+ 		return ret;
+ 	mutex_lock(&pcm->abox->prepare_lock);
+-	ret = speaker_restore(pcm);
++	/* Calliope still needs the UAIF0 clocks after microphone close. */
++	if (pcm->capture && pcm->prepared && speaker->dsm_active)
++		pcm->restore_after_dsm = true;
++	else
++		restore_ret = speaker_restore(pcm);
+ 	mutex_unlock(&pcm->abox->prepare_lock);
+ 	pm_runtime_put_sync(pcm->abox->dev);
+-	return ret;
++	return ret ?: restore_ret;
+ }
+ 
+ static int abox_prepare_pcm(struct g955n_pcm *pcm, struct snd_pcm_substream *stream)
+@@ -460,34 +566,60 @@
+ 			   struct snd_pcm_substream *stream)
+ {
+ 	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	struct g955n_speaker *abox = pcm->abox;
++	struct g955n_pcm *speaker = &abox->pcm[SNDRV_PCM_STREAM_PLAYBACK];
+ 	int ret;
+ 
+-	ret = speaker_stop(pcm);
++	scoped_guard(mutex, &abox->prepare_lock)
++		ret = speaker_stop(pcm);
+ 	if (ret)
+ 		return ret;
+ 	cancel_delayed_work_sync(&pcm->period_work);
+-	mutex_lock(&pcm->abox->prepare_lock);
++	guard(mutex)(&abox->prepare_lock);
++	if (uses_dsm(speaker) && speaker->poisoned)
++		return -EIO;
++	/* Preparing a PCM can reprogram clocks and routes owned by Calliope. */
++	if (speaker->dsm_active)
++		return -EBUSY;
+ 	ret = speaker_restore(pcm);
+-	if (!ret && !pcm->capture &&
+-	    pcm->abox->pcm[pcm->receiver ? SNDRV_PCM_STREAM_PLAYBACK : RECEIVER_PCM].prepared)
+-		ret = -EBUSY;
+-	if (!ret)
+-		ret = abox_prepare_pcm(pcm, stream);
+-	mutex_unlock(&pcm->abox->prepare_lock);
+-	return ret;
++	if (ret)
++		return ret;
++
++	/* The two playback endpoints share RDMA0. */
++	if (!pcm->capture &&
++	    abox->pcm[pcm->receiver ? SNDRV_PCM_STREAM_PLAYBACK : RECEIVER_PCM].prepared)
++		return -EBUSY;
++	if (uses_dsm(pcm))
++		return speaker_dsm_prepare(pcm, stream->runtime->periods);
++	return abox_prepare_pcm(pcm, stream);
+ }
+ 
+ static int speaker_trigger(struct snd_soc_component *component,
+ 			   struct snd_pcm_substream *stream, int cmd)
+ {
+ 	struct g955n_pcm *pcm = abox_pcm(component, stream);
++	struct g955n_pcm *speaker = &pcm->abox->pcm[SNDRV_PCM_STREAM_PLAYBACK];
+ 	void __iomem *sfr = pcm->abox->sfr;
+ 	u32 initial, status;
+ 	int ret;
+ 
++	guard(mutex)(&pcm->abox->prepare_lock);
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+-		if (!pcm->prepared || pcm->poisoned)
++		if (pcm->poisoned || (uses_dsm(speaker) && speaker->poisoned))
++			return -EIO;
++		if (uses_dsm(pcm)) {
++			if (!pcm->dsm_active)
++				return -EIO;
++			dma_wmb();
++			complete(&pcm->dsp.start);
++			wait_for_completion(&pcm->dsp.running);
++			ret = READ_ONCE(pcm->dsp.result);
++			if (ret != -EINPROGRESS)
++				return ret ?: -EIO;
++			goto running;
++		}
++		if (!pcm->prepared)
+ 			return -EIO;
+ 		initial = readl(sfr + dma_status(pcm)) & GENMASK(28, 0);
+ 		dma_wmb();
+@@ -504,6 +636,7 @@
+ 				return ret;
+ 			}
+ 		}
++running:
+ 		pcm->period = 0;
+ 		WRITE_ONCE(pcm->running, true);
+ 		schedule_delayed_work(&pcm->period_work, msecs_to_jiffies(5));

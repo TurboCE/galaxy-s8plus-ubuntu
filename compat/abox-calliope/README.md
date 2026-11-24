@@ -55,8 +55,18 @@ The resulting module replaces `g955n-abox-speaker.ko` for a trial boot.
 Load it with `use_dsm=1` to route ALSA speaker playback through Calliope.
 The ALSA card and PCM names stay the same. Playback uses the existing
 ALSA ring as an IOMMU alias and waits for the firmware preparation and
-trigger acknowledgments. Prepare the microphone PCM first when testing
-simultaneous playback and capture.
+trigger acknowledgments.
+
+For the receiver-capable R100 source, append `--receiver` to the build
+command and use the RDMA0 source against which patch 0131 applies.
+This applies patches 0131 and 0133 in the output directory. Only PCM 0
+uses Calliope when enabled. PCM 1 stays on the native microphone route
+and PCM 2 on the native receiver route. For duplex, configure and
+prepare the microphone before speaker startup and start capture after
+Calliope playback starts. Firmware startup refuses a running microphone
+because the firmware configures shared audio registers. Once playback is
+running, the microphone can stop and close while the speaker keeps using
+UAIF0's clocks. The driver restores those clocks after firmware teardown.
 
 The R100 trial reproduced underruns when SIFS0 had no clocked sink and
 when an optional DSP dump report ended the stream. The stock UAIF0

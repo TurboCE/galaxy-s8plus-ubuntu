@@ -2402,3 +2402,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Verified the live registers and shutdown on R100. The updated
   amplifier control did not restore native UAIF4 data or acoustic
   loudspeaker output in the two-microphone trial.
+
+### R100 Calliope playback with the separate receiver
+
+- Combined the optional Calliope speaker path with the native
+  receiver and microphone driver. Verified resumed UAIF4 data
+  activity and microphone close before playback teardown. Kept the
+  firmware path opt-in because acoustic playback and capture-first
+  duplex remain unresolved.
