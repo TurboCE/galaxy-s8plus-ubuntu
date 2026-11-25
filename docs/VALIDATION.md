@@ -6133,3 +6133,48 @@ launch and captured 216,000 zero-valued stereo frames. That
 format difference on its own did not restore the reference
 feedback. Neither trial changed the installed codec, microphone
 or receiver configuration. The temporary modules were removed.
+
+### SM-G955N bottom speaker restored on GPH3
+
+Used the working Samsung #58 boot as the live control and Samsung's
+Exynos8895 DT and pinctrl sources as the board reference. A read-only
+probe sampled GPH0, GPH1 and GPH3 during the same played fixture.
+GPH0-5 through GPH0-7 stayed low. GPH3 was muxed to function 2 on
+all four pins. GPH3-0 through GPH3-2 showed clock and data activity in
+both runs. GPH3-3 stayed low with the MAX98506 voltage/current ADCs
+disabled and transitioned in all nine windows with the ADCs enabled.
+WDMA1 captured 288,000 frames in each run, all zero with ADCs off and
+with the reference feedback present at a 520-count peak with ADCs on.
+This isolates the physical speaker interface to GPH3 even though the
+Samsung pinctrl group label calls it the CDMA bus.
+
+Returned to 6.18 VPN2 and confirmed its speaker group selected
+GPH0-5 through GPH0-7. Replaced only the speaker DT pin list with
+GPH3-0 through GPH3-3, retaining function 2 and the pull-down.
+Decompiled and compared both DTBs and verified that the kernel
+payload and initramfs matched byte for byte. Preserved and verified
+the raw rollback BOOT and protected partitions through TWRP. The
+installed MAX98506, ABOX speaker and microphone drivers were the
+existing release modules.
+
+The corrected 6.18 BOOT exposed the original three ALSA devices.
+Played the same five-second WAV through the normal lower-speaker
+playback PCM 0 with no Calliope diagnostic override, and recorded
+384,000 frames from the handset microphone on PCM 1. The 523.25 Hz
+and 697 Hz tones appeared in order at 197.78 and 467.17 counts in
+the strongest 250 ms windows, consistent with the reference and
+above the preceding quiet runs. The receiver PCM was not used.
+
+After saving the existing Standard (HiFi) profile in WirePlumber,
+selected Bottom Speaker as the default output. The previous active
+profile was Voice, which exposes the separate receiver. After a
+normal reboot the Bottom Speaker and Microphone were still the
+default nodes. PipeWire connected `pw-play` to the default speaker
+and `pw-record` to the microphone. The playback exited successfully,
+captured 311,296 frames, and reproduced both frequencies in order
+with peaks of 192.54 and 458.24 counts. The Receiver PCM and Voice
+profile remained available. The patched BOOT was kept installed,
+the temporary recovery timer was removed, and `g955n-ubuntu` stayed
+as the persistent hostname. There were no error-priority pinctrl,
+ABOX or codec messages in that boot's kernel journal. The recorded
+audio and vendor artifacts are private and excluded from Git.

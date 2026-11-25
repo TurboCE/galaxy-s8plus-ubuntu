@@ -1,0 +1,22 @@
+Subject: [PATCH] arm64: dts: exynos: select GPH3 for dream2lteks speaker
+
+On the SM-G955N, the working Samsung kernel shows the speaker
+clock and PCM activity on GPH3. Its fourth pin becomes active
+only when the MAX98506 voltage/current ADCs are enabled and
+WDMA1 receives the corresponding samples. The previous mainline
+speaker group selected GPH0-5 through GPH0-7 instead.
+
+Mux all four GPH3 pins for UAIF4, including the amplifier return.
+The CS47L92 microphone and receiver use the existing UAIF0 pins.
+
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -510,7 +510,7 @@
+ 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+ 	};
+ 	g955n_abox_speaker_pins: speaker-bus-pins {
+-		samsung,pins = "gph0-5", "gph0-6", "gph0-7";
++		samsung,pins = "gph3-0", "gph3-1", "gph3-2", "gph3-3";
+ 		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+ 		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+ 	};

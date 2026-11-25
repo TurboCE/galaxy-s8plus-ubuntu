@@ -2613,3 +2613,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   samples. The diagnostic module was removed after testing.
 - Matched the working #58 UAIF0 format with the microphone idle.
   Playback timing was unchanged and amplifier feedback stayed zero.
+
+## 2026-11-25 — SM-G955N bottom speaker pinmux
+
+- Corrected the UAIF4 speaker pin group to GPH3-0 through GPH3-3,
+  including the amplifier feedback input, using an isolated DTB
+  change on 6.18 VPN2.
+- Verified actual lower-speaker output over ALSA and the default
+  PipeWire route after reboot. Saved the Standard audio profile
+  for the lower speaker and preserved the separate Voice profile.
