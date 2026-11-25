@@ -7160,3 +7160,37 @@ and the default bottom speaker route remained available. One
 brcmfmac temporary scan suppression was logged after resume. The
 front test observes the sensor frame counter. CSI reception, pixel
 capture and Ubuntu camera app operation have yet to be verified.
+
+
+## 2026-11-26 — Front CSI reception and camera clock
+
+On the working 6.18 boot the Exynos8895 CAM power status low field was
+0xf and the clock controller reported CSIS1 bus gates already enabled.
+The CSIS1 mapping at 0x12cb0000 returned version 0x03070000. The link
+test used two D-PHY lanes, virtual channel zero, RAW10, settle code 7
+and the handset's previously verified 1632×918 S5K3H1 sensor mode.
+
+At the 33.3125 MHz boot camera clock, CSIS1 observed frame start and
+end and the frame counter advanced by two. The receive overflow bit
+was set. With the other settings fixed and the camera bus at
+133.25 MHz, three consecutive tests saw two frames and both events
+without receiver errors. The same check passed after a normal reboot.
+The probe verified DMA inactive on all four virtual channels, restored
+the shared PHY and receiver settings and verified that the camera
+clock returned to its original rate. The front sensor's four rails
+returned to off.
+
+The normal CAM0 System MMU reported version 0x70000011. A separate
+bring-up read incorrectly accessed optional capability register
+0x874 and generated a synchronous external abort. The faulting
+instruction was resolved against the exact test module. Rebooted the
+unchanged BOOT and checked GDM, Wi-Fi, the location hub and the
+default bottom speaker. The corrected read of capability0 alone
+returned 0x2080331c, which clears the optional second-register flag.
+The subsequent CSI reception check passed. The exploratory
+capability reader is separate from the checked-in link probe.
+
+The separate 6.18 V4L2 build produced the ARM64 Image and media
+controller, videodev, async and fwnode modules. The handset tests
+above used the existing kernel. System MMU mapping, DMA transfer
+and app capture are separate validation steps.

@@ -69,3 +69,24 @@ Both operations assert reset, idle the clock pin and drop the power
 rails at the end. The probe generates and discards the sensor stream.
 A separate CSI receiver and media pipeline are needed to capture pixels
 in V4L2.
+
+## Front CSI link check
+
+The checked capture path starts at CSIS1 0x12cb0000. The handset reports
+receiver register version 0x03070000. The tested stock front mode
+uses two lanes, RAW10, 1632×918 and settle code 7. For the test the
+camera bus is raised from its 33.3125 MHz boot rate to 133.25 MHz.
+The lower rate produced a CSIS receive overflow before the change.
+
+Build `g955n-csis1-link-test` for the live kernel. The bounded probe
+logs when CSIS1 is armed. Start the front driver's `stream_probe` from
+a second root process during the reception window. The module checks
+frame start and end, the receiver counter, receiver errors, and that
+all four DMA channels stay inactive. It restores the receiver, the shared
+PHY controls and camera clock immediately afterward. A successful test
+reports its result through the kernel log and returns EAGAIN from
+module initialization so the one-shot can be repeated without reboot.
+
+`config/mainline618-camera-media.fragment` enables the standard V4L2
+and media-controller core for a separate kernel build. The reception
+test uses the existing handset kernel and allocates no capture buffers.

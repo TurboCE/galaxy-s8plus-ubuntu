@@ -2932,3 +2932,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   clock, reset line and four stock S2MPB02 supplies.
 - Confirmed direct chip reads and advancing frame counters in the stock
   1632×918 mode before and after RTC-woken s2idle.
+
+
+## 2026-11-26 — Front CSI receiver frame reception
+
+- Verified the S5K3H1-to-CSIS1 link in the 1632×918 RAW10 mode.
+- Corrected an observed receive overflow by clocking the camera bus
+  at 133.25 MHz during the test. Pixel DMA remains disabled in the probe.
+- Added a media-core fragment that built the ARM64 V4L2 kernel and modules.
