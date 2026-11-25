@@ -6531,3 +6531,18 @@ sequence uses calibrated gamma and AOR, temperature and supply
 compensation, ACL, and an explicit gamma latch. The integrated
 kernel's GNOME, Wi-Fi, sensor daemon, and default lower-speaker
 routing were available after the probe. BOOT was not changed.
+
+## 2026-11-25 — Isolate the DSIM bus-turnaround timeout
+
+The loader's timeout register was `0x00ffffff`, identical to the
+Samsung driver values of 0xff for BTA and 0xffff for LP receive.
+Command packet gating was disabled. Forcing low-power command
+transmission alone reproduced the original BTA timeout, and the
+escape-mode register was restored.
+
+Extending only BTA to 0xfff returned a DCS long response with ID
+`d11010`. The final W=1 build repeated the result on the running
+6.18 device and confirmed timeout register restoration to
+`0x00ffffff`. Existing display timing and mode were retained.
+GDM and the BCM4773 daemon remained active. No calibration or
+brightness commands were sent. The native backlight is still absent.

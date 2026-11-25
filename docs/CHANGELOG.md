@@ -2731,3 +2731,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added a guarded DSIM0 status snapshot with an opt-in panel ID request.
   Matched the same handset's Samsung boot log to the S6E3HA6 Dream2 A3
   SA calibration table. Linux backlight registration is still pending.
+
+## 2026-11-25 — Recover OLED panel ID reads on 6.18
+
+- The DSIM diagnostic waits for a ready clock lane and extends the
+  bus-turnaround window for the ID read. It restores the timeout
+  register before returning. The live panel returned ID `d11010`.

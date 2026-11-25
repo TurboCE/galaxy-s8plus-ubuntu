@@ -11,8 +11,7 @@ sudo insmod compat/display/dsim/g955n-dsim-identify.ko
 sudo dmesg | grep g955n-dsim:
 ```
 
-The default mode snapshots six controller registers plus the IRQ and
-FIFO status. It requires the Korean dream2lte board, the active display
+The default mode snapshots controller configuration, IRQ, and FIFO status. It requires the Korean dream2lte board, the active display
 power domain, and an unclaimed DSIM0 range. Use it only on the
 loader-configured DECON build. The module does not install a display or
 backlight driver.
@@ -20,8 +19,9 @@ backlight driver.
 The optional developer-only `read_id=Y` issues a standard three-byte DCS
 ID request. This mode writes to the DSIM header FIFO and acknowledges
 the resulting receive events. Keep the screen active and test only
-with exclusive access to the controller. The loader-inherited setup
-returned a bus-turnaround timeout on the tested handset.
+with exclusive access to the controller. The read temporarily extends the controller’s bus-turnaround
+window, then restores the loader configuration. It returned
+`d11010` on the running 6.18 handset.
 
 Older Samsung-kernel logs from this handset contain
 `lcdtype=13701136` (hexadecimal `d11010`). Samsung's
