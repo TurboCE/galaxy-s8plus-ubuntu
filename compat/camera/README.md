@@ -17,3 +17,18 @@ removes the diagnostic module on kernels built without module unloading.
 The result confirms communication with the shared power and flash IC.
 Camera regulator control, sensor identification, flash output and V4L2
 capture are separate checks.
+
+## White torch
+
+Include `g955n-s2mpb02-torch.dtsi` with the dual-channel USI10 fragment
+and install `g955n-s2mpb02-torch` for the exact kernel release. Linux
+exports `/sys/class/leds/white:torch/brightness` with levels 0 through 3.
+The enabled range follows Samsung's ordinary 20, 40 and 60 mA table
+entries. The driver reads the enable pin and programmed current to
+report brightness. It keeps the high-current flash trigger inactive
+and leaves the second illuminator and camera rails untouched.
+
+Boot, shutdown and standby use the kernel LED class. An off request
+drops the physical enable and restores the original torch current
+selector. Suspend powers the output down and resume restores the
+prior level.

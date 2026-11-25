@@ -2908,3 +2908,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Identified the camera and flash power IC on the handset with read-only
   register checks. Verified NFC and buffered optical acquisition again
   after a normal reboot.
+
+
+## 2026-11-26 — White torch LED class integration
+
+- Added the SM-G955N S2MPB02 white torch to the Linux LED class at the
+  stock 20–60 mA ordinary torch settings.
+- Verified GPIO and current-register readback on the handset, including
+  restoration after s2idle and the final output-off state.

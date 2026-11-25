@@ -7069,3 +7069,30 @@ discovery and shutdown passed, and optical acquisition yielded
 48 frames before returning both supplies to off. No priority-error
 kernel entries were present at the end of those checks. Camera
 streaming, flash emission and iris support remain unverified.
+
+
+## 2026-11-26 — White torch LED class and s2idle
+
+Added one I²C node to the verified dual-channel USI10 board and compiled
+the S2MPB02 LED driver against the installed Linux 6.18 release with W=1.
+The GPIO mapping and 60 mA upper limit follow Samsung's regular
+flashlight path. The unused flash trigger stays low. The driver checks
+the boost configuration before claiming the output and touches only the
+first channel's mode and torch-current fields.
+
+The module loaded automatically. After rebooting into the build with
+hardware-backed brightness readback, four off-to-60 mA cycles read back
+the GPIO and current selector and ended with the GPIO off. With torch
+level 1 and the optical buffer active, the phone completed RTC-woken
+s2idle on the same boot. The torch read back level 1 after resume and
+level 0 on shutdown of the test. Optical IIO produced 32 fresh frames
+after wake and both optical supplies returned to off.
+
+USB and Wi-Fi management paths, GDM, the GNSS socket and default bottom
+speaker route remained available. The Wi-Fi driver logged one scan
+suppression status 4 after resume. In brcmfmac this bit denotes temporary
+scan suppression around a DHCP critical-protocol interval. A subsequent
+NetworkManager rescan succeeded without another kernel error, with the
+link connected. Removed the BOOT trial timer and kept the tested image.
+The observations verify the GPIO and current programming. Visible
+emission and the camera flash strobe require separate tests.

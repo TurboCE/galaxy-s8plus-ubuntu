@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc@0/usi@10900000/i2c@0} {
+	torch@59 {
+		compatible = "samsung,sm-g955n-s2mpb02-torch";
+		reg = <0x59>;
+		/* The Samsung driver sets the two outputs by physical level. */
+		flash-gpios = <&{/soc@0/pinctrl@10980000/gpc0-gpio-bank} 1 0>;
+		torch-gpios = <&{/soc@0/pinctrl@10980000/gpc0-gpio-bank} 2 0>;
+	};
+};
