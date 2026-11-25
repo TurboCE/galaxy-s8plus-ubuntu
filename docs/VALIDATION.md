@@ -6325,3 +6325,43 @@ After the trial, TWRP restored and verified the original full VPN2 BOOT
 image. Ubuntu restarted with GDM active and the lower speaker selected.
 The test nodes and recovery timer were absent. The restore check also
 compared all backed-up protected partitions without writing to them.
+
+### BCM4773 legacy power and initial daemon traffic
+
+A new controlled restart on the same handset's #58 logged GNSS enable
+off and MCU rail off, followed about 43 ms later by MCU rail on and
+then GNSS enable on. The vendor daemon sent `BBD:PassThru=1` before
+download and `BBD:PassThru=0` just before `ESW:READY`. The kernel
+reported SSP ID 0x55. The #58 trace was restricted to these nodes and
+power/control values.
+
+ARM64 `W=1` built the matching 6.18 module. On the existing pinctrl
+trial BOOT, the root-only `mcu_power` and `GPS_PWR_EN/value` paths
+returned independent state transitions. Invalid values were rejected,
+writes with the rail off returned `EHOSTDOWN`, and 315 bytes were sent
+with the rail enabled. Unbinding the driver while powered removed
+the nodes and disabled the MCU regulator with zero users.
+
+Under a bounded private service, the original on-device daemon ran with
+its cache directories on tmpfs and its existing vendor and calibration
+mounts read-only. The driver accepted real `BBD:PassThru` messages. One
+sync window transferred 536 bytes out and 452 bytes in without an SPI
+error. The daemon repeatedly reported `FD:Timeout Sync` before finishing
+autobaud. Its status never reached ready, and the driver recorded no
+read of the patch binary. The trace used no `bbd_sensor` substitute.
+The private firmware file and trial device registrations were removed
+after the test.
+
+Separate temporary runs at 1 MHz in mode 3 and at 26 MHz with CPHA
+cleared reproduced the timeout and did not reach the patch reader.
+The daemon sent BBD-framed sync requests beginning with the escape
+marker. Its reads repeatedly began with 0x58 or 0xd8. Offline alignment
+checks found three apparent frame delimiters after a one-bit shift,
+but zero CRC-valid frames at any tested alignment. The timing trials
+were removed. These results point to the receive path and leave the
+specific synchronization defect open.
+
+After both trials, TWRP restored and read back steady VPN2 BOOT and
+checked the protected partition hashes. The normal Ubuntu boot reached
+GDM, the lower speaker was still the PipeWire default, and no legacy
+power/TTY/patch endpoints, trial firmware or return timers remained.

@@ -2,6 +2,7 @@
 /* BCM4773 half-duplex SSI transport for the SM-G955N. */
 #include <crypto/sha2.h>
 #include <linux/delay.h>
+#include <linux/device/class.h>
 #include <linux/firmware.h>
 #include <linux/fs.h>
 #include <linux/gpio/consumer.h>
@@ -43,6 +44,16 @@ static bool expose_legacy_stream;
 module_param(expose_legacy_stream, bool, 0400);
 MODULE_PARM_DESC(expose_legacy_stream, "Expose an experimental queued /dev/ttyBCM stream");
 
+static bool expose_legacy_power;
+module_param(expose_legacy_power, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_power, "Let the legacy daemon control the hub and GNSS power");
+
+struct ssi_saved_gpio {
+	int direction;
+	int value;
+	bool saved;
+};
+
 enum bbd_firmware_state {
 	BBD_FIRMWARE_UNKNOWN,
 	BBD_FIRMWARE_NOT_READY,
@@ -72,7 +83,10 @@ struct g955n_ssi {
 	struct gpio_desc *response;
 	struct gpio_desc *host;
 	struct gpio_desc *enable;
-	int enable_direction, enable_value;
+	struct gpio_desc *gnss_enable;
+	struct ssi_saved_gpio enable_original, gnss_original;
+	struct class *sec_class;
+	struct device *power_device, *gnss_device;
 	u8 *tx, *rx;
 	size_t pending;
 	int irq;
@@ -172,46 +186,73 @@ static int ssi_receive(struct g955n_ssi *ssi)
 	return 0;
 }
 
-static int ssi_restore_enable(struct g955n_ssi *ssi)
+static int ssi_save_gpio(struct gpio_desc *gpio, struct ssi_saved_gpio *saved)
 {
-	if (!ssi->enable)
+	int ret;
+
+	if (!gpio || saved->saved)
 		return 0;
-	if (ssi->enable_direction)
-		return gpiod_direction_input(ssi->enable);
-	return gpiod_direction_output(ssi->enable, ssi->enable_value);
+	ret = gpiod_get_direction(gpio);
+	if (ret < 0)
+		return ret;
+	saved->direction = ret;
+	if (!saved->direction) {
+		ret = gpiod_get_value_cansleep(gpio);
+		if (ret < 0)
+			return ret;
+		saved->value = ret;
+	}
+	saved->saved = true;
+	return 0;
+}
+
+static int ssi_restore_gpio(struct gpio_desc *gpio, struct ssi_saved_gpio *saved)
+{
+	int ret;
+
+	if (!saved->saved)
+		return 0;
+	if (saved->direction)
+		ret = gpiod_direction_input(gpio);
+	else
+		ret = gpiod_direction_output(gpio, saved->value);
+	if (!ret)
+		saved->saved = false;
+	return ret;
+}
+
+static int ssi_drive_gpio(struct gpio_desc *gpio, bool enable)
+{
+	int ret = gpiod_direction_output(gpio, enable);
+
+	if (ret)
+		return ret;
+	ret = gpiod_get_value_cansleep(gpio);
+	if (ret < 0)
+		return ret;
+	return ret == enable ? 0 : -EIO;
 }
 
 static int ssi_power_on(struct g955n_ssi *ssi)
 {
 	int ret, restore;
 
-	if (ssi->enable) {
-		ret = gpiod_get_direction(ssi->enable);
-		if (ret < 0)
-			return ret;
-		ssi->enable_direction = ret;
-		if (!ret) {
-			ret = gpiod_get_value_cansleep(ssi->enable);
-			if (ret < 0)
-				return ret;
-			ssi->enable_value = ret;
-		}
-	}
-	ret = regulator_enable(ssi->supply);
+	ret = ssi_save_gpio(ssi->enable, &ssi->enable_original);
 	if (ret)
 		return ret;
+	ret = regulator_enable(ssi->supply);
+	if (ret) {
+		ssi->enable_original.saved = false;
+		return ret;
+	}
 	ssi->powered = true;
 	if (!ssi->enable)
 		return 0;
 
-	ret = gpiod_direction_output(ssi->enable, 1);
-	if (!ret) {
-		restore = gpiod_get_value_cansleep(ssi->enable);
-		if (restore == 1)
-			return 0;
-		ret = restore < 0 ? restore : -EIO;
-	}
-	restore = ssi_restore_enable(ssi);
+	ret = ssi_drive_gpio(ssi->enable, true);
+	if (!ret)
+		return 0;
+	restore = ssi_restore_gpio(ssi->enable, &ssi->enable_original);
 	if (restore)
 		dev_err(&ssi->spi->dev, "cannot restore hub enable: %d\n", restore);
 	if (!regulator_disable(ssi->supply))
@@ -221,7 +262,7 @@ static int ssi_power_on(struct g955n_ssi *ssi)
 
 static int ssi_power_off(struct g955n_ssi *ssi)
 {
-	int restore = ssi_restore_enable(ssi);
+	int restore = ssi_restore_gpio(ssi->enable, &ssi->enable_original);
 	int ret = regulator_disable(ssi->supply);
 
 	if (!ret)
@@ -242,15 +283,21 @@ static int ssi_open_link(struct file *file, struct g955n_ssi *ssi, bool stream)
 		ret = -EBUSY;
 		goto out;
 	}
-	if (ssi->powered) {
-		ret = -EIO;
-		goto out;
+	if (expose_legacy_power) {
+		if (!stream) {
+			ret = -EBUSY;
+			goto out;
+		}
+	} else {
+		if (ssi->powered) {
+			ret = -EIO;
+			goto out;
+		}
+		ret = ssi_power_on(ssi);
+		if (ret)
+			goto out;
+		msleep(200);
 	}
-	ret = ssi_power_on(ssi);
-	if (ret)
-		goto out;
-
-	msleep(200);
 	ssi->opened = true;
 	ssi->pending = 0;
 	if (stream) {
@@ -288,7 +335,8 @@ static int ssi_release(struct inode *inode, struct file *file)
 	mutex_lock(&ssi->lock);
 	if (!ssi->removed) {
 		disable_irq(ssi->irq);
-		ret = ssi_power_off(ssi);
+		if (!expose_legacy_power)
+			ret = ssi_power_off(ssi);
 	}
 	WRITE_ONCE(ssi->stream_open, false);
 	ssi->opened = false;
@@ -423,7 +471,7 @@ static void ssi_stream_worker(struct work_struct *work)
 	int host, ret = 0, frame;
 
 	mutex_lock(&ssi->lock);
-	if (ssi->removed || !ssi->stream_open || ssi->stream_error)
+	if (ssi->removed || !ssi->stream_open || !ssi->powered || ssi->stream_error)
 		goto out;
 
 	for (frame = 0; frame < SSI_WORK_BUDGET; frame++) {
@@ -536,6 +584,8 @@ static ssize_t ssi_stream_write(struct file *file, const char __user *buffer,
 		return ret;
 	if (ssi->removed) {
 		ret = -ENODEV;
+	} else if (!ssi->powered) {
+		ret = -EHOSTDOWN;
 	} else if (ssi->stream_error) {
 		ret = ssi->stream_error;
 	} else {
@@ -562,7 +612,7 @@ static __poll_t ssi_stream_poll(struct file *file, poll_table *wait)
 			flags |= EPOLLIN | EPOLLRDNORM;
 		if (ssi->stream_error)
 			flags |= EPOLLERR;
-		else if (!kfifo_is_full(&ssi->stream_tx))
+		else if (ssi->powered && !kfifo_is_full(&ssi->stream_tx))
 			flags |= EPOLLOUT | EPOLLWRNORM;
 	}
 	mutex_unlock(&ssi->lock);
@@ -732,9 +782,11 @@ static ssize_t ssi_control_write(struct file *file, const char __user *buffer,
 	} else if (!strcmp(command, "ESW:CRASHED")) {
 		ssi->firmware_state = BBD_FIRMWARE_CRASHED;
 		ssi->patch_transfer = false;
-	} else if (!strcmp(command, "SSI:PassThru=1")) {
+	} else if (!strcmp(command, "BBD:PassThru=1") ||
+		   !strcmp(command, "SSI:PassThru=1")) {
 		ssi->patch_transfer = true;
-	} else if (!strcmp(command, "SSI:PassThru=0")) {
+	} else if (!strcmp(command, "BBD:PassThru=0") ||
+		   !strcmp(command, "SSI:PassThru=0")) {
 		ssi->patch_transfer = false;
 	} else if (strcmp(command, "BBD:DEBUG=0") &&
 		   strcmp(command, "SSP:DEBUG=0") &&
@@ -790,6 +842,156 @@ static struct attribute *ssi_control_attrs[] = {
 };
 ATTRIBUTE_GROUPS(ssi_control);
 
+/* On Korean rev10, the gate stays asserted while lhd cycles the 1.8 V rail. */
+static int ssi_manual_rail(struct g955n_ssi *ssi, bool on)
+{
+	int ret;
+
+	if (ssi->powered == on)
+		return 0;
+	if (on) {
+		ret = ssi_save_gpio(ssi->enable, &ssi->enable_original);
+		if (ret)
+			return ret;
+		ret = ssi_drive_gpio(ssi->enable, true);
+		if (!ret)
+			ret = regulator_enable(ssi->supply);
+		if (ret && ssi_restore_gpio(ssi->enable, &ssi->enable_original))
+			dev_err(&ssi->spi->dev, "cannot restore manual hub gate\n");
+	} else {
+		ret = regulator_disable(ssi->supply);
+	}
+	if (ret)
+		return ret;
+	ssi->powered = on;
+	if (!on) {
+		kfifo_reset(&ssi->stream_rx);
+		kfifo_reset(&ssi->stream_tx);
+		ssi->empty_receives = 0;
+		ssi->stream_error = 0;
+		ssi->firmware_state = BBD_FIRMWARE_UNKNOWN;
+		ssi->patch_transfer = false;
+	}
+	msleep(20);
+	if (on && ssi->stream_open)
+		queue_delayed_work(system_freezable_wq, &ssi->stream_work, 0);
+	wake_up_interruptible(&ssi->wait);
+	return 0;
+}
+
+static ssize_t mcu_power_show(struct device *dev, struct device_attribute *attr,
+			      char *buf)
+{
+	struct g955n_ssi *ssi = dev_get_drvdata(dev);
+	int ret;
+
+	mutex_lock(&ssi->lock);
+	ret = regulator_is_enabled(ssi->supply);
+	mutex_unlock(&ssi->lock);
+	return ret < 0 ? ret : sysfs_emit(buf, "%d\n", ret);
+}
+
+static ssize_t mcu_power_store(struct device *dev, struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct g955n_ssi *ssi = dev_get_drvdata(dev);
+	u8 on;
+	int ret;
+
+	ret = kstrtou8(buf, 10, &on);
+	if (ret)
+		return ret;
+	if (on > 1)
+		return -EINVAL;
+	mutex_lock(&ssi->lock);
+	ret = ssi_manual_rail(ssi, on);
+	mutex_unlock(&ssi->lock);
+	return ret ? ret : (ssize_t)count;
+}
+static DEVICE_ATTR(mcu_power, 0600, mcu_power_show, mcu_power_store);
+
+static struct attribute *ssi_power_attrs[] = {
+	&dev_attr_mcu_power.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(ssi_power);
+
+static ssize_t value_show(struct device *dev, struct device_attribute *attr,
+			  char *buf)
+{
+	struct g955n_ssi *ssi = dev_get_drvdata(dev);
+	int ret;
+
+	mutex_lock(&ssi->lock);
+	ret = gpiod_get_value_cansleep(ssi->gnss_enable);
+	mutex_unlock(&ssi->lock);
+	return ret < 0 ? ret : sysfs_emit(buf, "%d\n", ret);
+}
+
+static ssize_t value_store(struct device *dev, struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	struct g955n_ssi *ssi = dev_get_drvdata(dev);
+	u8 on;
+	int ret;
+
+	ret = kstrtou8(buf, 10, &on);
+	if (ret)
+		return ret;
+	if (on > 1)
+		return -EINVAL;
+	mutex_lock(&ssi->lock);
+	ret = ssi_save_gpio(ssi->gnss_enable, &ssi->gnss_original);
+	if (!ret)
+		ret = ssi_drive_gpio(ssi->gnss_enable, on);
+	mutex_unlock(&ssi->lock);
+	return ret ? ret : (ssize_t)count;
+}
+static DEVICE_ATTR(value, 0600, value_show, value_store);
+
+static struct attribute *ssi_gnss_attrs[] = {
+	&dev_attr_value.attr,
+	NULL,
+};
+static const struct attribute_group ssi_gnss_group = {
+	.name = "GPS_PWR_EN",
+	.attrs = ssi_gnss_attrs,
+};
+static const struct attribute_group *ssi_gnss_groups[] = {
+	&ssi_gnss_group,
+	NULL,
+};
+
+static int ssi_register_power(struct g955n_ssi *ssi)
+{
+	struct device *parent = &ssi->spi->dev;
+	int ret;
+
+	ssi->sec_class = class_create("sec");
+	if (IS_ERR(ssi->sec_class))
+		return PTR_ERR(ssi->sec_class);
+	ssi->power_device = device_create_with_groups(ssi->sec_class, parent,
+						      0, ssi, ssi_power_groups,
+						      "sensorhub");
+	if (IS_ERR(ssi->power_device)) {
+		ret = PTR_ERR(ssi->power_device);
+		goto destroy_class;
+	}
+	ssi->gnss_device = device_create_with_groups(ssi->sec_class, parent,
+						     0, ssi, ssi_gnss_groups,
+						     "gps");
+	if (IS_ERR(ssi->gnss_device)) {
+		ret = PTR_ERR(ssi->gnss_device);
+		device_unregister(ssi->power_device);
+		goto destroy_class;
+	}
+	return 0;
+
+destroy_class:
+	class_destroy(ssi->sec_class);
+	return ret;
+}
+
 static void ssi_disconnect(struct g955n_ssi *ssi)
 {
 	mutex_lock(&ssi->lock);
@@ -798,6 +1000,10 @@ static void ssi_disconnect(struct g955n_ssi *ssi)
 		disable_irq(ssi->irq);
 	if (ssi->powered && ssi_power_off(ssi))
 		dev_err(&ssi->spi->dev, "cannot restore hub power on removal\n");
+	if (ssi_restore_gpio(ssi->enable, &ssi->enable_original))
+		dev_err(&ssi->spi->dev, "cannot restore hub enable on removal\n");
+	if (ssi_restore_gpio(ssi->gnss_enable, &ssi->gnss_original))
+		dev_err(&ssi->spi->dev, "cannot restore GNSS enable on removal\n");
 	mutex_unlock(&ssi->lock);
 	cancel_delayed_work_sync(&ssi->stream_work);
 	wake_up_interruptible(&ssi->wait);
@@ -812,6 +1018,9 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (!of_machine_is_compatible("samsung,dream2lteks") ||
 	    (spi->mode & (SPI_CPOL | SPI_CPHA)) != SPI_MODE_3)
 		return -ENODEV;
+
+	if (expose_legacy_power && !expose_legacy_stream)
+		return dev_err_probe(dev, -EINVAL, "daemon power requires the queued SSI stream\n");
 
 	ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
 	if (!ssi)
@@ -857,6 +1066,18 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	ret = PTR_ERR_OR_ZERO(ssi->enable);
 	if (ret)
 		goto free;
+
+	if (expose_legacy_power) {
+		if (!ssi->enable) {
+			ret = -ENODEV;
+			goto free;
+		}
+		ssi->gnss_enable = devm_gpiod_get(dev, "gnss-enable", GPIOD_ASIS);
+		if (IS_ERR(ssi->gnss_enable)) {
+			ret = PTR_ERR(ssi->gnss_enable);
+			goto free;
+		}
+	}
 
 	ssi->irq = gpiod_to_irq(ssi->host);
 	if (ssi->irq < 0) {
@@ -916,9 +1137,16 @@ static int g955n_ssi_probe(struct spi_device *spi)
 		if (ret)
 			goto deregister_control;
 	}
+	if (expose_legacy_power) {
+		ret = ssi_register_power(ssi);
+		if (ret)
+			goto deregister_stream;
+	}
 	spi_set_drvdata(spi, ssi);
 	return 0;
 
+deregister_stream:
+	misc_deregister(&ssi->stream);
 deregister_control:
 	if (expose_legacy_control)
 		misc_deregister(&ssi->control);
@@ -940,6 +1168,11 @@ static void g955n_ssi_remove(struct spi_device *spi)
 {
 	struct g955n_ssi *ssi = spi_get_drvdata(spi);
 
+	if (expose_legacy_power) {
+		device_unregister(ssi->gnss_device);
+		device_unregister(ssi->power_device);
+		class_destroy(ssi->sec_class);
+	}
 	if (expose_legacy_stream)
 		misc_deregister(&ssi->stream);
 	if (expose_legacy_control)

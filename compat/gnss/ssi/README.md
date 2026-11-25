@@ -88,3 +88,25 @@ write of read-only SSP chip-ID requests completed over two SSI
 transfers. The hub sent no response in that test. The stock patch
 bootstrap, power-control ABI and SSP RPC routing still need
 qualification before the original daemon can provide desktop sensors.
+
+## Legacy daemon power control
+
+With `expose_legacy_stream=1 expose_legacy_power=1`, the driver exposes
+the Korean rev10 board's power controls at the original paths:
+
+- `/sys/class/sec/sensorhub/mcu_power` controls the 1.8 V rail.
+- `/sys/class/sec/gps/GPS_PWR_EN/value` controls the independent GNSS
+  enable GPIO.
+
+Both accept root writes of 0 or 1. The MCU gate remains asserted
+between rail cycles and both pins return to their saved states on
+unbind. The opt-in mode requires an explicit rail-on command before
+stream I/O. The original raw SSI mode powers its link on open when
+daemon power control is disabled.
+
+A same-device #58 trace established the startup order and the
+`BBD:PassThru` notifications. On 6.18, an isolated run of the original
+daemon reproduced the power sequence and exchanged actual bytes in
+both directions. The daemon retried at the initial autobaud sync and
+did not read the firmware patch. The trial's service is not enabled
+at boot.

@@ -2675,3 +2675,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   and transport byte and error reporting.
 - Verified a 315-byte queued write and SPI unbind with an open descriptor
   on the Korean board with its revision 10 power pin configured.
+
+## 2026-11-25 — BCM4773 legacy daemon power control
+
+- Matched the same handset's #58 MCU rail, independent GNSS enable
+  and BBD startup delimiters in the opt-in 6.18 stream.
+- Verified the two power controls on the Korean board. The original
+  daemon exchanged bytes in both directions before reaching an
+  autobaud sync timeout. Firmware transfer remains pending.

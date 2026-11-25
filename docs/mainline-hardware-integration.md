@@ -51,8 +51,8 @@ after the vendor daemon read the original patch and transferred it on
 ttyBCM. On 6.18, the opt-in patch reader and inbound control messages
 passed separate endpoint tests. The opt-in `ttyBCM` stream also transferred
 a 315-byte query across multiple SSI frames with the revision 10 power pin
-configured. The hub sent no response without the firmware bootstrap.
-The power controls, actual firmware transfer and sensor RPC routing still
-need to be connected to the original daemon.
-A daemon-reported readiness flag alone does not qualify either sensor
-data or a satellite fix.
+configured. With the legacy daemon power controls connected, the original
+daemon exchanged bytes with the hub. Its autobaud sync timed out before
+the patch reader was used. Firmware startup and sensor RPC routing still
+need qualification before exposing real sensor readings or a satellite
+fix to Ubuntu.
