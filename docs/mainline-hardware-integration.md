@@ -58,7 +58,8 @@ the USI8 divider and matched the first #58 replies.
 [Proposal 0140](../patches/proposals/0140-mainline-sm-g955n-bcm4773-usi8-clock.patch)
 applies that clock correction to the kernel and board DT.
 [Proposal 0141](../patches/proposals/0141-mainline-sm-g955n-bcm4773-short-spi-delays.patch)
-avoids tick-rounded delays during short transfers. A bounded handset trial
-with those controller changes and the BBD sensor probe finished firmware
-transfer, reached daemon ready and returned chip ID 0x55. Persistent boot
-integration, IIO measurements and a satellite fix still need verification.
+avoids tick-rounded delays during short transfers. The integrated handset
+image automatically starts the original daemon using the mainline systemd
+unit. Two boots reached ready and the SSP probe returned chip ID 0x55
+over the integrated driver. IIO measurements and a satellite fix remain
+unverified.

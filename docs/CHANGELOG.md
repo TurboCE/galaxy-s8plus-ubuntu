@@ -2701,3 +2701,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   chip-ID query after the original daemon reports ready.
 - Confirmed firmware completion, 549 acknowledged reliable frames with
   zero NACKs, and physical SSP ID 0x55 on 6.18.
+
+## 2026-11-25 — BCM4773 automatic startup on 6.18
+
+- Added the mainline location-hub systemd unit and an explicit Linux 6.18
+  entry point to prepare the handset's read-only Android runtime.
+- Booted the patched clock and SPI controller on the handset twice.
+  The daemon started automatically each time. An integrated service
+  restart also returned the real SSP ID 0x55.

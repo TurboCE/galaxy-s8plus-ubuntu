@@ -6435,3 +6435,32 @@ integrated kernel image remain separate validation targets.
 TWRP restored and verified the original VPN2 BOOT. The handset reached
 GDM with the lower speaker still selected in PipeWire. The return timer,
 trial firmware and all four legacy nodes were absent after restart.
+
+### BCM4773 integrated 6.18 boot and daemon autostart
+
+Built the kernel Image and SPI controller module with proposals 0140
+and 0141 in an isolated copy of the VPN2 build output. The kernel config
+matched the previous VPN2 config byte for byte. Based the embedded DT
+on the 0139 pinctrl trial and changed the USI8 compatible and the
+mainline hub opt-in boot argument. The loader's embedded initramfs
+matched the previous trial byte for byte. Staged matching modules in
+the kernel-release updates directory and kept the board firmware file
+outside Git.
+
+TWRP verified and read back the new BOOT. Two distinct normal boots
+reached GDM and reported the mainline location service running with
+zero automatic restarts and `firmware_state=ready patch_transfer=0`.
+Each transmitted 513,269 bytes without a pending payload or transport
+error at readiness. Between boots, a restart with a temporary strace
+override verified a CRC-valid SSP chip ID 0x55. The override and
+its private capture were removed before the second boot.
+
+After the second boot, NetworkManager reported connected Wi-Fi,
+PipeWire had the lower speaker as its default sink, and the Ubuntu
+GNOME Shell process held the DRM display and render nodes. The
+daemon's mount namespace showed both the Android system and EFS
+mounts as read-only with journal replay disabled. Retained the new
+BOOT and enabled service after removing the temporary return timer.
+Verified recovery backups and pre-trial launcher copies are available
+for rollback. Continuous SSP measurements, GNSS positioning and hub
+behavior across system suspend remain unverified.

@@ -4,7 +4,18 @@
 set -eu
 test "$(id -u)" = 0
 grep -q SM-G955N /proc/device-tree/model
-uname -r | grep -q g955n-ubuntu
+case "${1:-}" in
+    "")
+        uname -r | grep -q g955n-ubuntu
+        ;;
+    --mainline-hub)
+        uname -r | grep -Eq '^6\.18\.[0-9]+-g955n-'
+        grep -Eq '(^|[[:space:]])g955n\.bcm4773=1([[:space:]]|$)' /proc/cmdline
+        ;;
+    *)
+        exit 2
+        ;;
+esac
 node=$(readlink -f /dev/block/by-name/SYSTEM)
 test -b "$node"
 grep -qx PARTNAME=SYSTEM "/sys/class/block/$(basename "$node")/uevent"

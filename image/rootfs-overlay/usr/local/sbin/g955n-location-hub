@@ -4,10 +4,28 @@ set -eu
 umask 077
 test "$(id -u)" = 0
 grep -q SM-G955N /proc/device-tree/model
-uname -r | grep -q g955n-ubuntu
+case "${1:-}" in
+    "")
+        uname -r | grep -q g955n-ubuntu
+        ;;
+    --mainline|--power-off)
+        uname -r | grep -Eq '^6\.18\.[0-9]+-g955n-'
+        grep -Eq '(^|[[:space:]])g955n\.bcm4773=1([[:space:]]|$)' /proc/cmdline
+        if [ "$1" = --power-off ]; then
+            for control in /sys/class/sec/gps/GPS_PWR_EN/value /sys/class/sec/sensorhub/mcu_power; do
+                [ ! -w "$control" ] || printf '0\n' > "$control"
+            done
+            exit
+        fi
+        set -- --mainline-hub
+        ;;
+    *)
+        exit 2
+        ;;
+esac
 
 # Keep BSP mounts and the final daemon in the same service mount namespace.
-/usr/local/sbin/g955n-android-bsp
+/usr/local/sbin/g955n-android-bsp "$@"
 
 # Calibration must be the actual EFS partition, mounted without journal replay.
 efs_node=$(readlink -f /dev/block/by-name/EFS)

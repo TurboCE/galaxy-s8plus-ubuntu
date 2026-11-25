@@ -125,3 +125,18 @@ returned a CRC-valid SSP chip-ID response using temporary USI8 clock
 and microsecond-delay driver trials. The persistent integration still
 needs a qualified boot with proposals 0139 through 0141, followed by
 sensor RPC routing and IIO consumers.
+
+## Boot integration on Linux 6.18
+
+The SM-G955N root filesystem overlay provides
+`g955n-location-hub-mainline.service`. Enable it after installing the SSI
+module built against the running kernel, the matching SPI controller
+module, and the verified on-device patch file. The unit starts only
+with the `g955n.bcm4773=1` boot parameter. The matching board DT needs
+proposals 0139 through 0141 and the USI8 SPI compatible from 0140.
+
+The original daemon runs with the vendor and EFS partitions mounted
+read-only with journal replay disabled. The service disables the GNSS
+enable and MCU rail when it stops. Check live startup by reading
+`/sys/class/misc/bbd_control/daemon_status`. The dedicated service was
+verified across two normal boots on the integrated SM-G955N image.
