@@ -3,10 +3,33 @@
 
 #include "aid-source/dimming.h"
 #include "aid-source/s6e3ha6/dream2-a3.h"
+#include "aid-source/s6e3ha6/dream2-a3-aor.h"
 
 #define DREAM2_GAMMA_LEN 35
 
 int g955n_aid_verify(const u8 *mtp);
+
+int g955n_aor_trial_value(const u8 saved[2], u8 trial[2]);
+
+int g955n_aor_trial_value(const u8 saved[2], u8 trial[2])
+{
+	unsigned int baseline = (saved[0] << 8) | saved[1];
+	unsigned int best_delta = 65;
+	unsigned int i;
+
+	/* Increase AOR modestly to dim the panel at its existing gamma. */
+	for (i = 0; i < ARRAY_SIZE(dream2_a3_sa_aor_table); i++) {
+		const u8 *entry = dream2_a3_sa_aor_table[i];
+		int delta = ((entry[0] << 8) | entry[1]) - (int)baseline;
+
+		if (delta >= 32 && delta < best_delta) {
+			best_delta = delta;
+			memcpy(trial, entry, 2);
+		}
+	}
+
+	return best_delta < 65 ? 0 : -ERANGE;
+}
 
 static void dream2_decode_mtp(struct tp *tp, const u8 *mtp)
 {

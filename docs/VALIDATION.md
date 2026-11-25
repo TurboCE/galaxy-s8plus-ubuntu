@@ -6574,3 +6574,17 @@ and the first and last rows differed. The probe sent no gamma
 packets. MTP, ELVSS and HBM resource checks, lock-key transmission
 and DSIM timeout restoration also completed. GDM and the BCM4773
 service remained active. The Linux backlight remains to be wired.
+
+## 2026-11-25 — Verify OLED AOR write, latch and restore
+
+Built the ARM64 AID probe with `W=1` and ran it temporarily on the
+integrated 6.18 boot with system suspend inhibited. The live panel
+returned AOR `047d` twice. The selected Samsung table entry
+`04a3` read back after writing B1 and sending the stock F7 03 latch.
+Restoring B1 and sending the same latch returned `047d` again.
+
+The probe sent the lock keys and restored the DSIM timeout.
+GDM, Wi-Fi, the sensor hub, the connected DSI connector, and the
+default PipeWire bottom-speaker routing were available afterward.
+The AOR register change was verified. OLED luminance, the full
+brightness packet sequence and Linux backlight binding remain open.

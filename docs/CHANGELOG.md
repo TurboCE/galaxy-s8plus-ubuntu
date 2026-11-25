@@ -2749,3 +2749,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added an optional AID probe using the pinned Samsung Dream2 A3
   tuning data and calculator. The 6.18 handset generated 74 gamma
   rows from factory MTP. Panel brightness remained unchanged.
+
+## 2026-11-25 — Verify reversible writes to the OLED AOR register
+
+- Added an opt-in AOR write and restore probe using Samsung's
+  Dream2 A3 brightness table and latch command. Verified both
+  register readbacks on the live panel.

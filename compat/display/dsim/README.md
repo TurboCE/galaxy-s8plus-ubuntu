@@ -60,3 +60,12 @@ data. It checks every packed row for nonblank output and the endpoints
 for different contents. Calibration and computed bytes stay in scratch
 memory. HBM gamma is read in the resource diagnostic. No calculated
 row is sent to the panel by this probe.
+
+The optional `test_aor=Y` parameter also exercises a bounded panel
+write. It requires `read_calibration=Y` and an active display with
+suspend inhibited. After two matching AOR reads, it selects a
+nearby dimmer value from the Samsung normal-brightness table, sends
+the stock gamma latch command, confirms the new register value,
+then restores and verifies the original value. The trial leaves
+gamma and supply compensation settings alone. Register readback
+does not measure panel luminance.

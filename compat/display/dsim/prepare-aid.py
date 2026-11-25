@@ -9,6 +9,7 @@ SOURCES = {
     "dimming.c": "a0550cf5dd21b6057b439274e9275b24f976aff6de0834d0bffcf4355a44a1ec",
     "dimming.h": "707fa31b19003f86d54dc79f6c4126e51fd3fb11ae0c03c9ee3c59f83cd6a21f",
     "dimming_gamma.h": "0152ce10367d47e8e722dfd2488cfdada0d2ff8e33fc323cdfe5eed53cfef21c",
+    "s6e3ha6/s6e3ha6_dream2_a3_sa_panel.h": "6be34d111265ff6f9959586b5f2dd7464fbbffcaf2db5dc44a7d8cb7188ab6c1",
     "s6e3ha6/s6e3ha6_dimming.h": "2b8dada0cecadc031d884c6c65305bc6001a246b2b7f208b9123eed62ce9a504",
     "s6e3ha6/s6e3ha6_dream2_a3_sa_panel_dimming.h": "a666517f0067237bc3d3102b2d03a22914beee3c18a2abbc70028833a22c1e67",
 }
@@ -60,10 +61,18 @@ void g955n_aid_release_orders(void)
     variant = variant[:variant.index("#if PANEL_BACKLIGHT_PAC_STEPS")]
     variant += "\n#endif\n"
 
+    panel = files["s6e3ha6/s6e3ha6_dream2_a3_sa_panel.h"]
+    aor = panel.split("#if PANEL_BACKLIGHT_PAC_STEPS == 512", 1)[1]
+    aor = aor[:aor.index("/* HBM */")]
+    aor = aor.replace("static u8", "static const u8")
+    aor = aor.replace("[S6E3HA6_TOTAL_PAC_STEPS][2]", "[][2]")
+    aor = panel[:panel.index("*/") + 2] + aor + "};\n"
+
     generated = destination / "aid-source"
     (generated / "s6e3ha6").mkdir(parents=True, exist_ok=True)
     (generated / "dimming.c").write_text(calculator)
     (generated / "dimming.h").write_text(interface)
+    (generated / "s6e3ha6/dream2-a3-aor.h").write_text(aor)
     (generated / "dimming_gamma.h").write_text(files["dimming_gamma.h"])
     (generated / "s6e3ha6/s6e3ha6_dimming.h").write_text(files["s6e3ha6/s6e3ha6_dimming.h"])
     (generated / "s6e3ha6/dream2-a3.h").write_text(variant)

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Inspect the SM-G955N Exynos8895 DSI controller inherited from the loader. */
 #include <linux/bitfield.h>
+#include <linux/delay.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/ioport.h>
@@ -48,6 +49,12 @@ MODULE_PARM_DESC(read_id, "Read only the display family's three-byte DCS ID");
 static bool read_calibration;
 module_param(read_calibration, bool, 0400);
 MODULE_PARM_DESC(read_calibration, "Validate reads of S6E3HA6 brightness calibration");
+
+#ifdef G955N_WITH_AID
+static bool test_aor;
+module_param(test_aor, bool, 0400);
+MODULE_PARM_DESC(test_aor, "Temporarily dim via AOR and verify restoration");
+#endif
 
 #define S6E3HA6_MTP		0xc8
 #define S6E3HA6_MTP_LEN		35
@@ -123,6 +130,13 @@ static int g955n_dsim_read(void __iomem *dsi, u8 address, u8 *data, size_t len)
 		budget--;
 		if ((word & 0x3f) == MIPI_DSI_RX_END_OF_TRANSMISSION)
 			continue;
+		if (!received && len == 2 &&
+		    (word & 0x3f) == MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_2BYTE) {
+			data[0] = word >> 8;
+			data[1] = word >> 16;
+			received = true;
+			continue;
+		}
 		if ((word & 0x3f) != MIPI_DSI_RX_DCS_LONG_READ_RESPONSE ||
 		    FIELD_GET(GENMASK(23, 8), word) != len || received) {
 			malformed = true;
@@ -156,30 +170,79 @@ static int g955n_dsim_read(void __iomem *dsi, u8 address, u8 *data, size_t len)
 	return 0;
 }
 
-static int g955n_dsim_key(void __iomem *dsi, u8 address, u8 value)
+static int g955n_dsim_long3(void __iomem *dsi, u8 address, u8 first, u8 second)
 {
 	int ret = g955n_dsim_wait_tx(dsi);
 
 	if (ret)
 		return ret;
-	writel(address | (value << 8) | (value << 16), dsi + DSIM_PAYLOAD);
+	writel(address | (first << 8) | (second << 16), dsi + DSIM_PAYLOAD);
 	writel(MIPI_DSI_DCS_LONG_WRITE | (3 << 8), dsi + DSIM_PKTHDR);
 	return g955n_dsim_wait_tx(dsi);
 }
 
-static int g955n_dsim_set_offset(void __iomem *dsi, u8 offset)
+static int g955n_dsim_short_param(void __iomem *dsi, u8 address, u8 value)
 {
 	int ret = g955n_dsim_wait_tx(dsi);
 
 	if (ret)
 		return ret;
-	writel(MIPI_DSI_DCS_SHORT_WRITE_PARAM | (S6E3HA6_GPARA << 8) |
-	       (offset << 16), dsi + DSIM_PKTHDR);
+	writel(MIPI_DSI_DCS_SHORT_WRITE_PARAM | (address << 8) |
+	       (value << 16), dsi + DSIM_PKTHDR);
 	return g955n_dsim_wait_tx(dsi);
 }
 
 #ifdef G955N_WITH_AID
 int g955n_aid_verify(const u8 *mtp);
+int g955n_aor_trial_value(const u8 saved[2], u8 trial[2]);
+
+static int g955n_dsim_latch_aor(void __iomem *dsi, const u8 value[2])
+{
+	int ret = g955n_dsim_long3(dsi, 0xb1, value[0], value[1]);
+
+	if (ret)
+		return ret;
+	return g955n_dsim_short_param(dsi, 0xf7, 0x03);
+}
+
+static int g955n_dsim_check_aor(void __iomem *dsi)
+{
+	u8 saved[2], trial[2], observed[2];
+	int ret, restore;
+
+	ret = g955n_dsim_read(dsi, 0xb1, saved, sizeof(saved));
+	if (!ret)
+		ret = g955n_dsim_read(dsi, 0xb1, observed, sizeof(observed));
+	if (ret)
+		return ret;
+	if (memcmp(saved, observed, sizeof(saved)))
+		return -EAGAIN;
+
+	ret = g955n_aor_trial_value(saved, trial);
+	if (ret)
+		return ret;
+
+	ret = g955n_dsim_latch_aor(dsi, trial);
+	if (!ret) {
+		msleep(150);
+		ret = g955n_dsim_read(dsi, 0xb1, observed, sizeof(observed));
+		if (!ret && memcmp(trial, observed, sizeof(trial)))
+			ret = -EIO;
+		if (!ret)
+			pr_info("g955n-dsim: AOR test value accepted: %*phN\n", 2, observed);
+	}
+
+	restore = g955n_dsim_latch_aor(dsi, saved);
+	if (!restore)
+		restore = g955n_dsim_read(dsi, 0xb1, observed, sizeof(observed));
+	if (!restore && memcmp(saved, observed, sizeof(saved)))
+		restore = -EIO;
+	if (restore)
+		pr_err("g955n-dsim: AOR restoration not verified: %d\n", restore);
+	else
+		pr_info("g955n-dsim: AOR original value restored: %*phN\n", 2, observed);
+	return restore ?: ret;
+}
 #endif
 
 static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
@@ -189,14 +252,14 @@ static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
 	int ret = 0;
 
 	if (offset)
-		ret = g955n_dsim_set_offset(dsi, offset);
+		ret = g955n_dsim_short_param(dsi, S6E3HA6_GPARA, offset);
 	if (!ret)
 		ret = g955n_dsim_read(dsi, address, first, len);
 	if (!ret && offset)
-		ret = g955n_dsim_set_offset(dsi, offset);
+		ret = g955n_dsim_short_param(dsi, S6E3HA6_GPARA, offset);
 	if (!ret)
 		ret = g955n_dsim_read(dsi, address, second, len);
-	if (offset && g955n_dsim_set_offset(dsi, 0)) {
+	if (offset && g955n_dsim_short_param(dsi, S6E3HA6_GPARA, 0)) {
 		pr_err("g955n-dsim: failed to restore panel offset\n");
 		ret = -EIO;
 	}
@@ -224,7 +287,7 @@ static int g955n_dsim_check_calibration(void __iomem *dsi)
 
 	/* Match the S6E3HA6 Dream2 A3 resource-init key order. */
 	while (opened < ARRAY_SIZE(keys)) {
-		ret = g955n_dsim_key(dsi, keys[opened], unlock[opened]);
+		ret = g955n_dsim_long3(dsi, keys[opened], unlock[opened], unlock[opened]);
 		opened++;
 		if (ret)
 			break;
@@ -237,11 +300,16 @@ static int g955n_dsim_check_calibration(void __iomem *dsi)
 		ret = g955n_dsim_check_resource(dsi, S6E3HA6_HBM_GAMMA, S6E3HA6_HBM_OFFSET,
 					       S6E3HA6_HBM_LEN);
 
+#ifdef G955N_WITH_AID
+	if (!ret && test_aor)
+		ret = g955n_dsim_check_aor(dsi);
+#endif
+
 	while (opened) {
 		int err;
 
 		opened--;
-		err = g955n_dsim_key(dsi, keys[opened], ~unlock[opened]);
+		err = g955n_dsim_long3(dsi, keys[opened], ~unlock[opened], ~unlock[opened]);
 		if (err)
 			lock_error = err;
 	}
@@ -284,6 +352,10 @@ static int __init g955n_dsim_identify(void)
 	unsigned int power;
 	int ret;
 
+#ifdef G955N_WITH_AID
+	if (test_aor && !read_calibration)
+		return -EINVAL;
+#endif
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
 
