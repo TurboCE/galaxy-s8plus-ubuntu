@@ -7631,3 +7631,37 @@ The candidate modules and DT were not installed. Direct PRIME
 import of noncontiguous Panfrost buffers, G0 latch, restored
 scanout after suspend and the effect on CMA requirements remain
 unverified on hardware.
+
+
+## 2026-11-26 — Live DPU1 PRIME scanout and resume
+
+Built the DPU1 trial using the previous Linux Image, initramfs and
+outer Samsung DT. Verified the new embedded board DT and both module
+hashes, retained the original DECON module and made a fresh private
+recovery backup. The BOOT-only write was verified with protected
+partitions unchanged.
+
+After boot, the clock provider, native Exynos System MMU and DECON
+all bound. The DPU1 supplier and DECON consumer were runtime-active,
+and the DMA group reported the direct reservation from 0xcc000000
+through 0xcd042fff. A KMS-to-Panfrost import and the formerly failing
+Panfrost-to-KMS import both succeeded at 1440×2960 and 2960×1440.
+
+A bounded DRM fixture rendered three linear buffers on Mali-G71 from
+the Panfrost DRM render node and imported them through PRIME. The
+fixture completed twelve presentations on DECON and the kernel
+reported twelve desktop-buffer address latches. The user Wayland
+session was kept alive and its virtual console restored afterwards.
+A same-boot RTC-woken s2idle cycle succeeded. The fixture completed
+another twelve presentations after resume, with 24 verified address
+latches across the two runs and zero DPU1 fault, DECON latch timeout,
+SWIOTLB allocation or GNOME Mesa scanout-resource messages in the
+scoped journal checks.
+
+GDM, USB SSH, the location hub and Wi-Fi were present after resume.
+PipeWire kept the built-in bottom speaker as default; this trial did
+not replay an acoustic reference. The persisted mainline rotation
+rule retained its verified matrix. The trial return timer was removed
+after the checks. The translated device uses the firmware framebuffer
+reservation rather than the DECON-only CMA pool. A separate comparison
+BOOT was built with the now-unreferenced pool removed.
