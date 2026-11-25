@@ -20,6 +20,7 @@ test -s "$build/Module.symvers"
 
 native="$source/sound/soc/samsung/g955n-abox-speaker.c"
 module_source="$output/g955n-abox-speaker-native.c"
+cp "$here/Makefile.alsa" "$output/Makefile"
 if [ "${4:-}" = "--receiver" ]; then
     patch --batch --forward --silent --fuzz=0 \
         -i "$patches/0131-mainline-sm-g955n-receiver-pcm.patch" -o "$module_source" "$native"
@@ -27,10 +28,13 @@ if [ "${4:-}" = "--receiver" ]; then
         -i "$patches/0133-mainline-sm-g955n-calliope-with-receiver.patch" "$module_source"
     patch --batch --forward --silent --fuzz=0 \
         -i "$patches/0135-mainline-sm-g955n-kernel58-speaker-geometry.patch" "$module_source"
+    patch --batch --forward --silent --fuzz=0 \
+        -i "$patches/0144-mainline-sm-g955n-wired-jack-detect.patch" "$module_source"
+    cp "$here/g955n-wired-jack.c" "$here/g955n-wired-jack.h" "$output/"
+    printf '%s\n' 'g955n-abox-speaker-y += g955n-wired-jack.o' >> "$output/Makefile"
 else
     patch --batch --forward --silent --fuzz=0 \
         -i "$patches/0128-mainline-sm-g955n-alsa-calliope.patch" -o "$module_source" "$native"
 fi
-cp "$here/Makefile.alsa" "$output/Makefile"
 cp "$here/calliope.h" "$here/g955n-calliope-stage.c" "$here/g955n-calliope-boot.c" "$output/"
 make -C "$source" O="$build" M="$output" modules

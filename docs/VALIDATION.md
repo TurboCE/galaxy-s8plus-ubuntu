@@ -7270,3 +7270,23 @@ separate CAM CMU registers only. An ARM64 W=1 build succeeded and
 the module metadata exposes the new parameter for the installed
 kernel release. USB network and Tailscale still did not respond.
 The clock snapshot has not run on the handset.
+
+
+## 2026-11-26 — CS47L93 wired jack integration build
+
+Compared the Korean dream2lte codec child to Samsung's Madera switch
+driver. It uses clamp mode 0x8 with JD2 enabled, the clamp rise and
+fall IRQs and active-low insertion polarity. The stock analog
+headphone pins are HPOUT2L and HPOUT2R, and headset capture is
+wired to IN1BL with MICBIAS2A.
+
+Built the receiver audio module for the current release with W=1.
+The build applies the jack hook to the capture-codec link after its
+existing initialization and calls the helper before link removal.
+Verified the module references the standard ALSA jack API. Compiled
+and decoded the board DT fragment and confirmed the only audio-node
+change was the optional detector property. The handset was still
+unreachable. No hardware registers, audio module or BOOT partition
+were changed. Actual insertion events, audio playback and capture,
+and preservation of acoustic bottom-speaker playback on the trial
+remain to be checked on the handset.

@@ -1,0 +1,70 @@
+Subject: [PATCH] ASoC: attach SM-G955N wired jack detection to the codec link
+
+Register the optional wired jack after the established microphone
+initialization and release it before the codec link is removed.
+Keep the existing card and PCM routes if jack setup is unavailable.
+
+Apply after the Calliope receiver and geometry overlays.
+
+diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
+--- a/sound/soc/samsung/g955n-abox-speaker.c
++++ b/sound/soc/samsung/g955n-abox-speaker.c
+@@ -30,6 +30,7 @@
+ #include <linux/mfd/madera/registers.h>
+ #include "../codecs/madera.h"
+ #include "calliope.h"
++#include "g955n-wired-jack.h"
+ 
+ static bool use_dsm;
+ module_param(use_dsm, bool, 0400);
+@@ -125,6 +126,7 @@
+ 	void __iomem *sfr;
+ 	void __iomem *cmu;
+ 	struct snd_soc_card card;
++	struct g955n_wired_jack *jack_detect;
+ 	struct snd_soc_dai_link link[PCM_COUNT];
+ 	struct snd_soc_dai_link_component cpu[PCM_COUNT], codec[PCM_COUNT], platform;
+ 	struct g955n_pcm pcm[PCM_COUNT];
+@@ -824,6 +826,32 @@
+ 	return ret < 0 ? ret : 0;
+ }
+ 
++
++static int g955n_codec_link_init(struct snd_soc_pcm_runtime *rtd)
++{
++	struct g955n_speaker *speaker = container_of(rtd->card, struct g955n_speaker, card);
++	int ret;
++
++	ret = g955n_mic_init(rtd);
++	if (ret)
++		return ret;
++	speaker->jack_detect = g955n_wired_jack_init(rtd);
++	if (IS_ERR(speaker->jack_detect)) {
++		dev_warn(speaker->dev, "wired jack detection unavailable: %ld\n",
++			 PTR_ERR(speaker->jack_detect));
++		speaker->jack_detect = NULL;
++	}
++	return 0;
++}
++
++static void g955n_codec_link_exit(struct snd_soc_pcm_runtime *rtd)
++{
++	struct g955n_speaker *speaker = container_of(rtd->card, struct g955n_speaker, card);
++
++	g955n_wired_jack_exit(speaker->jack_detect);
++	speaker->jack_detect = NULL;
++}
++
+ static const struct snd_soc_dapm_widget mic_widgets[] = {
+ 	SND_SOC_DAPM_MIC("Internal Mic", NULL),
+ 	SND_SOC_DAPM_SPK("Receiver", NULL),
+@@ -987,7 +1015,8 @@
+ 		.codecs = &speaker->codec[1], .num_codecs = 1,
+ 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF | SND_SOC_DAIFMT_CBC_CFC,
+ 		.capture_only = 1, .nonatomic = 1,
+-		.init = g955n_mic_init, .ops = &g955n_mic_ops,
++		.init = g955n_codec_link_init, .exit = g955n_codec_link_exit,
++		.ops = &g955n_mic_ops,
+ 	};
+ 	speaker->link[RECEIVER_PCM] = (struct snd_soc_dai_link) {
+ 		.id = RECEIVER_PCM,

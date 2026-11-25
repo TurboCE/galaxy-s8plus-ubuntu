@@ -102,3 +102,18 @@ With private backing for that window, the handset remained responsive and
 Calliope reported two components, sent BOOT_DONE, and acknowledged RESUME.
 The DSM query returned 146 words with enable=1 at idle. Playback through
 DSM and microphone capture remain unverified.
+
+### Wired jack insertion detection
+
+The receiver module build also contains the SM-G955N CS47L93 jack
+detector. The `g955n-wired-jack.dtsi` fragment separately enables it.
+The detector follows the stock Korean board's combined JD1/JD2 clamp,
+uses both clamp interrupts, and reports stable samples through the
+ALSA `Headphone Jack` control. It releases the interrupts and restores
+its detector fields when the codec link is removed. The existing PCM
+routes remain available if the optional detector fails to initialize.
+
+The stock wired headphones use HPOUT2L/HPOUT2R, and the headset
+microphone uses IN1BL with MICBIAS2A. Physical jack-state validation,
+accessory and microphone classification, and the UCM playback and
+capture routes are separate steps.
