@@ -7194,3 +7194,27 @@ The separate 6.18 V4L2 build produced the ARM64 Image and media
 controller, videodev, async and fwnode modules. The handset tests
 above used the existing kernel. System MMU mapping, DMA transfer
 and app capture are separate validation steps.
+
+
+## 2026-11-26 — CAM0 translated buffer lifecycle
+
+Connected the CSIS1 diagnostic consumer to the stock board's CAM0
+mapping at 0x12d10000 with the camera bus clock parent and gate. The
+tracked fragment compiled to the flashed trial DTB. Both diagnostic
+modules built with W=1. CAM0 and ABOX used separate IOMMU groups.
+
+The first test found that the diagnostic's 32-bit range check rejected
+an otherwise valid allocation ending at 0xffffffff. After correcting
+the inclusive end check, an ordinary boot and a driver rebind each
+mapped all 1024 pages of a 4 MiB buffer at the expected physical
+addresses and verified that the mappings were removed. The same
+mapping test passed after suspend and resume.
+
+A bounded RTC-woken s2idle cycle completed on the same boot. Both
+camera module ROMs remained readable, the front sensor chip ID matched
+and its frame counter advanced before and after resume, and all four
+front sensor rails returned to off. GDM and GeoClue were active, Wi-Fi
+reconnected and accepted a new scan after one temporary scan suppression
+message, and PipeWire retained the bottom speaker as the default route.
+The trial return timer was removed after verification. This trial
+enabled no CSI DMA engine and captured no pixels.

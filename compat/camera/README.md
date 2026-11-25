@@ -90,3 +90,16 @@ module initialization so the one-shot can be repeated without reboot.
 `config/mainline618-camera-media.fragment` enables the standard V4L2
 and media-controller core for a separate kernel build. The reception
 test uses the existing handset kernel and allocates no capture buffers.
+
+## CAM0 frame buffer mapping
+
+The board routes CSIS1 DMA through the normal-world CAM0 System MMU
+at 0x12d10000. The handset reports System MMU version 7.0. CAM0 uses
+the standard Exynos IOMMU driver plus its board clock gate. The
+camera and ABOX attach to separate IOMMU groups.
+
+The CAM0 diagnostic fragment and its two modules check a translated
+4 MiB, 32-bit DMA aperture. The test matches all 1024 page translations
+against the allocated buffer and verifies that the mapping is removed
+when it finishes. The 32-bit end check permits an inclusive last byte
+of 0xffffffff. The test performs no camera DMA and records no pixels.

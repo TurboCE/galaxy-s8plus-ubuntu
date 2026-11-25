@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/clock/samsung,exynos8895.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+&{/soc@0} {
+	cam0_clk: clock-controller@12c020d0 {
+		compatible = "samsung,sm-g955n-cam0-clock";
+		reg = <0x12c020d0 4>;
+		clocks = <&{/soc@0/clock-controller@15a80000} CLK_DOUT_CMU_CAM_BUS>;
+		#clock-cells = <0>;
+	};
+
+	cam0_iommu: iommu@12d10000 {
+		compatible = "samsung,exynos-sysmmu";
+		reg = <0x12d10000 0x3000>;
+		interrupts = <GIC_SPI 279 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cam0_clk>;
+		clock-names = "sysmmu";
+		#iommu-cells = <0>;
+	};
+
+	csis1-buffer-test {
+		compatible = "samsung,sm-g955n-csis1-buffer-test";
+		iommus = <&cam0_iommu>;
+	};
+};

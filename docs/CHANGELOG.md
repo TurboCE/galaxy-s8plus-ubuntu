@@ -2940,3 +2940,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Corrected an observed receive overflow by clocking the camera bus
   at 133.25 MHz during the test. Pixel DMA remains disabled in the probe.
 - Added a media-core fragment that built the ARM64 V4L2 kernel and modules.
+
+
+## 2026-11-26 — Front camera CAM0 DMA buffer mapping
+
+- Connected the CSIS1 diagnostic consumer to the standard Exynos
+  CAM0 IOMMU and its camera clock gate.
+- Verified all pages of the 4 MiB buffer and their removal at unmap
+  on the handset. Camera DMA and app capture remain pending.
