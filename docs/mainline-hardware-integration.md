@@ -36,8 +36,9 @@ services pending outbound bytes independently of the high-level
 `HOST_REQ` input used for pending receive data. A passive wait for
 `HOST_REQ` with no BBD client cannot qualify sensor startup.
 
-For the transport port, qualify bounded TX and RX with the documented SSI
-headers and restore the wake-request line on exit. The existing board
+The [experimental Linux transport](../compat/gnss/ssi/) implements bounded
+SSI reads and writes. On-device tests covered power ownership and
+idle I/O. The first application-level reply is still unverified. The existing board
 daemon requires `ttyBCM`, `bbd_control`, `bbd_sensor`, `bbd_patch`, and
 the board power controls before it starts. The first functional test
 should exercise the ordinary SSP chip-ID request through the same

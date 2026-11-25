@@ -6214,3 +6214,20 @@ The vendor worker handles outbound bytes even with HOST_REQ low,
 and the ordinary SSP request is sent via the BBD userspace
 daemon before a reply is expected. The existing mainline
 probe contains only a passive receive qualification path.
+
+### BCM4773 experimental SSI endpoint on 6.18 VPN2
+
+Built the optional SSI transport against the exact running ARM64 release
+with kernel build warnings enabled. Verified the GPH3 BOOT and the
+unbound SPI1.0 node before loading it from temporary storage. Live open
+enabled the hub supply with one regulator user, and a second open
+returned EBUSY. Poll reported writable on the idle link. Idle read
+returned EAGAIN and a zero-byte write returned zero. Normal close
+released the rail. Unbinding with an open descriptor removed the device
+node, released the rail, and made the open descriptor report ENODEV
+for I/O and POLLERR/POLLHUP. The SPI node was left unbound and the
+bottom speaker remained the default audio sink.
+
+No nonempty SSI write or returned frame was exercised. The BBD/RPC
+consumer, sensor data and GNSS capability remain unqualified. The
+test module was not installed for startup.

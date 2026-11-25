@@ -2641,3 +2641,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verified reversible SSI idle reads with the hub supply enabled
   and identified the missing outbound BBD path required to query
   the sensor hub from 6.18.
+
+## 2026-11-25 — BCM4773 SSI endpoint
+
+- Added a bounded half-duplex SPI transport for the sensor and
+  location hub. Verified device ownership, idle I/O, regulator
+  cleanup and unbind on 6.18 VPN2.
