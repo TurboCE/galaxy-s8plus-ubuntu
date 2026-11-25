@@ -109,7 +109,7 @@ Check the current lease after reboot if a saved WLAN address stops responding.
 
 See [validation](docs/VALIDATION.md), [engineering notes](docs/PORTING.md),
 [change log](docs/CHANGELOG.md), [installation review](docs/INSTALLATION_REVIEW.md),
-and [attribution](NOTICE).
+[Ubuntu 26.04 upgrade handoff](docs/ubuntu-26.04-upgrade.md), and [attribution](NOTICE).
 
 ## Root filesystem / installation tools
 

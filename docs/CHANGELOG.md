@@ -2622,3 +2622,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verified actual lower-speaker output over ALSA and the default
   PipeWire route after reboot. Saved the Standard audio profile
   for the lower speaker and preserved the separate Voice profile.
+
+## 2026-11-25 — Ubuntu 26.04 upgrade handoff
+
+- Recorded the verified 24.04.5 audio baseline, GPH3 DT patch,
+  device-specific UCM settings and post-upgrade checks in the
+  [upgrade handoff](ubuntu-26.04-upgrade.md).
