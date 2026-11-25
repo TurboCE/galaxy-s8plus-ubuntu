@@ -8037,3 +8037,36 @@ host switching and VBUS sourcing remain unverified.
 A separate olddefconfig check resolved DWC3 dual role, USB role
 switch, xHCI HCD and platform xHCI together. Those settings were
 checked offline and were not installed in the running kernel.
+
+
+## 2026-11-26 — USB gadget and resume on the DWC3 dual-role kernel
+
+Built Linux 6.18 with DWC3 dual role, the USB role switch and
+platform xHCI. In the first configuration, choosing in-tree
+Type-C as a module also moved the Exynos USB PHY to a module.
+The live candidate keeps that PHY built in and retains the
+previously qualified Type-C class module. The kernel release and
+module build list matched the previous kernel and no existing
+exported symbols were removed. Preserved the battery-status patch
+from the live kernel. The initramfs and outer Samsung DT were
+unchanged. The only inner DT changes were the DWC3 role settings.
+
+Installed after a fresh protected-partition backup and verified the
+BOOT readback. The role provider registered and the DWC3 gadget
+configured at high speed while S2MM005 reported device and sink.
+The Mac read the USB ACM serial login prompt and authenticated
+through USB Ethernet. UPower reported Full and the charging
+indicator read back red 0 and green 1 on the live battery event.
+
+The same boot completed an RTC-woken s2idle cycle with no increase
+in failures. The Mac read the ACM login prompt again, USB Ethernet
+had carrier and the Type-C partner still reported device and sink.
+Wi-Fi returned to connected and the bottom speaker remained the
+default output. The kernel logged one Wi-Fi scan suppression
+during reconnect. The role provider was still registered and the
+gadget configured when the trial return timer was removed.
+
+The trial exercised the peripheral default. The role switch has no
+userspace override in this configuration. S2MM005-driven host
+switching, VBUS-supply control, and enumeration of a physical
+USB peripheral remain to be verified.

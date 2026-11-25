@@ -3128,3 +3128,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Connected the S2MM005 attachment and current roles to the standard
   Type-C port and partner devices while retaining the diagnostic attribute.
+
+
+## 2026-11-26 — Enable SM-G955N DWC3 dual-role support and xHCI
+
+- Built the dual-role USB controller with the Exynos PHY available
+  during initramfs. Registered the standard role switch with the
+  peripheral role as its default.

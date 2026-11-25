@@ -1,0 +1,5 @@
+# Build the DWC3 controller with both roles and the platform xHCI driver.
+CONFIG_USB_DWC3_DUAL_ROLE=y
+CONFIG_USB_ROLE_SWITCH=y
+CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_XHCI_PLATFORM=y

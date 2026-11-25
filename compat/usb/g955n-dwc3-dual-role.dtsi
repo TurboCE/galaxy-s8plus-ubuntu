@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc@0/usb@10c00000} {
+	dr_mode = "otg";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+};

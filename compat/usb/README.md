@@ -26,8 +26,16 @@ the Type-C class:
 cat /sys/bus/i2c/drivers/g955n-s2mm005-status/*-0033/port_status
 ```
 
-The current mainline image uses DWC3 in peripheral mode. USB host
-support requires the DWC3 dual-role and xHCI drivers, a Linux role
-switch driven by validated S2MM005 attach events, and the board's VBUS
-supply control. The diagnostic leaves those controls to the existing
-kernel and firmware.
+## DWC3 dual-role controller
+
+The [kernel fragment](../../config/mainline618-usb-dual-role.fragment)
+adds DWC3 dual-role and the platform xHCI driver. The
+[board fragment](g955n-dwc3-dual-role.dtsi) registers the DWC3 role
+switch and defaults to peripheral mode so the boot-time serial and
+Ethernet gadget can start. Keep the Exynos USB DRD PHY built in for
+that initramfs path. The Type-C class can continue to use the matching
+module from the existing installation.
+
+USB host operation also requires connecting the S2MM005 role events
+to the DWC3 role switch and coordinating the board's VBUS supply.
+The Type-C status driver continues to report the firmware's roles.
