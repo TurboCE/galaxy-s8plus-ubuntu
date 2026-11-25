@@ -2725,3 +2725,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   per sensor and the firmware's proximity decision retained.
 - After reboot, standard SensorProxy recognized all three devices and
   reported actual light changes in lux and the far proximity state.
+
+## 2026-11-25 — Identify the native OLED control path
+
+- Added a guarded DSIM0 status snapshot with an opt-in panel ID request.
+  Matched the same handset's Samsung boot log to the S6E3HA6 Dream2 A3
+  SA calibration table. Linux backlight registration is still pending.

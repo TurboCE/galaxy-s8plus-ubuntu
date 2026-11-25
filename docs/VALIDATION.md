@@ -6514,3 +6514,20 @@ file was returned to the Ubuntu desktop account before rechecking the
 setting. The installed GNOME session could then read the enabled
 ambient option without the earlier permissions error. The GNOME login
 manager, Wi-Fi, and lower-speaker default remained available after boot.
+
+## 2026-11-25 — DSIM0 and S6E3HA6 panel identification
+
+Built the diagnostic against the running ARM64 6.18 VPN2 build with
+`W=1`. The SM-G955N guard and integrated BOOT hash matched before
+temporary diagnostic insertion. DSIM0 at `0x12870000` reported a
+locked PLL, an active PHY, and idle FIFOs. An opt-in three-byte ID read
+reached RX completion with BTA timeout (IRQ `0x13140000`).
+No ID was accepted from that response.
+
+Historical same-handset boot logs record `lcdtype=13701136`
+(`0xd11010`). The Samsung Dream2 panel lookup applies mask
+`0xf0ffff` and selects the S6E3HA6 Dream2 A3 SA table. Its brightness
+sequence uses calibrated gamma and AOR, temperature and supply
+compensation, ACL, and an explicit gamma latch. The integrated
+kernel's GNOME, Wi-Fi, sensor daemon, and default lower-speaker
+routing were available after the probe. BOOT was not changed.
