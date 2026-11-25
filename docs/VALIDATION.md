@@ -6654,3 +6654,24 @@ the OLED backlight service active and created the file with owner
 permission failures from GNOME. The ambient toggle read enabled and
 GNOME reported screen brightness. A separate SSH query to the
 current Wi-Fi lease succeeded after this reboot.
+
+## 2026-11-25 — BCM4773 gyroscope, magnetometer, pressure and steps
+
+Cross-checked the Samsung SSP sensor IDs, wire lengths and signed
+fields, then built the temporary and canonical modules for ARM64
+with `W=1`. Starting the step stream during firmware-ready handling
+coincided with two temporary trials losing proximity reports. The
+first-read step startup passed simultaneous reads of all seven
+IIO devices. The trial then restored the original binding.
+
+Installed the verified module and service with the old files backed
+up. After reboot, the daemon reached ready with no automatic restarts.
+Gyroscope and magnetometer returned live XYZ samples, with their
+physical scales and axis calibration still open. The pressure
+reading was approximately 101.60 kPa with the LPS22H scale and
+its temperature reading was 37.7 °C. The step endpoint reported
+zero on the stationary device. A walking test has not been run.
+System SensorProxy continued to recognize accelerometer, ambient
+light and proximity. Light resumed reporting lux, and the far
+proximity state included a live ADC reading. The OLED backlight,
+Wi-Fi and default lower-speaker routing remained available.

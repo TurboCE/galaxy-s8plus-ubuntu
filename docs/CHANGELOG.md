@@ -2777,3 +2777,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Isolated GSettings for the administrator ChatGPT service. After a
   second reboot the service was still active and the Ubuntu user's
   runtime dconf file had the correct owner.
+
+## 2026-11-25 — Expose native motion and barometer IIO devices
+
+- Added gyroscope, magnetic field, pressure, barometer temperature
+  and step-count attributes to the BCM4773 driver. Verified all seven
+  IIO devices after reboot and retained Ubuntu's existing SensorProxy
+  inputs, backlight, Wi-Fi and audio routing.

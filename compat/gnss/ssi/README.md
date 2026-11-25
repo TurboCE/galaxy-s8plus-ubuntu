@@ -177,5 +177,24 @@ by this driver.
 
 The integrated handset has passed simultaneous IIO reads and stock
 SensorProxy discovery after reboot. Light-level changes and the far
-state were observed. Physical near/far transition and OLED backlight
-control still require verification.
+state were observed. Physical near/far transition still requires verification.
+
+
+## Native motion and barometer inputs
+
+`expose_legacy_motion=1` adds IIO angular velocity, magnetic field,
+pressure, barometer temperature, and a step count. The gyroscope uses
+the signed 32-bit XYZ SSP layout. The magnetometer uses the calibrated
+signed 16-bit XYZ record and ignores samples with its overflow byte
+set. The physical scales and axis alignment of these two streams still
+require validation, so they expose the firmware's numeric values.
+
+The LPS22H pressure scale is 1/40960 kPa per count and its temperature
+scale is 10 millidegrees Celsius per count. No factory pressure offset
+is loaded from protected storage by this driver.
+
+Reading the step input starts its on-change stream. It stays active
+after the first read so intervals between reads do not discard step
+deltas. The IIO counter sums unsigned firmware deltas for the lifetime
+of the driver binding. A stationary reading of zero only checks the
+counter endpoint. A physical walking trial is still needed.

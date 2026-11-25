@@ -69,16 +69,25 @@ static bool expose_legacy_environment;
 module_param(expose_legacy_environment, bool, 0400);
 MODULE_PARM_DESC(expose_legacy_environment, "Expose the BCM4773 light and proximity sensors through IIO");
 
+static bool expose_legacy_motion;
+module_param(expose_legacy_motion, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_motion, "Expose gyroscope, magnetometer, barometer and steps through IIO");
+
 enum ssi_iio_kind {
 	SSI_ACCEL,
 	SSI_LIGHT,
 	SSI_PROX,
+	SSI_GYRO,
+	SSI_MAGN,
+	SSI_PRESS,
+	SSI_STEPS,
 	SSI_IIO_COUNT,
 };
 
 struct ssi_sensor_slot {
 	struct iio_dev *iio;
 	int sample[3];
+	s64 steps;
 	unsigned long stamp, access;
 	bool requested, running, valid;
 };
@@ -87,12 +96,20 @@ static const u8 ssi_sensor_ids[] = {
 	[SSI_ACCEL] = 0,
 	[SSI_LIGHT] = 9,
 	[SSI_PROX] = 7,
+	[SSI_GYRO] = 1,
+	[SSI_MAGN] = 4,
+	[SSI_PRESS] = 5,
+	[SSI_STEPS] = 18,
 };
 
 static const u8 ssi_sensor_lengths[] = {
 	[SSI_ACCEL] = 6,
 	[SSI_LIGHT] = 18,
 	[SSI_PROX] = 3,
+	[SSI_GYRO] = 12,
+	[SSI_MAGN] = 8,
+	[SSI_PRESS] = 6,
+	[SSI_STEPS] = 4,
 };
 
 struct ssi_bbd_rx {
@@ -256,6 +273,15 @@ static void ssi_sensor_report(struct g955n_ssi *ssi, const u8 *data, size_t size
 			continue;
 
 		switch (i) {
+		case SSI_GYRO:
+			slot->sample[0] = (s32)get_unaligned_le32(sample);
+			slot->sample[1] = (s32)get_unaligned_le32(sample + 4);
+			slot->sample[2] = (s32)get_unaligned_le32(sample + 8);
+			break;
+		case SSI_MAGN:
+			if (sample[7])
+				continue;
+			fallthrough;
 		case SSI_ACCEL:
 			slot->sample[0] = (s16)get_unaligned_le16(sample);
 			slot->sample[1] = (s16)get_unaligned_le16(sample + 2);
@@ -275,6 +301,17 @@ static void ssi_sensor_report(struct g955n_ssi *ssi, const u8 *data, size_t size
 			slot->sample[0] = *sample;
 			slot->sample[1] = get_unaligned_le16(sample + 1);
 			break;
+		case SSI_PRESS:
+			slot->sample[0] = (s32)get_unaligned_le32(sample);
+			slot->sample[1] = (s16)get_unaligned_le16(sample + 4);
+			break;
+		case SSI_STEPS: {
+			u32 delta = get_unaligned_le32(sample);
+
+			/* The firmware reports deltas, as in the Samsung SSP driver. */
+			slot->steps += min_t(u64, delta, S64_MAX - slot->steps);
+			break;
+		}
 		}
 		WRITE_ONCE(slot->stamp, jiffies);
 		WRITE_ONCE(slot->valid, true);
@@ -325,6 +362,10 @@ static void ssi_sensor_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
 				put_unaligned_le32(SSP_SENSOR_PERIOD_MS, payload + 3);
 				ssi_sensor_queue(ssi, payload, expected + 2);
 				slot->running = ssi->transfer_enable;
+				if (slot == &ssi->slots[SSI_STEPS] && slot->running) {
+					WRITE_ONCE(slot->valid, true);
+					wake_up_interruptible(&ssi->wait);
+				}
 				ssi->sensor_transfer = NULL;
 			}
 		} else {
@@ -467,7 +508,7 @@ static void ssi_sensor_schedule_idle(struct g955n_ssi *ssi)
 		struct ssi_sensor_slot *slot = &ssi->slots[i];
 		unsigned long expires, delay;
 
-		if (!slot->requested)
+		if (!slot->requested || i == SSI_STEPS)
 			continue;
 		expires = slot->access + msecs_to_jiffies(SSP_SENSOR_IDLE_MS);
 		delay = time_after(expires, now) ? expires - now : 1;
@@ -490,7 +531,7 @@ static void ssi_sensor_idle(struct work_struct *work)
 		struct ssi_sensor_slot *slot = &ssi->slots[i];
 		unsigned long expires = slot->access + msecs_to_jiffies(SSP_SENSOR_IDLE_MS);
 
-		if (slot->requested && time_after_eq(jiffies, expires)) {
+		if (i != SSI_STEPS && slot->requested && time_after_eq(jiffies, expires)) {
 			slot->requested = false;
 			WRITE_ONCE(slot->valid, false);
 		}
@@ -507,9 +548,11 @@ struct ssi_iio_priv {
 
 static bool ssi_sensor_fresh(struct ssi_sensor_slot *slot, enum ssi_iio_kind kind)
 {
-	return READ_ONCE(slot->valid) &&
-	       (kind != SSI_ACCEL ||
-		!time_after(jiffies, READ_ONCE(slot->stamp) + msecs_to_jiffies(600)));
+	if (!READ_ONCE(slot->valid))
+		return false;
+	if (kind == SSI_LIGHT || kind == SSI_PROX || kind == SSI_STEPS)
+		return true;
+	return !time_after(jiffies, READ_ONCE(slot->stamp) + msecs_to_jiffies(600));
 }
 
 static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *chan,
@@ -522,6 +565,17 @@ static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *c
 
 	if (mask == IIO_CHAN_INFO_SCALE) {
 		*value = 0;
+		if (priv->kind == SSI_PRESS) {
+			if (chan->type == IIO_TEMP) {
+				/* Samsung's LPS22H factory interface reports centidegrees. */
+				*value = 10;
+				return IIO_VAL_INT;
+			}
+			/* LPS22H pressure is 4096 counts/hPa. IIO uses kPa. */
+			*value = 1;
+			*value2 = 40960;
+			return IIO_VAL_FRACTIONAL;
+		}
 		if (priv->kind == SSI_PROX) {
 			*value2 = 500000;
 			return IIO_VAL_INT_PLUS_MICRO;
@@ -555,7 +609,11 @@ static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *c
 		ret = -ENODEV;
 	else if (!ssi_sensor_fresh(slot, priv->kind))
 		ret = -EAGAIN;
-	else {
+	else if (priv->kind == SSI_STEPS) {
+		*value = lower_32_bits(slot->steps);
+		*value2 = upper_32_bits(slot->steps);
+		ret = IIO_VAL_INT_64;
+	} else {
 		*value = slot->sample[chan->address];
 		/* Keep the firmware's binary flag and the ADC in separate channels. */
 		if (priv->kind == SSI_PROX && !chan->address)
@@ -602,6 +660,45 @@ static const struct iio_chan_spec ssi_prox_channels[] = {
 	},
 };
 
+#define SSI_RAW_AXIS(kind, axis, index) {			\
+	.type = IIO_##kind,					\
+	.modified = 1,						\
+	.channel2 = IIO_MOD_##axis,				\
+	.address = index,					\
+	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),		\
+}
+
+static const struct iio_chan_spec ssi_gyro_channels[] = {
+	SSI_RAW_AXIS(ANGL_VEL, X, 0),
+	SSI_RAW_AXIS(ANGL_VEL, Y, 1),
+	SSI_RAW_AXIS(ANGL_VEL, Z, 2),
+};
+
+static const struct iio_chan_spec ssi_magn_channels[] = {
+	SSI_RAW_AXIS(MAGN, X, 0),
+	SSI_RAW_AXIS(MAGN, Y, 1),
+	SSI_RAW_AXIS(MAGN, Z, 2),
+};
+
+static const struct iio_chan_spec ssi_pressure_channels[] = {
+	{
+		.type = IIO_PRESSURE,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
+	},
+	{
+		.type = IIO_TEMP,
+		.address = 1,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
+	},
+};
+
+static const struct iio_chan_spec ssi_steps_channels[] = {
+	{
+		.type = IIO_STEPS,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_PROCESSED),
+	},
+};
+
 static const struct iio_info ssi_sensor_info = {
 	.read_raw = ssi_iio_read_raw,
 };
@@ -614,6 +711,10 @@ static const struct {
 	[SSI_ACCEL] = { "g955n-bcm4773-accel", ssi_accel_channels, ARRAY_SIZE(ssi_accel_channels) },
 	[SSI_LIGHT] = { "g955n-bcm4773-light", ssi_light_channels, ARRAY_SIZE(ssi_light_channels) },
 	[SSI_PROX] = { "g955n-bcm4773-proximity", ssi_prox_channels, ARRAY_SIZE(ssi_prox_channels) },
+	[SSI_GYRO] = { "g955n-bcm4773-gyro", ssi_gyro_channels, ARRAY_SIZE(ssi_gyro_channels) },
+	[SSI_MAGN] = { "g955n-bcm4773-magnetometer", ssi_magn_channels, ARRAY_SIZE(ssi_magn_channels) },
+	[SSI_PRESS] = { "g955n-bcm4773-pressure", ssi_pressure_channels, ARRAY_SIZE(ssi_pressure_channels) },
+	[SSI_STEPS] = { "g955n-bcm4773-steps", ssi_steps_channels, ARRAY_SIZE(ssi_steps_channels) },
 };
 
 static int ssi_register_sensor(struct g955n_ssi *ssi, enum ssi_iio_kind kind)
@@ -1037,7 +1138,7 @@ static void ssi_stream_worker(struct work_struct *work)
 				break;
 			count = kfifo_in(&ssi->stream_rx, ssi->rx + SSI_HEADER, ret);
 			ssi->stream_rx_bytes += count;
-			if ((expose_legacy_accel || expose_legacy_environment) &&
+			if ((expose_legacy_accel || expose_legacy_environment || expose_legacy_motion) &&
 			    ssi->firmware_state == BBD_FIRMWARE_READY)
 				ssi_bbd_feed(ssi, ssi->rx + SSI_HEADER, count);
 			if (!count && ++ssi->empty_receives == 4) {
@@ -1660,7 +1761,7 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (probe_legacy_ssp && !expose_legacy_control)
 		return dev_err_probe(dev, -EINVAL, "SSP probe requires BBD control\n");
 
-	if ((expose_legacy_accel || expose_legacy_environment) &&
+	if ((expose_legacy_accel || expose_legacy_environment || expose_legacy_motion) &&
 	    (!probe_legacy_ssp || !expose_legacy_stream))
 		return dev_err_probe(dev, -EINVAL, "sensor IIO requires the legacy SSI bridge\n");
 
@@ -1809,6 +1910,15 @@ static int g955n_ssi_probe(struct spi_device *spi)
 		ret = ssi_register_sensor(ssi, SSI_PROX);
 		if (ret)
 			goto deregister_sensor;
+	}
+	if (expose_legacy_motion) {
+		enum ssi_iio_kind kind;
+
+		for (kind = SSI_GYRO; kind <= SSI_STEPS; kind++) {
+			ret = ssi_register_sensor(ssi, kind);
+			if (ret)
+				goto deregister_sensor;
+		}
 	}
 	spi_set_drvdata(spi, ssi);
 	return 0;
