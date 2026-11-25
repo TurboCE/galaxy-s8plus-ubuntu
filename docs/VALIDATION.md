@@ -7780,3 +7780,46 @@ passed in both directions. The built-in bottom speaker remained
 the default output. No acoustic playback test or Qi charge trial
 was performed. Removed the trial return timer and retained the
 verified BOOT and input module.
+
+
+## 2026-11-26 — Restore native touch at GNOME lock screen
+
+The active GNOME Wayland session was locked and the stock screen
+keyboard setting was enabled. The touchscreen was missing from
+the Linux input list. The 2-0049 client existed, but STMFTS was
+unbound. Targeted client and controller rebind attempts failed
+with HSI2C transmit timeout on the first warm-boot command.
+
+The Korean revision 10 stock DT and regulator tables identify
+S2MPS17 LDO35 at 0x60 for the 3.3 V analog rail and LDO34 at 0x5f
+for the 1.85 V I/O rail. The mainline DT's fixed supplies did not
+control either output. Proposal 0149 registers the two regulators,
+corrects selectors only when the respective rail is disabled, and
+checks their readback. The board fragment replaces the fixed
+supplies and orders initial registration analog first with a
+1 ms enable delay before the I/O rail is registered.
+
+Built the ACPM module for the running ARM64 kernel with W=1.
+Read back the candidate BOOT and verified the protected partitions.
+The Linux Image, initramfs and outer Samsung DT matched the prior
+build. On boot both real rails reported enabled at their specified
+voltages, STMFTS registered event2 and udev classified it as a
+touchscreen. GNOME held the input device. The startup journal
+still included STMFTS controller error events previously seen on
+a working touch build.
+
+The first lock-screen swipe reported no visible change despite
+37 touch contacts in the diagnostic window. The subsequent physical
+touch trial let the owner unlock the same Wayland session, and
+logind confirmed LockedHint=no. No authentication settings were
+altered. GDM, Wi-Fi and the location hub stayed active and the
+bottom speaker remained the default sink. Retained the verified
+BOOT and ACPM module and removed the trial return timer.
+
+A separate earlier check found the BCM4773 accelerometer and light
+reads returning EAGAIN while the daemon stayed active after suspend.
+Restarting the location hub restored native IIO and packaged
+SensorProxy responses without reboot. On a subsequent same-boot
+RTC-woken s2idle cycle both IIO reads succeeded. The intermittent
+loss of sensor readings and its relation to GNOME automatic
+brightness remain to be reproduced and resolved.

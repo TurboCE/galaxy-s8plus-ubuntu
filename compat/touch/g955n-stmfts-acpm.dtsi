@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc@0/acpm-layout@16500000/regulators} {
+	g955n_touch_io: ldo34 {
+		regulator-name = "tsp-io";
+		regulator-min-microvolt = <1850000>;
+		regulator-max-microvolt = <1850000>;
+		regulator-boot-on;
+	};
+
+	g955n_touch_avdd: ldo35 {
+		regulator-name = "tsp-avdd";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-enable-ramp-delay = <1000>;
+		regulator-boot-on;
+	};
+};
+
+&{/soc@0/usi@108e0000/i2c@0/touchscreen@49} {
+	vdd-supply = <&g955n_touch_io>;
+	avdd-supply = <&g955n_touch_avdd>;
+};
+
+/delete-node/ &{/regulator-touch-io};
+/delete-node/ &{/regulator-touch-avdd};

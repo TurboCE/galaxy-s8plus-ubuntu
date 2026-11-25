@@ -3074,3 +3074,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Verified the charger status through the Linux battery class and
   Ubuntu UPower, including a state change while USB remained online.
+
+
+## 2026-11-26 — Restore SM-G955N touchscreen power at boot
+
+- Connected the touchscreen to the board's S2MPS17 LDO34 and LDO35.
+- Verified input registration and physical touch unlock in stock
+  GNOME Wayland on the handset.

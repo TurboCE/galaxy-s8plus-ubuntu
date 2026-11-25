@@ -1,0 +1,77 @@
+Subject: [PATCH] regulator: expose SM-G955N S2MPS17 touch supplies
+
+Register the board's touch analog and I/O rails from their stock
+S2MPS17 register assignments. When a board opts into a touch supply,
+verify the stock voltage selector and correct it only while the
+rail is off. Keep the existing checks for the SD and NFC supplies.
+
+Apply after proposal 0145.
+
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -12,6 +12,8 @@
+ #include <linux/slab.h>
+ 
+ #define S2MPS17_LDO2_CTRL	0x3e
++#define S2MPS17_LDO34_CTRL	0x5f
++#define S2MPS17_LDO35_CTRL	0x60
+ #define S2MPS17_LDO39_CTRL	0x64
+ #define S2MPS17_RTCBUF		0x11
+ #define S2MPS17_RTCBUF_OUT	BIT(2)
+@@ -193,11 +195,17 @@
+ static const struct regulator_desc exynos8895_nfc_io =
+ 	G955N_LDO("ldo39", S2MPS17_LDO39_CTRL, 1800000);
+ 
++static const struct regulator_desc exynos8895_touch_avdd =
++	G955N_LDO("ldo35", S2MPS17_LDO35_CTRL, 3300000);
++
++static const struct regulator_desc exynos8895_touch_io =
++	G955N_LDO("ldo34", S2MPS17_LDO34_CTRL, 1850000);
++
+ static void exynos8895_register_optional_io(struct device *dev,
+ 					 struct exynos8895_acpm_layout *layout,
+ 					 struct device_node *regulators,
+ 					 const struct regulator_desc *desc,
+-					 u8 selector)
++					 u8 selector, bool set_while_disabled)
+ {
+ 	struct regulator_config cfg = { .dev = dev, .driver_data = layout };
+ 	struct regulator_dev *rdev;
+@@ -214,6 +222,20 @@
+ 	if (ret) {
+ 		dev_warn(dev, "cannot read %s selector: %d\n", desc->name, ret);
+ 		return;
++	}
++	if (FIELD_GET(S2MPS17_LDO_SELECTOR, control) != selector &&
++	    set_while_disabled && !(control & S2MPS17_LDO_MODE)) {
++		u32 command = ACPM_PMIC_UPDATE |
++			FIELD_PREP(ACPM_PMIC_VALUE, selector) |
++			FIELD_PREP(ACPM_PMIC_MASK, S2MPS17_LDO_SELECTOR);
++
++		ret = exynos8895_acpm_pmic_transfer(layout, 1, desc->id, command, NULL);
++		if (!ret)
++			ret = exynos8895_acpm_pmic_read(layout, 1, desc->id, &control);
++		if (ret) {
++			dev_warn(dev, "cannot set and verify %s selector: %d\n", desc->name, ret);
++			return;
++		}
+ 	}
+ 	if (FIELD_GET(S2MPS17_LDO_SELECTOR, control) != selector) {
+ 		dev_warn(dev, "%s voltage selector differs from %u uV\n",
+@@ -427,9 +449,13 @@
+ 		ret = exynos8895_register_ldos(dev, layout);
+ 		if (!ret) {
+ 			exynos8895_register_optional_io(dev, layout, regulators,
+-						       &exynos8895_sd_io, 0x28);
++						       &exynos8895_sd_io, 0x28, false);
+ 			exynos8895_register_optional_io(dev, layout, regulators,
+-						       &exynos8895_nfc_io, 0x2c);
++						       &exynos8895_nfc_io, 0x2c, false);
++			exynos8895_register_optional_io(dev, layout, regulators,
++						       &exynos8895_touch_avdd, 0x3c, true);
++			exynos8895_register_optional_io(dev, layout, regulators,
++						       &exynos8895_touch_io, 0x2e, true);
+ 		}
+ 		of_node_put(regulators);
+ 		if (ret)
