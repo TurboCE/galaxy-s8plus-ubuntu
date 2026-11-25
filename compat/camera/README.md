@@ -58,8 +58,9 @@ Include `g955n-s5k3h1-readback.dtsi` after the camera ROM fragment.
 The added driver controls the front sensor on USI11 HSI2C27 at 0x35.
 The front EEPROM remains on HSI2C28. The front sensor takes its stock
 four rails from the S2MPB02 and a 26 MHz CIS_CLK1 on GPK0-1. GPC0-3
-is the active-low reset. The regulator provider verifies every configured
-selector before exposing the corresponding rail.
+is the active-low reset. The regulator provider applies and verifies the board selector on a
+disabled rail at registration and before enabling it. It refuses to
+alter a rail already enabled at a different voltage.
 
 The root-only `sensor_registers` attribute checks the powered sensor
 model, revision and standby state. Writing `1` to root-only

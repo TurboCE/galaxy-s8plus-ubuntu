@@ -7311,3 +7311,33 @@ selections in both orders. The built-in microphone could be
 selected alongside Headphones and remained selected when returning
 to Speaker. USB Ethernet and Tailscale remained unavailable, so
 hardware sound, jack-state changes and GNOME routing are unverified.
+
+
+## 2026-11-26 — Camera PMIC reset state and optical bus supply
+
+After the handset connection returned, the unchanged CAM0 BOOT
+showed the S2MPB02 probe rejecting the front digital supply. A
+read-only I2C module reported the disabled LDO5, LDO13 and LDO17
+selectors as 0x30, 0x5c and 0x5e. Samsung's camera rail specifications
+and the previous working camera trial use 0x24, 0x58 and 0x30.
+The other two front selectors already matched.
+
+The revised regulator module built for the running release with W=1.
+Verified the previous module hash against the retained original,
+installed and read back the candidate, and rebooted normally without
+changing BOOT. The new driver confirmed all three selector changes
+with the enable bits clear. The torch LED class returned at brightness
+zero, CAM0 completed its DMA mapping test, and the default bottom
+speaker route was present. The next front sensor chip read returned
+ENXIO and its four rails returned to disabled. USB and Tailscale
+then stopped responding. The separate CAM clock snapshot did not
+return. No successful camera capture is claimed and the newest
+transport failure has no confirmed cause.
+
+The optical driver's ID read still timed out. A separate ACPM read
+showed S2MPS17 LDO39=0x2c, with the enable mode cleared. In the
+previous working optical and NFC checks it was 0xec. The Samsung
+revision 10 optical node and NFC node both reference VDD_NFC_1P8,
+provided by LDO39. The current Linux optical node lacks a consumer
+reference for that rail. This is a concrete missing dependency;
+the optical transport needs to be retested after adding it.

@@ -2986,3 +2986,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   when the standard Headphone Jack control exists.
 - Marked wired headphones and the bottom speaker as conflicting
   because they share the ABOX playback DMA.
+
+
+## 2026-11-26 — Camera regulator initialization after reset
+
+- Program the board's S2MPB02 voltage selectors while the camera
+  outputs are disabled, then read back each change.
+- Keep already enabled rails at their current voltage and report a
+  mismatch instead of exposing them as a supported camera supply.

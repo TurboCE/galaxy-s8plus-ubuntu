@@ -41,8 +41,52 @@ static const struct regmap_config s2mpb02_torch_regmap = {
 	.max_register = S2MPB02_LDO17_CTRL,
 };
 
+struct s2mpb02_camera_rail {
+	struct regulator_desc desc;
+	unsigned int selector;
+};
+
+static int s2mpb02_camera_prepare_voltage(struct device *dev, struct regmap *map,
+					  const struct s2mpb02_camera_rail *rail)
+{
+	unsigned int reg = rail->desc.enable_reg;
+	unsigned int value, previous;
+	int ret;
+
+	ret = regmap_read(map, reg, &value);
+	if (ret)
+		return ret;
+	if ((value & S2MPB02_LDO_VSEL_MASK) == rail->selector)
+		return 0;
+	if (value & S2MPB02_LDO_ENABLE)
+		return dev_err_probe(dev, -EBUSY, "%s active at unexpected voltage\n",
+				     rail->desc.name);
+	previous = value & S2MPB02_LDO_VSEL_MASK;
+	ret = regmap_update_bits(map, reg, S2MPB02_LDO_VSEL_MASK, rail->selector);
+	if (ret)
+		return ret;
+	ret = regmap_read(map, reg, &value);
+	if (ret)
+		return ret;
+	if ((value & (S2MPB02_LDO_VSEL_MASK | S2MPB02_LDO_ENABLE)) != rail->selector)
+		return dev_err_probe(dev, -EIO, "%s voltage readback failed\n",
+				     rail->desc.name);
+	dev_info(dev, "%s disabled selector %#x -> %#x\n",
+		 rail->desc.name, previous, rail->selector);
+	return 0;
+}
+
+static int s2mpb02_camera_enable(struct regulator_dev *rdev)
+{
+	const struct s2mpb02_camera_rail *rail = rdev_get_drvdata(rdev);
+	int ret;
+
+	ret = s2mpb02_camera_prepare_voltage(rdev_get_dev(rdev), rdev_get_regmap(rdev), rail);
+	return ret ?: regulator_enable_regmap(rdev);
+}
+
 static const struct regulator_ops s2mpb02_camera_ops = {
-	.enable = regulator_enable_regmap,
+	.enable = s2mpb02_camera_enable,
 	.disable = regulator_disable_regmap,
 	.is_enabled = regulator_is_enabled_regmap,
 };
@@ -65,10 +109,7 @@ static const struct regulator_ops s2mpb02_camera_ops = {
 		.selector = (_uv - 600000) / _step,		\
 	}
 
-static const struct {
-	struct regulator_desc desc;
-	unsigned int selector;
-} s2mpb02_camera_rails[] = {
+static struct s2mpb02_camera_rail s2mpb02_camera_rails[] = {
 	S2MPB02_FIXED_LDO("camera-front-dvdd-1v05", "ldo5", S2MPB02_LDO5_CTRL, 1050000, 12500),
 	S2MPB02_FIXED_LDO("camera-front-rom-1v8", "ldo6", S2MPB02_LDO6_CTRL, 1800000, 25000),
 	S2MPB02_FIXED_LDO("camera-front-avdd-2v8", "ldo13", S2MPB02_LDO13_CTRL, 2800000, 25000),
@@ -81,25 +122,24 @@ static int s2mpb02_register_camera_rails(struct device *dev, struct regmap *map)
 	struct regulator_config config = { .dev = dev, .regmap = map };
 	struct device_node *regulators __free(device_node) =
 		of_get_child_by_name(dev->of_node, "regulators");
-	unsigned int value, i;
+	unsigned int i;
 	int ret;
 
 	if (!regulators)
 		return 0;
 	for (i = 0; i < ARRAY_SIZE(s2mpb02_camera_rails); i++) {
-		const struct regulator_desc *rail = &s2mpb02_camera_rails[i].desc;
+		struct s2mpb02_camera_rail *rail = &s2mpb02_camera_rails[i];
 		struct device_node *child __free(device_node) =
-			of_get_child_by_name(regulators, rail->of_match);
+			of_get_child_by_name(regulators, rail->desc.of_match);
 		struct regulator_dev *rdev;
 
 		if (!child || !of_device_is_available(child))
 			continue;
-		ret = regmap_read(map, rail->enable_reg, &value);
+		ret = s2mpb02_camera_prepare_voltage(dev, map, rail);
 		if (ret)
 			return ret;
-		if ((value & S2MPB02_LDO_VSEL_MASK) != s2mpb02_camera_rails[i].selector)
-			return dev_err_probe(dev, -EINVAL, "unexpected %s voltage\n", rail->name);
-		rdev = devm_regulator_register(dev, rail, &config);
+		config.driver_data = rail;
+		rdev = devm_regulator_register(dev, &rail->desc, &config);
 		if (IS_ERR(rdev))
 			return PTR_ERR(rdev);
 	}
