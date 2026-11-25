@@ -2875,3 +2875,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Read the optical supply configuration and identified the installed
   device without enabling its emitters or capturing a biosignal.
+
+
+## 2026-11-25 — Reliable NFC discovery shutdown
+
+- Kept the NFC IRQ masked until the first successful transmit and
+  switched to an active-high level trigger so pending frames stay
+  serviceable during discovery shutdown.

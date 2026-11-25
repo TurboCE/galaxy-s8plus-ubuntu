@@ -29,9 +29,9 @@ NFC class. The reference clock is enabled only while the NCI device
 is open, with no firmware download hooks. The diagnostic and NCI
 fragments are alternative bindings for one physical device.
 
-The driver suppresses startup interrupts until the first successful
-write and checks the ready GPIO before reading. Without this gate,
-an early receive on the handset timed out before initialization.
+The driver keeps the IRQ masked until the first successful write and
+checks READY before reading. It uses a level interrupt so a second
+pending frame can still wake the reader without another rising edge.
 With it, the Linux NFC generic netlink interface powered the controller
 up, started and stopped discovery, and powered it down. The same
 sequence passed after s2idle and an ordinary reboot. The physical

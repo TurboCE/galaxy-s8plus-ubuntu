@@ -10,29 +10,29 @@
 struct g955n_nci {
 	struct g955n_nfc hw;
 	struct nci_dev *ndev;
-	bool rx_enabled;
+	bool irq_enabled;
 	int irq;
 };
 
 static int g955n_nci_open(struct nci_dev *ndev)
 {
 	struct g955n_nci *nfc = nci_get_drvdata(ndev);
-	int ret;
 
-	ret = g955n_nfc_power_on(&nfc->hw, true);
-	if (ret)
-		return ret;
-	/* Ignore startup edges until the controller accepts the first write. */
-	nfc->rx_enabled = false;
-	enable_irq(nfc->irq);
-	return 0;
+	/* The IRQ remains masked until the controller accepts a command. */
+	return g955n_nfc_power_on(&nfc->hw, true);
 }
 
 static int g955n_nci_close(struct nci_dev *ndev)
 {
 	struct g955n_nci *nfc = nci_get_drvdata(ndev);
 
-	disable_irq(nfc->irq);
+	mutex_lock(&nfc->hw.lock);
+	if (nfc->irq_enabled) {
+		nfc->irq_enabled = false;
+		disable_irq_nosync(nfc->irq);
+	}
+	mutex_unlock(&nfc->hw.lock);
+	synchronize_irq(nfc->irq);
 	return g955n_nfc_power_off(&nfc->hw);
 }
 
@@ -44,8 +44,10 @@ static int g955n_nci_send(struct nci_dev *ndev, struct sk_buff *skb)
 
 	mutex_lock(&nfc->hw.lock);
 	ret = i2c_master_send(nfc->hw.client, skb->data, bytes);
-	if (ret == bytes)
-		nfc->rx_enabled = true;
+	if (ret == bytes && !nfc->irq_enabled) {
+		nfc->irq_enabled = true;
+		enable_irq(nfc->irq);
+	}
 	mutex_unlock(&nfc->hw.lock);
 	consume_skb(skb);
 
@@ -65,11 +67,22 @@ static irqreturn_t g955n_nci_irq(int irq, void *data)
 	int ret;
 
 	mutex_lock(&nfc->hw.lock);
-	if (!nfc->rx_enabled || gpiod_get_value_cansleep(nfc->hw.ready) <= 0) {
+	if (!nfc->irq_enabled) {
 		mutex_unlock(&nfc->hw.lock);
 		return IRQ_HANDLED;
 	}
-	ret = g955n_read_nci_frame(&nfc->hw, header, payload);
+
+	ret = gpiod_get_value_cansleep(nfc->hw.ready);
+	if (ret > 0)
+		ret = g955n_read_nci_frame(&nfc->hw, header, payload);
+	else if (!ret) {
+		mutex_unlock(&nfc->hw.lock);
+		return IRQ_HANDLED;
+	}
+	if (ret) {
+		nfc->irq_enabled = false;
+		disable_irq_nosync(irq);
+	}
 	mutex_unlock(&nfc->hw.lock);
 	if (ret) {
 		dev_err_ratelimited(&nfc->hw.client->dev, "NCI receive failed: %d\n", ret);
@@ -116,8 +129,9 @@ static int g955n_nci_probe(struct i2c_client *client)
 	if (nfc->irq < 0)
 		return dev_err_probe(dev, nfc->irq, "NFC IRQ unavailable\n");
 
+	/* READY stays high when another frame is pending. */
 	ret = devm_request_threaded_irq(dev, nfc->irq, NULL, g955n_nci_irq,
-					IRQF_TRIGGER_RISING | IRQF_ONESHOT | IRQF_NO_AUTOEN,
+					IRQF_TRIGGER_HIGH | IRQF_ONESHOT | IRQF_NO_AUTOEN,
 					dev_name(dev), nfc);
 	if (ret)
 		return dev_err_probe(dev, ret, "cannot request NFC IRQ\n");

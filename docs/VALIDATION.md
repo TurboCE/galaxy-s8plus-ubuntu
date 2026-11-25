@@ -6955,3 +6955,29 @@ the BCM4773 service remained active.
 Restored the verified NFC-capable BOOT and removed the optical trial
 module and recovery timer. Linux IIO exposure and physical sampling
 remain pending.
+
+
+## 2026-11-25 — NFC level IRQ retest and discovery shutdown latency
+
+After restoring the NFC-capable BOOT from the optical readback trial,
+generic netlink accepted discovery and returned powered-off. The
+kernel nevertheless logged two NCI completion timeouts during the
+stop and reset sequence. The NCI core can return success from the
+down path after a timeout, so the verifier now also measures elapsed
+shutdown time and checks kernel errors.
+
+The replacement module keeps the interrupt masked through power-up and
+enables a level-high interrupt after the first successful I²C write.
+The interrupt handler checks READY and remasks on a receive error.
+This allows the host to receive another queued frame while READY stays
+high. Rebuilt with W=1 and replaced only the board NFC module.
+The verified BOOT stayed the same.
+
+On the next boot two discovery-stop and power-down trials completed in
+13 and 16 ms, with no kernel error entries at the check. An RTC alarm
+then woke the same boot after approximately 21 seconds of s2idle.
+The NFC sequence passed again, with discovery stop and power-down in
+17 ms and no NFC timeout. The resumed kernel again reported a
+temporary brcmfmac scan suppression while Wi-Fi was connected.
+GDM, the display, the sensor hub and the default bottom-speaker route
+were active. Physical tag reads remain unverified.
