@@ -2805,3 +2805,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Restored the integrated BOOT after the trial regressed the BCM4773
   firmware handshake. Identified the missing sensor clock and SPI
   overlay files in the trial's source tree.
+
+## 2026-11-25 — Identify the notification RGB registers
+
+- Extended the read-only MAX77865 probe to confirm the notification
+  LED register block on the same handset and I²C address as haptics.

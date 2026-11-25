@@ -25,3 +25,9 @@ The trial also exposed a sensor hub regression from the build's
 baseline source. The original BOOT was restored. Use the exact
 integrated clock and SPI source when building the next trial.
 Suspend cancellation still requires a handset test.
+
+The read-only probe also checks the notification LED registers on
+the same PMIC address. Stock Dream2 maps red, green and blue to
+MAX77865 outputs 1, 2 and 3. The handset reported all three off.
+A future Linux LED class driver must share the existing PMIC client
+with haptics.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Read-only MAX77865 haptic block identification on Korean Dream2 boards. */
+/* Read-only MAX77865 motor and notification LED identification on Dream2. */
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -9,13 +9,17 @@
 #define MAX77865_PMIC_REV	0x01
 #define MAX77865_MAINCTRL1	0x02
 #define MAX77865_MOTOR_CONFIG	0x10
+#define MAX77865_LED_ENABLE	0x30
+#define MAX77865_LED_RED	0x32
+#define MAX77865_LED_GREEN	0x33
+#define MAX77865_LED_BLUE	0x34
 
 static int __init g955n_haptic_identify(void)
 {
 	struct device_node *switch_node, *bus;
 	struct i2c_adapter *adapter;
 	struct i2c_client *client;
-	int id, rev, bias, motor;
+	int id, rev, bias, motor, enable, red, green, blue;
 
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
@@ -45,6 +49,10 @@ static int __init g955n_haptic_identify(void)
 	rev = i2c_smbus_read_byte_data(client, MAX77865_PMIC_REV);
 	bias = i2c_smbus_read_byte_data(client, MAX77865_MAINCTRL1);
 	motor = i2c_smbus_read_byte_data(client, MAX77865_MOTOR_CONFIG);
+	enable = i2c_smbus_read_byte_data(client, MAX77865_LED_ENABLE);
+	red = i2c_smbus_read_byte_data(client, MAX77865_LED_RED);
+	green = i2c_smbus_read_byte_data(client, MAX77865_LED_GREEN);
+	blue = i2c_smbus_read_byte_data(client, MAX77865_LED_BLUE);
 	i2c_unregister_device(client);
 	if (id < 0 || rev < 0 || bias < 0 || motor < 0) {
 		pr_err("g955n-haptic: PMIC access failed: %d %d %d %d\n", id, rev, bias, motor);
@@ -52,9 +60,16 @@ static int __init g955n_haptic_identify(void)
 	}
 	pr_info("g955n-haptic: PMIC id=%02x rev=%02x bias=%d motor=%d config=%02x\n",
 		id, rev, !!(bias & BIT(7)), !!(motor & BIT(6)), motor);
+	if (enable < 0 || red < 0 || green < 0 || blue < 0) {
+		pr_err("g955n-haptic: notification LED access failed: %d %d %d %d\n",
+		       enable, red, green, blue);
+		return -EIO;
+	}
+	pr_info("g955n-haptic: notification LED mode=%02x red=%02x green=%02x blue=%02x\n",
+		enable, red, green, blue);
 	return 0;
 }
 module_init(g955n_haptic_identify);
 
-MODULE_DESCRIPTION("Read-only SM-G955N MAX77865 haptic block identification");
+MODULE_DESCRIPTION("Read-only SM-G955N MAX77865 motor and notification LED identification");
 MODULE_LICENSE("GPL");

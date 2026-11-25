@@ -6730,3 +6730,20 @@ reported ready, and GDM and backlight were active. A corrected
 candidate based on the integrated source is required before the
 haptic driver can be retained. Suspend cancellation still needs
 a handset test.
+
+## 2026-11-25 — Notification LED control block on MAX77865
+
+While the haptic kernel was rebuilding, compared the stock Korean
+Dream2 notification LED table with the live MAX77865 registers.
+The Samsung RGB driver uses the primary PMIC client at 0x66.
+Its red, green and blue outputs are 1, 2 and 3. The read-only
+ARM64 probe built with `W=1` and read the mode and three current
+registers on the original BOOT; all four returned zero. The probe
+did not change LED current or enable states. Actual light output
+and Linux LED class registration remain to be verified.
+
+Separately verified that both corrected haptic source files matched
+the known-good BCM4773 clock and SPI overlay exactly. The corrected
+build config enables only PWM, Samsung PWM and FF memless relative to
+the integrated kernel. No corrected BOOT had been installed at the
+time of this entry.
