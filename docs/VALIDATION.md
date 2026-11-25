@@ -6102,3 +6102,34 @@ This verifies that the 6.18 diagnostic can record a real signal
 from the internal SIFS1 tap under the same stream setup. The
 remaining failure is beyond that tap or in the amp feedback
 return. It is reproducible without changing the recording API.
+
+#### UAIF4 receiver startup ordering
+
+Samsung's ABOX trigger enables the receiver independently from
+the transmitter. The successful #58 monitor run armed capture
+before playback, while the initial VPN2 feedback trials enabled
+receiver after transmit had already started. On VPN2, held the
+reference WAV, period and buffer geometry, amplifier ADCs, and
+WDMA1 ASRC bypass fixed. In the control run, UAIF4 CTRL0 became
+0x01000005 at transmit start and later 0x01000007 with capture.
+In the second run, enabled receive first and observed 0x01000006
+before transmit set 0x01000007. Both direct ALSA playbacks and
+feedback captures completed, and each 216,000-frame recording
+was all zero. This eliminates the late UAIF4 receive-enable bit
+alone as the explanation for that missing feedback. It does not
+cover starting the entire vendor capture pipeline before playback.
+
+#### Reference UAIF0 format with the microphone idle
+
+The working #58 feedback trace showed UAIF0 CTRL1 at 0x171d75d7,
+while VPN2 sets it to 0x0984f000. Earlier clock-divider trials
+showed that UAIF0 can pace speaker frames, so repeated the
+feedback A/B with the physical microphone stream closed and
+switched only the UAIF0 format. Readbacks confirmed each value
+during playback. UAIF4 CTRL1 remained 0x0984f000, and the
+reference WAV, amp and DMA settings were held constant. Playback
+and capture both completed. Each run took 5.51 seconds from ALSA
+launch and captured 216,000 zero-valued stereo frames. That
+format difference on its own did not restore the reference
+feedback. Neither trial changed the installed codec, microphone
+or receiver configuration. The temporary modules were removed.

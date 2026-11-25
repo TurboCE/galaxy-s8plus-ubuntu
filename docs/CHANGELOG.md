@@ -2605,3 +2605,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   bypassing capture ASRC1 removed the feedback PCM read error, but the
   captured frames were all zero. This is diagnostic evidence and does
   not change the installed playback or microphone driver.
+
+## 2026-11-25 — UAIF4 startup order comparison
+
+- Compared enabling UAIF4 receive before and after transmit on
+  VPN2. Both feedback recordings completed and contained only zero
+  samples. The diagnostic module was removed after testing.
+- Matched the working #58 UAIF0 format with the microphone idle.
+  Playback timing was unchanged and amplifier feedback stayed zero.
