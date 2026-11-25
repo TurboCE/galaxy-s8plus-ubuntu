@@ -6904,3 +6904,32 @@ diagnostic module and timer, and rechecked UPower, GNOME, Wi-Fi, the
 BCM4773 hub, the MMC host and the default bottom-speaker route.
 The standard NCI driver is a separate candidate. The discovery
 and tag-read paths have yet to be qualified.
+
+
+## 2026-11-25 — Standard NFC initialization and discovery
+
+Built the native NFC and NCI core modules and the board transport for
+ARM64, with W=1 for the board module. Compared the boot DT against the
+verified baseline. The only functional DT change was the NFC client on
+USI10. The first NFC class boot registered nfc0, but generic netlink
+device-up timed out. The kernel logged an I²C receive timeout before
+the initialization command completed.
+
+Matched the Samsung transport's receive gate. The IRQ thread now waits
+for the first successful transmit before accepting any reads and also
+checks the controller's ready GPIO. Kept the same BOOT for the retest.
+Generic netlink device-up completed CORE_RESET and CORE_INIT, accepted
+a start and stop of discovery, and returned the controller to off.
+No physical tag was available for a read test.
+
+An RTC alarm woke the same boot after about 20 seconds of s2idle.
+The NFC sequence passed again after resume. NetworkManager reported
+Wi-Fi connected, with a single brcmfmac scan suppression logged during
+the DHCP coexistence window. GDM, the panel, the sensor hub and the
+bottom-speaker output route remained available.
+
+Removed the trial rollback timer and rebooted normally. NFC registered
+again and the same commands passed. Verified the MMC host, UPower wired
+input, haptic input and RGB LED interfaces. A manual Wi-Fi scan request
+was accepted and the device remained connected. The kernel error
+journal was empty at the NFC verification following the normal reboot.

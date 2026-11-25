@@ -20,7 +20,7 @@ The first handset test received an address NACK. Two attempts with
 the wake signal succeeded, reporting status 0 and NCI 1.0. The handset
 returned to the verified Ubuntu boot without the temporary driver.
 
-## Linux NFC candidate
+## Linux NFC transport
 
 Enable the trial kernel configuration fragment and build the modules
 against that kernel. Include `g955n-s3nrn82.dtsi` after the USI10
@@ -29,6 +29,10 @@ NFC class. The reference clock is enabled only while the NCI device
 is open, with no firmware download hooks. The diagnostic and NCI
 fragments are alternative bindings for one physical device.
 
-The NCI candidate still requires device-up and discovery testing.
-Successful CORE_RESET on the diagnostic path does not qualify RF
-polling or tag reads.
+The driver suppresses startup interrupts until the first successful
+write and checks the ready GPIO before reading. Without this gate,
+an early receive on the handset timed out before initialization.
+With it, the Linux NFC generic netlink interface powered the controller
+up, started and stopped discovery, and powered it down. The same
+sequence passed after s2idle and an ordinary reboot. The physical
+tag path still needs a known tag and has yet to be qualified.

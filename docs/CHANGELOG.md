@@ -2861,3 +2861,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   to a configuration-preserving NCI reset.
 - Prepared a Linux NCI class transport for the board and kept the
   reset diagnostic out of the normal boot.
+
+
+## 2026-11-25 — Native Linux NFC on the SM-G955N
+
+- Enabled the S3NRN82 through the standard kernel NFC class. Fixed an
+  early receive before the first I²C command was accepted.
+- Verified device-up, discovery start and stop, and device-down on
+  the handset after both s2idle and an ordinary reboot.

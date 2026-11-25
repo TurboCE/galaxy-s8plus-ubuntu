@@ -4,7 +4,7 @@ Live baseline on 2026-11-25: Ubuntu 24.04.5 LTS with
 `6.18.0-g955n-usb-r100-vpn2`, the corrected speaker DTB, and
 the integrated BCM4773 transport, the shared MAX77865 haptic
 and RGB LED drivers, native microSD host registration, and MAX77865
-input detection in UPower.
+input detection in UPower, and the S3NRN82 on Linux NFC.
 Older Samsung 4.4 evidence is in [VALIDATION.md](VALIDATION.md);
 it does not qualify a device on the current mainline boot.
 
@@ -20,7 +20,7 @@ it does not qualify a device on the current mainline boot.
 | Location | GeoClue returns an approximate network location. Native BCM4773 exposes no GNSS receiver source. | Qualify satellite reports and a receiver fix before enabling a native GeoClue GNSS feed. |
 | LTE | ModemManager is active and lists no modem. | Securely bring up the Exynos modem transport, then validate SIM registration and mobile data in NetworkManager. |
 | Cameras and iris sensor | No video device. Samsung's board source lists alternatives for the front and rear sensor modules, so the actual variant must be identified. | Qualify capture through the Linux media stack and a standard Ubuntu camera app. Iris functionality needs a separate userspace interface and security review. |
-| NFC | The handset's own firmware inventory identifies S3NRN82. Samsung's board DTS shows the I²C address and GPIOs, and the vendor driver controls the NFC supply and an AP clock. The Linux 6.18 S3FWRN5 I²C match table does not include this variant. | The live rail probe found the shared 1.8 V I²C supply already enabled. The USI10 I²C adapter now registers automatically. A board-specific clock and wake sequence produced two successful NCI 1.0 reset replies. The Linux NCI transport still requires device-up and discovery testing. Exposing a controller is separate from card emulation or payment support. |
+| NFC | The S3NRN82 binds to the Linux NFC class at boot. Generic netlink device-up completed CORE_RESET and CORE_INIT, discovery started and stopped, and power-down succeeded. The sequence passed after s2idle and an ordinary reboot. | Identify and read a physical tag. |
 | Optical heart-rate sensor | The Korean revision 10 board connects an optical sensor at 0x64 to the same I²C bus and 1.8 V I/O supply as NFC. | Identify the installed sensor and qualify its other supplies before any optical sampling. |
 | Fingerprint, haptics and LEDs | No fingerprint service observed. The haptic actuator exposes force feedback through Linux input. The accelerometer detected vibration and confirmed it stopped. Haptics and the three Linux LED class devices ran alongside the BCM4773 hub before and after s2idle. | Measure LED light output, connect and test desktop notification policies if supported, and qualify fingerprint enrollment and unlock. |
 

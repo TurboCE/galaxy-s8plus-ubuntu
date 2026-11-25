@@ -10,6 +10,7 @@
 struct g955n_nci {
 	struct g955n_nfc hw;
 	struct nci_dev *ndev;
+	bool rx_enabled;
 	int irq;
 };
 
@@ -21,6 +22,8 @@ static int g955n_nci_open(struct nci_dev *ndev)
 	ret = g955n_nfc_power_on(&nfc->hw, true);
 	if (ret)
 		return ret;
+	/* Ignore startup edges until the controller accepts the first write. */
+	nfc->rx_enabled = false;
 	enable_irq(nfc->irq);
 	return 0;
 }
@@ -41,12 +44,17 @@ static int g955n_nci_send(struct nci_dev *ndev, struct sk_buff *skb)
 
 	mutex_lock(&nfc->hw.lock);
 	ret = i2c_master_send(nfc->hw.client, skb->data, bytes);
+	if (ret == bytes)
+		nfc->rx_enabled = true;
 	mutex_unlock(&nfc->hw.lock);
 	consume_skb(skb);
 
-	if (ret < 0)
-		return ret;
-	return ret == bytes ? 0 : -EIO;
+	if (ret != bytes) {
+		dev_err_ratelimited(&nfc->hw.client->dev,
+				    "NCI write returned %d for %u bytes\n", ret, bytes);
+		return ret < 0 ? ret : -EIO;
+	}
+	return 0;
 }
 
 static irqreturn_t g955n_nci_irq(int irq, void *data)
@@ -57,6 +65,10 @@ static irqreturn_t g955n_nci_irq(int irq, void *data)
 	int ret;
 
 	mutex_lock(&nfc->hw.lock);
+	if (!nfc->rx_enabled || gpiod_get_value_cansleep(nfc->hw.ready) <= 0) {
+		mutex_unlock(&nfc->hw.lock);
+		return IRQ_HANDLED;
+	}
 	ret = g955n_read_nci_frame(&nfc->hw, header, payload);
 	mutex_unlock(&nfc->hw.lock);
 	if (ret) {
