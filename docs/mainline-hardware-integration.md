@@ -2,7 +2,8 @@
 
 Live baseline on 2026-11-25: Ubuntu 24.04.5 LTS with
 `6.18.0-g955n-usb-r100-vpn2`, the corrected speaker DTB, and
-the integrated BCM4773 transport.
+the integrated BCM4773 transport, and the shared MAX77865
+haptic and RGB LED drivers.
 Older Samsung 4.4 evidence is in [VALIDATION.md](VALIDATION.md);
 it does not qualify a device on the current mainline boot.
 
@@ -19,7 +20,7 @@ it does not qualify a device on the current mainline boot.
 | LTE | ModemManager is active and lists no modem. | Securely bring up the Exynos modem transport, then validate SIM registration and mobile data in NetworkManager. |
 | Cameras and iris sensor | No video device. Samsung's board source lists alternatives for the front and rear sensor modules, so the actual variant must be identified. | Qualify capture through the Linux media stack and a standard Ubuntu camera app. Iris functionality needs a separate userspace interface and security review. |
 | NFC | The handset's own firmware inventory identifies S3NRN82. Samsung's board DTS shows the I²C address and GPIOs, and the vendor driver controls the NFC supply and an AP clock. The Linux 6.18 S3FWRN5 I²C match table does not include this variant. | Qualify the exact I²C transport, clock and supply before attempting read-only tag discovery. Exposing a controller is separate from card emulation or payment support. |
-| Fingerprint, haptics and LEDs | No fingerprint service observed. A MAX77865 trial produced force-feedback vibration. A separate LED-class trial verified RGB on/off register state. | Validate the combined MAX77865 driver with the integrated sensor kernel, measure LED light output, and qualify fingerprint enrollment and unlock. |
+| Fingerprint, haptics and LEDs | No fingerprint service observed. The haptic actuator exposes force feedback through Linux input. The accelerometer detected vibration and confirmed it stopped. Haptics and the three Linux LED class devices ran alongside the BCM4773 hub before and after s2idle. | Measure LED light output, connect and test desktop notification policies if supported, and qualify fingerprint enrollment and unlock. |
 
 The legacy GNSS socket and its daemons require the Samsung 4.4 board-service
 stack. On the mainline boot the unit files now match that kernel requirement.

@@ -6762,3 +6762,27 @@ the BCM4773 service were still active.
 
 This test verifies LED class and register delivery. Optical output
 and combined haptic and LED operation after reboot remain open.
+
+
+## 2026-11-25 — Integrated haptic and RGB driver on BCM4773 BOOT
+
+Rebuilt the PWM-enabled 6.18 image with the same Exynos8895 clock
+and SPI source as the working BCM4773 image. The ready hub registered
+an accelerometer, light sensor and proximity sensor with SensorProxy.
+GDM and OLED backlight were active, NetworkManager reconnected Wi-Fi,
+and PipeWire retained Bottom Speaker as the default sink.
+
+Measured peak accelerometer changes before, during and after vibration
+of 11/350/13 counts on scheduled stop and 10/306/9 on cancellation.
+A read-only PM notifier then recorded the MAX77865 motor enable bit as
+1 at s2idle entry and 0 at resume. The RTC woke the same boot after about
+20 seconds. Force feedback worked again with 12/372/12 and 10/334/9 counts
+on the corresponding post-resume trials. PWM debugfs state was unavailable.
+
+Verified all three LED brightness requests and exact restoration on the
+shared PMIC before and after s2idle. Kept the tested BOOT, disabled the
+trial rollback timer, rebooted and confirmed the same BOOT hash, all
+three sensor properties, LED registration and readback, GDM, backlight,
+Wi-Fi and the default bottom-speaker route. The kernel error-priority
+journal was empty at this check. Optical LED output and desktop
+notification policy have yet to be tested.

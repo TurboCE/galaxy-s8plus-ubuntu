@@ -2816,3 +2816,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added three standard Linux LED class devices with Samsung current
   limits, a shared haptic regmap, and a standalone LED-only binding.
   Verified each color's on and off register state on the handset.
+
+
+## 2026-11-25 — Integrated vibration and notification LEDs
+
+- Installed the combined MAX77865 haptic and RGB LED kernel on the
+  BCM4773 baseline with the corrected USI8 clock and short SPI delays.
+- Verified actual vibration, cancellation, s2idle motor shutdown,
+  LED register state and the same hardware interfaces after reboot.

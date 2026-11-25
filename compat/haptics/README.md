@@ -19,18 +19,15 @@ motor enable and stops PWM on cancellation, suspend, shutdown or
 timeout. It preserves the initial mode and bias settings and leaves
 the PMIC's shared boost configuration alone.
 
-The first PWM-enabled handset trial registered the input device
-and produced real pulses that stopped normally or on cancellation.
-The trial also exposed a sensor hub regression from the build's
-baseline source. The original BOOT was restored. Use the exact
-integrated clock and SPI source when building the next trial.
-Suspend cancellation still requires a handset test.
-
-The read-only probe also checks the notification LED registers on
-the same PMIC address. Stock Dream2 maps red, green and blue to
-MAX77865 outputs 1, 2 and 3. The handset reported all three off.
-A future Linux LED class driver must share the existing PMIC client
-with haptics.
+Build against the integrated BCM4773 kernel with the corrected USI8
+clock and short SPI delay changes. The first PWM-enabled trial built
+without those changes and the sensor hub could no longer initialize.
+The corrected handset image ran the sensor hub and both MAX77865
+drivers together. The hub accelerometer measured vibration during
+force feedback, then returned to baseline after timeout or cancellation.
+During an RTC-woken s2idle test, a read-only PM notifier observed
+the motor enabled before suspend and disabled after resume. Force
+feedback worked again after waking.
 
 The notification LED driver registers `red:indicator`,
 `green:indicator`, and `blue:indicator`. It limits each channel
