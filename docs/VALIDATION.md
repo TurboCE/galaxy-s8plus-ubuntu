@@ -7460,3 +7460,27 @@ and PHY status 0x000000f0. It restored the CAM bus clock to
 connected, and the bottom speaker was still the default sink.
 The CSI test observes frame boundaries. DMA pixel transfer and
 camera apps remain unverified.
+
+
+## 2026-11-26 — Review of incorrect automatic display rotation
+
+The owner reported that, with the screen facing them, the clock appeared
+on the left for both side-facing camera positions and on the right for
+both vertical camera positions. This is a physical observation of the
+lock screen. It does not establish a fixed 90-degree sensor correction.
+
+The running 6.18 handset used the packaged iio-sensor-proxy polling
+backend with the display mount matrix `-1,0,0;0,-1,0;0,0,1`.
+GNOME reported PanelOrientationManaged=true with orientation lock off.
+One passive sample series captured a transition from SensorProxy
+`normal` to `right-up` and Mutter transform 0 to 3 (270 degrees).
+A separate spot check paired `left-up` with transform 1 (90 degrees).
+Neither check independently labeled the physical handset pose or
+observed the rendered lock-screen pixels at the panel.
+
+The same boot logged Mesa scanout-resource creation failures and
+DECON SWIOTLB mapping failures, with only about 3 MiB of aggregate CMA
+free in a later snapshot. These are display-path errors. There is no
+event-level evidence yet tying them to the physical rotation symptom
+or proving that CMA pressure is the cause. The sensor matrix, GNOME
+settings and installed kernel were left unchanged.
