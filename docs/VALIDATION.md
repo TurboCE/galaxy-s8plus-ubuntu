@@ -7398,3 +7398,42 @@ decoded the paired optional DT fragments and verified both properties
 on the existing audio node. USB and Tailscale remained unavailable.
 No trial was deployed, and microphone classification, GNOME capture
 routing and acoustic recording have yet to be verified.
+
+
+## 2026-11-26 — Live shared LDO39 and ramoops console qualification
+
+The sensor traces after the owner's reboot showed all four power
+requests, clock enable, reset release and MCLK pin selection
+make it to the chip-ID transfer. HSI2C returned ENXIO and sensor
+power-off completed successfully. The front EEPROM and rear SPI
+ROM separately identified S5K3H1 and S5K2L2. A bounded read-only
+Top CMU probe observed CIS_CLK1 mux and divider zero and its gate
+transition 0x00100000 to 0x00300000 and back during the failed ID
+read. The remaining cold sensor communication failure precedes
+CSI frame reception. The gate result is a register observation
+without a measured waveform at the sensor pin.
+
+Built the combined board image with the same 6.18 Linux Image and
+initramfs, the LDO39 and console DT settings, and the three updated
+ACPM, NFC and optical modules. Verified retained copies of the old
+modules, made fresh recovery backups, and read back the BOOT-only
+write. Confirmed NFC DEV_UP, CORE_RESET, CORE_INIT, RF discovery
+and DEV_DOWN on the handset. NFC alone toggled LDO39 from 0x2c to
+0xec and back. During simultaneous optical acquisition NFC released
+its reference while LDO39 stayed enabled and 64 valid red/infrared
+FIFO frames were read. LDO39 returned to 0x2c when capture ended.
+The same sequence passed after an ordinary reboot and after an
+RTC-woken s2idle cycle on the same boot.
+
+The first console marker was below the boot console log threshold.
+The next test temporarily raised the console level and recovered
+the marker after reboot from console-ramoops-0 via USB serial.
+The separate pmsg record still contained the loader stages through
+LINUX. Both USB-network and Tailscale SSH returned, though their
+availability lagged behind the USB serial login after reboot.
+Removed the trial return timer and retained the tested image.
+GDM and the location hub were active, network connectivity returned
+after s2idle and the built-in bottom speaker stayed the default route.
+A temporary brcmfmac scan suppression was logged on resume.
+Physical NFC tag reading and optical signal interpretation remain
+unverified; this test did not use a physical tag or derive heart rate.

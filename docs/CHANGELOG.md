@@ -3016,3 +3016,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Added an opt-in MICDET1 measurement and separate ALSA microphone
   jack control to the SM-G955N wired-jack driver.
+
+
+## 2026-11-26 — NFC, optical sensor and retained console verified
+
+- Booted the shared LDO39 supply and retained-console board update
+  on the existing 6.18 kernel.
+- Verified independent and concurrent NFC and optical acquisition
+  after ordinary reboot and RTC-woken s2idle. Recovered a retained
+  console marker after an ordinary reboot.
