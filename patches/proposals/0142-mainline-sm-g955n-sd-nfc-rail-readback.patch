@@ -1,0 +1,50 @@
+Subject: [PATCH] soc: samsung: read the SD and NFC PMIC rail states
+
+Use the established serialized read transaction on the S2MPS17 PMIC
+page to report LDO2 and LDO39. The stock Korean board uses these rails
+for microSD signaling and the shared NFC and heart-rate sensor I2C
+lines respectively. Keep the existing peripheral_rails ABI and do not
+modify either voltage selector or enable state.
+
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -11,6 +11,8 @@
+ #include <linux/regulator/driver.h>
+ #include <linux/slab.h>
+ 
++#define S2MPS17_LDO2_CTRL	0x3e
++#define S2MPS17_LDO39_CTRL	0x64
+ #define S2MPS17_RTCBUF		0x11
+ #define S2MPS17_RTCBUF_OUT	BIT(2)
+ 
+@@ -282,8 +284,29 @@
+ }
+ static DEVICE_ATTR_ADMIN_RO(peripheral_rails);
+ 
++static ssize_t removable_io_rails_show(struct device *dev,
++				       struct device_attribute *attr, char *buf)
++{
++	struct exynos8895_acpm_layout *layout = dev_get_drvdata(dev);
++	u8 sd_io, nfc;
++	int ret;
++
++	mutex_lock(&layout->lock);
++	ret = exynos8895_acpm_pmic_read(layout, 1, S2MPS17_LDO2_CTRL, &sd_io);
++	if (!ret)
++		ret = exynos8895_acpm_pmic_read(layout, 1, S2MPS17_LDO39_CTRL,
++					      &nfc);
++	mutex_unlock(&layout->lock);
++	if (ret)
++		return ret;
++
++	return sysfs_emit(buf, "LDO2=0x%02x LDO39=0x%02x\n", sd_io, nfc);
++}
++static DEVICE_ATTR_ADMIN_RO(removable_io_rails);
++
+ static struct attribute *exynos8895_acpm_layout_attrs[] = {
+ 	&dev_attr_peripheral_rails.attr,
++	&dev_attr_removable_io_rails.attr,
+ 	NULL,
+ };
+ static const struct attribute_group exynos8895_acpm_layout_group = {

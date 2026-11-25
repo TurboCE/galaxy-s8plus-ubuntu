@@ -6786,3 +6786,21 @@ three sensor properties, LED registration and readback, GDM, backlight,
 Wi-Fi and the default bottom-speaker route. The kernel error-priority
 journal was empty at this check. Optical LED output and desktop
 notification policy have yet to be tested.
+
+
+## 2026-11-25 — microSD and NFC supply readback on integrated 6.18
+
+The Samsung Korean revision 10 DT assigns S2MPS17 LDO2 to the
+microSD signaling rail and LDO39 to the NFC and heart-rate I²C
+supply. The microSD card VCC has a separate 2.8 V GPIO-controlled
+load switch. The live DT leaves the microSD controller and
+USI10 I²C adapter disabled.
+
+Built proposal 0142 against the active ARM64 kernel configuration
+with W=1. Loaded it through an updates module after an ordinary
+reboot. The original module is available as fallback and the BOOT
+hash is unchanged. The root-only readback returned LDO2=0x28
+(2.8 V selector, disabled) and LDO39=0xec (1.8 V selector, enabled).
+The pre-existing PMIC report was unchanged. GDM, backlight,
+Wi-Fi and the BCM4773 hub were active after the reboot. No supply
+voltage or enable was changed by the probe.
