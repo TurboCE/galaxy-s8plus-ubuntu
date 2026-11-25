@@ -3081,3 +3081,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Connected the touchscreen to the board's S2MPS17 LDO34 and LDO35.
 - Verified input registration and physical touch unlock in stock
   GNOME Wayland on the handset.
+
+
+## 2026-11-26 — Stream BCM4773 motion and light through standard IIO buffers
+
+- Connected native acceleration and illuminance to the packaged Ubuntu
+  SensorProxy through triggered IIO buffers, retaining the existing
+  direct IIO reads and accelerometer orientation matrix.

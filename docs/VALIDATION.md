@@ -7823,3 +7823,31 @@ SensorProxy responses without reboot. On a subsequent same-boot
 RTC-woken s2idle cycle both IIO reads succeeded. The intermittent
 loss of sensor readings and its relation to GNOME automatic
 brightness remain to be reproduced and resolved.
+
+
+## 2026-11-26 — Buffered BCM4773 acceleration and illuminance
+
+A previous resume with missing hub samples left the packaged
+SensorProxy waiting in synchronous IIO sysfs reads. Added triggered
+scan buffers for acceleration and illuminance so those two consumers
+can wait for reports without blocking the D-Bus main loop. Kept the
+existing direct channels, mount matrix, lux units and compass trigger.
+
+Built the direct-read and triggered variants for ARM64 with W=1.
+Verified the model, current BOOT and existing module before
+backing up and replacing only the SSI module. After reboot, the
+stock Ubuntu udev rules selected both buffers and the packaged
+SensorProxy enabled them. Checked three signed 32-bit accelerometer
+axes, the ALS scan format and the lux scale of 1. SensorProxy
+reported 9 lux. Also checked the compass scan interface, touchscreen
+classification, and default bottom-speaker route.
+
+The handset completed two RTC-woken s2idle cycles on the same
+boot with no increase in suspend failures. Both sensors returned
+live IIO data and SensorProxy responded with the buffers enabled.
+It reported 9 lux and an undefined orientation with the phone
+flat after the first cycle, then 0 lux and normal orientation
+after the second. The light value matched the direct IIO reading
+after both cycles. GDM, Wi-Fi and the location daemon were active.
+These trials did not repeat the physical four-way rotation test
+or reproduce the intermittent loss of reports from the hub.

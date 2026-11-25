@@ -596,6 +596,11 @@ static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *c
 
 	if (mask == IIO_CHAN_INFO_SCALE) {
 		*value = 0;
+		if (priv->kind == SSI_LIGHT) {
+			/* The hub reports illuminance in lux. */
+			*value = 1;
+			return IIO_VAL_INT;
+		}
 		if (priv->kind == SSI_HEADING) {
 			*value2 = 1000;
 			return IIO_VAL_INT_PLUS_MICRO;
@@ -659,6 +664,19 @@ static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *c
 	return ret;
 }
 
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+#define SSI_SCAN_CHANNEL(index) \
+	.scan_index = index, \
+	.scan_type = { \
+		.sign = 's', \
+		.realbits = 32, \
+		.storagebits = 32, \
+		.endianness = IIO_LE, \
+	},
+#else
+#define SSI_SCAN_CHANNEL(index)
+#endif
+
 #define SSI_ACCEL_AXIS(axis, index) {				\
 	.type = IIO_ACCEL,					\
 	.modified = 1,						\
@@ -666,6 +684,7 @@ static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *c
 	.address = index,					\
 	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),		\
 	.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SCALE),	\
+	SSI_SCAN_CHANNEL(index)				\
 }
 
 static const struct iio_chan_spec ssi_accel_channels[] = {
@@ -678,7 +697,17 @@ static const struct iio_chan_spec ssi_light_channels[] = {
 	{
 		.type = IIO_LIGHT,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_PROCESSED),
+		.scan_index = -1,
 	},
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+	{
+		.type = IIO_INTENSITY,
+		.modified = 1,
+		.channel2 = IIO_MOD_LIGHT_BOTH,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
+		SSI_SCAN_CHANNEL(0)
+	},
+#endif
 };
 
 static const struct iio_chan_spec ssi_prox_channels[] = {
@@ -740,23 +769,16 @@ static const struct iio_chan_spec ssi_heading_channels[] = {
 		.modified = 1,
 		.channel2 = IIO_MOD_NORTH_MAGN_TILT_COMP,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
-#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
-		.scan_index = 0,
-		.scan_type = {
-			.sign = 's',
-			.realbits = 32,
-			.storagebits = 32,
-			.endianness = IIO_LE,
-		},
-#endif
+		SSI_SCAN_CHANNEL(0)
 	},
 };
 
 #if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
-static int ssi_heading_trigger_state(struct iio_trigger *trigger, bool enabled)
+static int ssi_sensor_trigger_state(struct iio_trigger *trigger, bool enabled)
 {
-	struct g955n_ssi *ssi = iio_trigger_get_drvdata(trigger);
-	struct ssi_sensor_slot *slot = &ssi->slots[SSI_HEADING];
+	struct ssi_iio_priv *priv = iio_priv(iio_trigger_get_drvdata(trigger));
+	struct g955n_ssi *ssi = priv->ssi;
+	struct ssi_sensor_slot *slot = &ssi->slots[priv->kind];
 
 	mutex_lock(&ssi->lock);
 	slot->buffered = enabled;
@@ -769,39 +791,58 @@ static int ssi_heading_trigger_state(struct iio_trigger *trigger, bool enabled)
 	return 0;
 }
 
-static const struct iio_trigger_ops ssi_heading_trigger_ops = {
-	.set_trigger_state = ssi_heading_trigger_state,
-	.validate_device = iio_trigger_validate_own_device,
+static int ssi_sensor_trigger_validate(struct iio_trigger *trigger, struct iio_dev *indio)
+{
+	return iio_trigger_get_drvdata(trigger) == indio ? 0 : -EINVAL;
+}
+
+static const struct iio_trigger_ops ssi_sensor_trigger_ops = {
+	.set_trigger_state = ssi_sensor_trigger_state,
+	.validate_device = ssi_sensor_trigger_validate,
 };
 
-static irqreturn_t ssi_heading_push(int irq, void *data)
+static irqreturn_t ssi_sensor_push(int irq, void *data)
 {
 	struct iio_poll_func *poll = data;
-	struct ssi_iio_priv *priv = iio_priv(poll->indio_dev);
-	struct ssi_sensor_slot *slot = &priv->ssi->slots[SSI_HEADING];
-	__le32 heading = cpu_to_le32(READ_ONCE(slot->sample[0]));
+	struct iio_dev *indio = poll->indio_dev;
+	struct ssi_iio_priv *priv = iio_priv(indio);
+	struct ssi_sensor_slot *slot = &priv->ssi->slots[priv->kind];
+	__le32 scan[ARRAY_SIZE(slot->sample)];
+	unsigned int channel, index = 0;
 
-	iio_push_to_buffers(poll->indio_dev, &heading);
-	iio_trigger_notify_done(poll->indio_dev->trig);
+	/* The nested trigger runs under ssi->lock, with all axes from one report. */
+	for_each_set_bit(channel, indio->active_scan_mask, indio->masklength)
+		scan[index++] = cpu_to_le32(slot->sample[channel]);
+
+	iio_push_to_buffers(indio, scan);
+	iio_trigger_notify_done(indio->trig);
 	return IRQ_HANDLED;
 }
 
-static int ssi_heading_buffer_init(struct g955n_ssi *ssi, struct iio_dev *indio)
+static const char * const ssi_sensor_trigger_names[SSI_IIO_COUNT] = {
+	[SSI_ACCEL] = "accel_3d",
+	[SSI_LIGHT] = "als",
+	[SSI_HEADING] = "magn_3d",
+};
+
+static int ssi_sensor_buffer_init(struct g955n_ssi *ssi, struct iio_dev *indio,
+				  enum ssi_iio_kind kind)
 {
 	struct device *dev = &ssi->spi->dev;
 	struct iio_trigger *trigger;
 	int ret;
 
-	trigger = devm_iio_trigger_alloc(dev, "magn_3d-dev%d", iio_device_id(indio));
+	trigger = devm_iio_trigger_alloc(dev, "%s-dev%d",
+					 ssi_sensor_trigger_names[kind], iio_device_id(indio));
 	if (!trigger)
 		return -ENOMEM;
-	trigger->ops = &ssi_heading_trigger_ops;
-	iio_trigger_set_drvdata(trigger, ssi);
-	ret = devm_iio_triggered_buffer_setup(dev, indio, NULL, ssi_heading_push, NULL);
+	trigger->ops = &ssi_sensor_trigger_ops;
+	iio_trigger_set_drvdata(trigger, indio);
+	ret = devm_iio_triggered_buffer_setup(dev, indio, NULL, ssi_sensor_push, NULL);
 	if (ret)
 		return ret;
 
-	ssi->slots[SSI_HEADING].trigger = trigger;
+	ssi->slots[kind].trigger = trigger;
 	return devm_iio_trigger_register(dev, trigger);
 }
 #endif
@@ -843,8 +884,8 @@ static int ssi_register_sensor(struct g955n_ssi *ssi, enum ssi_iio_kind kind)
 	indio->channels = ssi_iio_layout[kind].channels;
 	indio->num_channels = ssi_iio_layout[kind].count;
 #if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
-	if (kind == SSI_HEADING) {
-		ret = ssi_heading_buffer_init(ssi, indio);
+	if (ssi_sensor_trigger_names[kind]) {
+		ret = ssi_sensor_buffer_init(ssi, indio, kind);
 		if (ret)
 			return ret;
 	}

@@ -208,9 +208,13 @@ millidegrees. It rejects malformed quaternions and orientations where
 the heading is undefined.
 
 Merge [compass.config](compass.config) into the mainline kernel
-configuration to enable the standard IIO trigger and scan buffer.
-Ubuntu's packaged SensorProxy discovers the tilted magnetic heading
-channel and uses the associated `magn_3d-devN` trigger. Consumers
-can use the standard Compass API under its existing GeoClue policy.
-Without the trigger config the raw heading remains readable through
-IIO. Physical heading and axis calibration require a rotation trial.
+configuration to enable standard IIO triggers and scan buffers for
+accelerometer, ambient light and magnetic heading. Ubuntu's packaged
+SensorProxy discovers `accel_3d-devN`, `als-devN` and `magn_3d-devN`
+through its packaged udev rules. Each accelerometer scan contains axes
+from the same firmware report. The light buffer reports the hub's
+already-converted lux with scale 1. SensorProxy can wait for either
+buffer without blocking the main loop on a raw sysfs read.
+The direct-read interfaces and the existing GeoClue compass policy
+remain available. Physical heading and axis calibration require a
+rotation trial.
