@@ -1,15 +1,16 @@
 # SM-G955N mainline hardware integration
 
 Live baseline on 2026-11-25: Ubuntu 24.04.5 LTS with
-`6.18.0-g955n-usb-r100-vpn2` and the corrected speaker DTB.
+`6.18.0-g955n-usb-r100-vpn2`, the corrected speaker DTB, and
+the integrated BCM4773 transport.
 Older Samsung 4.4 evidence is in [VALIDATION.md](VALIDATION.md);
 it does not qualify a device on the current mainline boot.
 
 | Hardware | Current Ubuntu path and evidence | Remaining live verification or integration |
 | --- | --- | --- |
 | OLED, GPU and touch | The built-in DSI connector is connected and the active GNOME Wayland process holds the DECON KMS card and Panfrost render node. STMFTS registers a touchscreen. | Brightness control, physical touch and rotation after sleep, and sustained rendering. |
-| Panel brightness and ambient light | No backlight class device. The GNOME Power Screen brightness property is -1. | Wire the physical OLED brightness interface to Linux backlight and the ambient sensor to SensorProxy before testing GNOME's slider and automatic control. |
-| Buttons and motion sensors | GPIO keys are registered. No IIO devices are exposed. The BCM4773 SPI node is present, but no native sensor measurements are available. | Exercise the physical buttons and wake path. Bring up the BCM4773 transport and publish accelerometer, gyro, magnetometer, step count, illuminance, proximity and pressure through the appropriate sensor interfaces. |
+| Panel brightness and ambient light | Standard SensorProxy reports live light changes in lux. No backlight class device is present and GNOME Power Screen reports brightness -1. | Wire the physical OLED brightness interface to Linux backlight before testing GNOME's slider and automatic control. |
+| Buttons and sensors | GPIO keys are registered. The BCM4773 publishes acceleration, illuminance and proximity through standard IIO, and Ubuntu SensorProxy sees all three. | Physical button/wake, display rotation, near/far transition, and gyro, magnetometer, step count and pressure. |
 | Audio | PCM 0 is the MAX98506 bottom speaker and remains the default PipeWire output after the GPH3 DT correction. PCM 1 is the microphone and PCM 2 the receiver. Bottom playback and microphone capture were verified acoustically. | Exercise receiver/voice and headset routes through actual playback and recording. |
 | Wi-Fi and Bluetooth | NetworkManager reports Wi-Fi connected. BlueZ sees a powered controller with Samsung firmware build 0405. A bounded Adapter1 discovery session received eight advertising peers and stopped cleanly. | Bluetooth pairing and data/audio, Wi-Fi reconnect across sleep and two-band checks on this build. |
 | Battery and charging | UPower reports a present MAX77865 battery and charge state. | Measure wired and wireless charging and charge-state transitions. |
@@ -61,7 +62,8 @@ applies that clock correction to the kernel and board DT.
 avoids tick-rounded delays during short transfers. The integrated handset
 image automatically starts the original daemon using the mainline systemd
 unit. Two boots reached ready and the SSP probe returned chip ID 0x55
-over the integrated driver. Acceleration now goes through standard
-IIO axes to Ubuntu's packaged SensorProxy. Stationary readings and
-D-Bus detection passed. Physical rotation, other sensor measurements
-and a satellite fix remain unverified.
+over the integrated driver. Acceleration, illuminance and proximity
+go through standard IIO to Ubuntu's packaged SensorProxy. Simultaneous
+stationary readings and D-Bus detection passed. Physical rotation,
+near/far transitions, other sensor measurements and a satellite fix
+remain unverified.

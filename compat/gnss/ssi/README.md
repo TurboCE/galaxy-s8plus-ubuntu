@@ -159,3 +159,23 @@ SM-G955N display mount matrix supplied by udev. The mainline unit
 enables the accelerometer option on boot. The stationary handset
 passed the IIO and SensorProxy tests. A physical rotation trial has
 yet to qualify desktop orientation transitions.
+
+## Native light and proximity inputs
+
+`expose_legacy_environment=1` adds standard IIO illuminance and
+proximity devices alongside the accelerometer. The driver serializes
+SSP add and remove commands across these devices. Each sensor starts
+on demand and stops after its own idle threshold.
+
+The light input reports lux from the firmware's bypass record. The
+proximity input preserves the firmware's near/far decision. Its
+primary raw channel encodes far as 0 and near as 2 with scale 0.5.
+Ubuntu SensorProxy uses a udev threshold of 1 between those levels.
+The separate `in_proximity1_raw` channel retains the sensor ADC count.
+No proximity thresholds or light calibration coefficients are written
+by this driver.
+
+The integrated handset has passed simultaneous IIO reads and stock
+SensorProxy discovery after reboot. Light-level changes and the far
+state were observed. Physical near/far transition and OLED backlight
+control still require verification.

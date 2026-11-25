@@ -37,8 +37,8 @@
 #define SSP_SENSOR_RPC	33
 #define SSP_ADD_SENSOR	0xa1
 #define SSP_REMOVE_SENSOR 0xa2
-#define SSP_ACCEL_PERIOD_MS 100
-#define SSP_ACCEL_IDLE_MS 2000
+#define SSP_SENSOR_PERIOD_MS 100
+#define SSP_SENSOR_IDLE_MS 2500
 #define SSP_SENSOR_RECORD_MAX 128
 
 static bool expose_legacy_patch;
@@ -64,6 +64,36 @@ MODULE_PARM_DESC(probe_legacy_ssp, "Issue a read-only SSP chip-ID request throug
 static bool expose_legacy_accel;
 module_param(expose_legacy_accel, bool, 0400);
 MODULE_PARM_DESC(expose_legacy_accel, "Expose the BCM4773 accelerometer through IIO");
+
+static bool expose_legacy_environment;
+module_param(expose_legacy_environment, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_environment, "Expose the BCM4773 light and proximity sensors through IIO");
+
+enum ssi_iio_kind {
+	SSI_ACCEL,
+	SSI_LIGHT,
+	SSI_PROX,
+	SSI_IIO_COUNT,
+};
+
+struct ssi_sensor_slot {
+	struct iio_dev *iio;
+	int sample[3];
+	unsigned long stamp, access;
+	bool requested, running, valid;
+};
+
+static const u8 ssi_sensor_ids[] = {
+	[SSI_ACCEL] = 0,
+	[SSI_LIGHT] = 9,
+	[SSI_PROX] = 7,
+};
+
+static const u8 ssi_sensor_lengths[] = {
+	[SSI_ACCEL] = 6,
+	[SSI_LIGHT] = 18,
+	[SSI_PROX] = 3,
+};
 
 struct ssi_bbd_rx {
 	u8 frame[BBD_FRAME_MAX];
@@ -99,15 +129,13 @@ struct g955n_ssi {
 	u8 sensor_request[12];
 	size_t sensor_size, sensor_offset;
 	bool sensor_open;
-	struct iio_dev *accel;
-	struct delayed_work accel_idle;
+	struct ssi_sensor_slot slots[SSI_IIO_COUNT];
+	struct ssi_sensor_slot *sensor_transfer;
+	bool transfer_enable;
+	struct delayed_work sensor_idle;
 	struct ssi_bbd_rx bbd;
 	u8 sensor_record[SSP_SENSOR_RECORD_MAX + 4];
 	size_t sensor_record_size, sensor_record_skip;
-	u8 accel_transfer;
-	bool accel_requested, accel_running, accel_valid;
-	unsigned long accel_stamp, accel_access;
-	s16 accel_axes[3];
 	struct miscdevice stream;
 	struct delayed_work stream_work;
 	struct kfifo stream_tx, stream_rx;
@@ -162,47 +190,96 @@ static void ssi_sensor_queue(struct g955n_ssi *ssi, const u8 *packet, size_t siz
 	wake_up_interruptible(&ssi->wait);
 }
 
-static void ssi_accel_update(struct g955n_ssi *ssi)
+static void ssi_sensor_update(struct g955n_ssi *ssi)
 {
 	u8 header[] = { 9, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0 };
+	unsigned int i;
 
-	if (!ssi->accel || ssi->removed || !ssi->sensor_open ||
+	if (ssi->removed || !ssi->sensor_open ||
 	    ssi->firmware_state != BBD_FIRMWARE_READY ||
-	    ssi->accel_transfer || ssi->sensor_size ||
-	    ssi->accel_requested == ssi->accel_running)
+	    ssi->sensor_transfer || ssi->sensor_size)
 		return;
 
-	ssi->accel_transfer = ssi->accel_requested ?
-			      SSP_ADD_SENSOR : SSP_REMOVE_SENSOR;
-	header[2] = ssi->accel_transfer;
-	header[3] = ssi->accel_requested ? 10 : 5;
-	ssi_sensor_queue(ssi, header, sizeof(header));
+	for (i = 0; i < SSI_IIO_COUNT; i++) {
+		struct ssi_sensor_slot *slot = &ssi->slots[i];
+
+		if (!slot->iio || slot->requested == slot->running)
+			continue;
+
+		ssi->sensor_transfer = slot;
+		ssi->transfer_enable = slot->requested;
+		header[2] = ssi->transfer_enable ? SSP_ADD_SENSOR : SSP_REMOVE_SENSOR;
+		header[3] = ssi->transfer_enable ? 10 : 5;
+		ssi_sensor_queue(ssi, header, sizeof(header));
+		break;
+	}
 }
 
 static void ssi_sensor_reset(struct g955n_ssi *ssi)
 {
+	unsigned int i;
+
 	ssi->sensor_size = 0;
-	ssi->accel_transfer = 0;
-	ssi->accel_running = false;
-	WRITE_ONCE(ssi->accel_valid, false);
+	ssi->sensor_transfer = NULL;
+	for (i = 0; i < SSI_IIO_COUNT; i++) {
+		ssi->slots[i].running = false;
+		WRITE_ONCE(ssi->slots[i].valid, false);
+	}
 	ssi->sensor_record_size = 0;
 	ssi->sensor_record_skip = 0;
 	ssi->bbd.receiving = false;
 	ssi->bbd.escaped = false;
 }
 
-static void ssi_accel_report(struct g955n_ssi *ssi, const u8 *data, size_t size)
+static void ssi_sensor_report(struct g955n_ssi *ssi, const u8 *data, size_t size)
 {
-	/* Single bypass record: instruction, sensor ID, three axes, timestamp. */
-	if (size != 16 || data[0] != 0x37 || data[1] != 0)
-		return;
+	/* Bypass instruction, sensor ID, sample, and 8-byte MCU timestamp. */
+	while (size >= 2 && data[0] == 0x37) {
+		struct ssi_sensor_slot *slot;
+		unsigned int i, length;
+		const u8 *sample = data + 2;
 
-	ssi->accel_axes[0] = get_unaligned_le16(data + 2);
-	ssi->accel_axes[1] = get_unaligned_le16(data + 4);
-	ssi->accel_axes[2] = get_unaligned_le16(data + 6);
-	WRITE_ONCE(ssi->accel_stamp, jiffies);
-	WRITE_ONCE(ssi->accel_valid, true);
-	wake_up_interruptible(&ssi->wait);
+		for (i = 0; i < SSI_IIO_COUNT; i++)
+			if (data[1] == ssi_sensor_ids[i])
+				break;
+		if (i == SSI_IIO_COUNT)
+			return;
+
+		length = ssi_sensor_lengths[i] + 10;
+		if (size < length)
+			return;
+
+		slot = &ssi->slots[i];
+		data += length;
+		size -= length;
+		if (!slot->running)
+			continue;
+
+		switch (i) {
+		case SSI_ACCEL:
+			slot->sample[0] = (s16)get_unaligned_le16(sample);
+			slot->sample[1] = (s16)get_unaligned_le16(sample + 2);
+			slot->sample[2] = (s16)get_unaligned_le16(sample + 4);
+			break;
+		case SSI_LIGHT: {
+			u32 lux = get_unaligned_le32(sample);
+
+			if (lux > INT_MAX)
+				continue;
+			slot->sample[0] = lux;
+			break;
+		}
+		case SSI_PROX:
+			if (*sample > 1)
+				continue;
+			slot->sample[0] = *sample;
+			slot->sample[1] = get_unaligned_le16(sample + 1);
+			break;
+		}
+		WRITE_ONCE(slot->stamp, jiffies);
+		WRITE_ONCE(slot->valid, true);
+		wake_up_interruptible(&ssi->wait);
+	}
 }
 
 static void ssi_sensor_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
@@ -237,16 +314,18 @@ static void ssi_sensor_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
 		options = get_unaligned_le16(record);
 		length = get_unaligned_le16(record + 2);
 		if ((options & 3) == 1) {
+			struct ssi_sensor_slot *slot = ssi->sensor_transfer;
 			u8 payload[12] = { 0 };
-			unsigned int expected = ssi->accel_transfer == SSP_ADD_SENSOR ? 10 : 5;
+			unsigned int expected = ssi->transfer_enable ? 10 : 5;
 
-			if (options == 1 && ssi->accel_transfer && !ssi->sensor_size &&
+			if (options == 1 && slot && !ssi->sensor_size &&
 			    length == expected) {
 				put_unaligned_le16(expected, payload);
-				put_unaligned_le32(SSP_ACCEL_PERIOD_MS, payload + 3);
+				payload[2] = ssi_sensor_ids[slot - ssi->slots];
+				put_unaligned_le32(SSP_SENSOR_PERIOD_MS, payload + 3);
 				ssi_sensor_queue(ssi, payload, expected + 2);
-				ssi->accel_running = ssi->accel_transfer == SSP_ADD_SENSOR;
-				ssi->accel_transfer = 0;
+				slot->running = ssi->transfer_enable;
+				ssi->sensor_transfer = NULL;
 			}
 		} else {
 			if (length > SSP_SENSOR_RECORD_MAX) {
@@ -256,8 +335,8 @@ static void ssi_sensor_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
 			}
 			if (ssi->sensor_record_size < length + 4)
 				continue;
-			if ((options & 3) == 2 && ssi->accel_running)
-				ssi_accel_report(ssi, record + 4, length);
+			if ((options & 3) == 2)
+				ssi_sensor_report(ssi, record + 4, length);
 		}
 		ssi->sensor_record_size = 0;
 	}
@@ -379,38 +458,78 @@ static void ssi_bbd_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
 	}
 }
 
-static void ssi_accel_idle(struct work_struct *work)
+static void ssi_sensor_schedule_idle(struct g955n_ssi *ssi)
+{
+	unsigned long now = jiffies, earliest = 0;
+	unsigned int i;
+
+	for (i = 0; i < SSI_IIO_COUNT; i++) {
+		struct ssi_sensor_slot *slot = &ssi->slots[i];
+		unsigned long expires, delay;
+
+		if (!slot->requested)
+			continue;
+		expires = slot->access + msecs_to_jiffies(SSP_SENSOR_IDLE_MS);
+		delay = time_after(expires, now) ? expires - now : 1;
+		if (!earliest || delay < earliest)
+			earliest = delay;
+	}
+
+	if (earliest && !ssi->removed)
+		mod_delayed_work(system_freezable_wq, &ssi->sensor_idle, earliest);
+}
+
+static void ssi_sensor_idle(struct work_struct *work)
 {
 	struct g955n_ssi *ssi = container_of(to_delayed_work(work),
-					    struct g955n_ssi, accel_idle);
-
-	unsigned long expires;
+					    struct g955n_ssi, sensor_idle);
+	unsigned int i;
 
 	mutex_lock(&ssi->lock);
-	expires = ssi->accel_access + msecs_to_jiffies(SSP_ACCEL_IDLE_MS);
-	if (!ssi->removed && time_before(jiffies, expires)) {
-		queue_delayed_work(system_freezable_wq, &ssi->accel_idle,
-				   expires - jiffies);
-	} else {
-		ssi->accel_requested = false;
-		WRITE_ONCE(ssi->accel_valid, false);
-		ssi_accel_update(ssi);
+	for (i = 0; i < SSI_IIO_COUNT; i++) {
+		struct ssi_sensor_slot *slot = &ssi->slots[i];
+		unsigned long expires = slot->access + msecs_to_jiffies(SSP_SENSOR_IDLE_MS);
+
+		if (slot->requested && time_after_eq(jiffies, expires)) {
+			slot->requested = false;
+			WRITE_ONCE(slot->valid, false);
+		}
 	}
+	ssi_sensor_update(ssi);
+	ssi_sensor_schedule_idle(ssi);
 	mutex_unlock(&ssi->lock);
 }
 
-static int ssi_accel_read_raw(struct iio_dev *indio, const struct iio_chan_spec *chan,
-			      int *value, int *value2, long mask)
+struct ssi_iio_priv {
+	struct g955n_ssi *ssi;
+	enum ssi_iio_kind kind;
+};
+
+static bool ssi_sensor_fresh(struct ssi_sensor_slot *slot, enum ssi_iio_kind kind)
 {
-	struct g955n_ssi *ssi = *(struct g955n_ssi **)iio_priv(indio);
+	return READ_ONCE(slot->valid) &&
+	       (kind != SSI_ACCEL ||
+		!time_after(jiffies, READ_ONCE(slot->stamp) + msecs_to_jiffies(600)));
+}
+
+static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *chan,
+			    int *value, int *value2, long mask)
+{
+	struct ssi_iio_priv *priv = iio_priv(indio);
+	struct g955n_ssi *ssi = priv->ssi;
+	struct ssi_sensor_slot *slot = &ssi->slots[priv->kind];
 	int ret;
 
 	if (mask == IIO_CHAN_INFO_SCALE) {
 		*value = 0;
+		if (priv->kind == SSI_PROX) {
+			*value2 = 500000;
+			return IIO_VAL_INT_PLUS_MICRO;
+		}
 		*value2 = 2394202; /* 9.80665 m/s² divided by 4096 counts/g. */
 		return IIO_VAL_INT_PLUS_NANO;
 	}
-	if (mask != IIO_CHAN_INFO_RAW)
+	if (mask != IIO_CHAN_INFO_RAW && mask != IIO_CHAN_INFO_PROCESSED)
 		return -EINVAL;
 
 	mutex_lock(&ssi->lock);
@@ -419,18 +538,14 @@ static int ssi_accel_read_raw(struct iio_dev *indio, const struct iio_chan_spec 
 		mutex_unlock(&ssi->lock);
 		return -ENODEV;
 	}
-	ssi->accel_access = jiffies;
-	ssi->accel_requested = true;
-	ssi_accel_update(ssi);
-	mod_delayed_work(system_freezable_wq, &ssi->accel_idle,
-			 msecs_to_jiffies(SSP_ACCEL_IDLE_MS));
+	slot->access = jiffies;
+	slot->requested = true;
+	ssi_sensor_update(ssi);
+	ssi_sensor_schedule_idle(ssi);
 	mutex_unlock(&ssi->lock);
 
 	ret = wait_event_interruptible_timeout(ssi->wait,
-			READ_ONCE(ssi->removed) ||
-			(READ_ONCE(ssi->accel_valid) &&
-			 !time_after(jiffies, READ_ONCE(ssi->accel_stamp) +
-				     msecs_to_jiffies(600))),
+			READ_ONCE(ssi->removed) || ssi_sensor_fresh(slot, priv->kind),
 			msecs_to_jiffies(1000));
 	if (ret < 0)
 		return ret;
@@ -438,11 +553,13 @@ static int ssi_accel_read_raw(struct iio_dev *indio, const struct iio_chan_spec 
 	mutex_lock(&ssi->lock);
 	if (ssi->removed)
 		ret = -ENODEV;
-	else if (!ssi->accel_valid ||
-		 time_after(jiffies, ssi->accel_stamp + msecs_to_jiffies(600)))
+	else if (!ssi_sensor_fresh(slot, priv->kind))
 		ret = -EAGAIN;
 	else {
-		*value = ssi->accel_axes[chan->address];
+		*value = slot->sample[chan->address];
+		/* Keep the firmware's binary flag and the ADC in separate channels. */
+		if (priv->kind == SSI_PROX && !chan->address)
+			*value *= 2;
 		ret = IIO_VAL_INT;
 	}
 	mutex_unlock(&ssi->lock);
@@ -464,29 +581,73 @@ static const struct iio_chan_spec ssi_accel_channels[] = {
 	SSI_ACCEL_AXIS(Z, 2),
 };
 
-static const struct iio_info ssi_accel_info = {
-	.read_raw = ssi_accel_read_raw,
+static const struct iio_chan_spec ssi_light_channels[] = {
+	{
+		.type = IIO_LIGHT,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_PROCESSED),
+	},
 };
 
-static int ssi_register_accel(struct g955n_ssi *ssi)
+static const struct iio_chan_spec ssi_prox_channels[] = {
+	{
+		.type = IIO_PROXIMITY,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
+	},
+	{
+		.type = IIO_PROXIMITY,
+		.indexed = 1,
+		.channel = 1,
+		.address = 1,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),
+	},
+};
+
+static const struct iio_info ssi_sensor_info = {
+	.read_raw = ssi_iio_read_raw,
+};
+
+static const struct {
+	const char *name;
+	const struct iio_chan_spec *channels;
+	unsigned int count;
+} ssi_iio_layout[] = {
+	[SSI_ACCEL] = { "g955n-bcm4773-accel", ssi_accel_channels, ARRAY_SIZE(ssi_accel_channels) },
+	[SSI_LIGHT] = { "g955n-bcm4773-light", ssi_light_channels, ARRAY_SIZE(ssi_light_channels) },
+	[SSI_PROX] = { "g955n-bcm4773-proximity", ssi_prox_channels, ARRAY_SIZE(ssi_prox_channels) },
+};
+
+static int ssi_register_sensor(struct g955n_ssi *ssi, enum ssi_iio_kind kind)
 {
+	struct ssi_iio_priv *priv;
 	struct iio_dev *indio;
 	int ret;
 
-	indio = devm_iio_device_alloc(&ssi->spi->dev, sizeof(struct g955n_ssi *));
+	indio = devm_iio_device_alloc(&ssi->spi->dev, sizeof(*priv));
 	if (!indio)
 		return -ENOMEM;
-	*(struct g955n_ssi **)iio_priv(indio) = ssi;
-	indio->name = "g955n-bcm4773-accel";
+	priv = iio_priv(indio);
+	priv->ssi = ssi;
+	priv->kind = kind;
+	indio->name = ssi_iio_layout[kind].name;
 	indio->modes = INDIO_DIRECT_MODE;
-	indio->info = &ssi_accel_info;
-	indio->channels = ssi_accel_channels;
-	indio->num_channels = ARRAY_SIZE(ssi_accel_channels);
-	ssi->accel = indio;
+	indio->info = &ssi_sensor_info;
+	indio->channels = ssi_iio_layout[kind].channels;
+	indio->num_channels = ssi_iio_layout[kind].count;
+	ssi->slots[kind].iio = indio;
 	ret = iio_device_register(indio);
 	if (ret)
-		ssi->accel = NULL;
+		ssi->slots[kind].iio = NULL;
 	return ret;
+}
+
+static void ssi_unregister_sensors(struct g955n_ssi *ssi)
+{
+	int i;
+
+	for (i = SSI_IIO_COUNT - 1; i >= 0; i--) {
+		if (ssi->slots[i].iio)
+			iio_device_unregister(ssi->slots[i].iio);
+	}
 }
 
 /* With the lock held, a file operation owns the GPIO handshake and SPI. */
@@ -876,7 +1037,8 @@ static void ssi_stream_worker(struct work_struct *work)
 				break;
 			count = kfifo_in(&ssi->stream_rx, ssi->rx + SSI_HEADER, ret);
 			ssi->stream_rx_bytes += count;
-			if (ssi->accel && ssi->firmware_state == BBD_FIRMWARE_READY)
+			if ((expose_legacy_accel || expose_legacy_environment) &&
+			    ssi->firmware_state == BBD_FIRMWARE_READY)
 				ssi_bbd_feed(ssi, ssi->rx + SSI_HEADER, count);
 			if (!count && ++ssi->empty_receives == 4) {
 				ret = -EPROTO;
@@ -1180,7 +1342,7 @@ static ssize_t ssi_sensor_read(struct file *file, char __user *buffer,
 		ssi->sensor_offset += length;
 		if (ssi->sensor_offset == ssi->sensor_size) {
 			ssi->sensor_size = 0;
-			ssi_accel_update(ssi);
+			ssi_sensor_update(ssi);
 		}
 		ret = length ? (ssize_t)length : -EFAULT;
 	}
@@ -1244,7 +1406,7 @@ static ssize_t ssi_control_write(struct file *file, const char __user *buffer,
 			ssi_sensor_queue(ssi, ssi_ssp_whoami, sizeof(ssi_ssp_whoami));
 		}
 		ssi->firmware_state = BBD_FIRMWARE_READY;
-		ssi_accel_update(ssi);
+		ssi_sensor_update(ssi);
 	} else if (!strcmp(command, "ESW:CRASHED")) {
 		ssi->firmware_state = BBD_FIRMWARE_CRASHED;
 		ssi_sensor_reset(ssi);
@@ -1463,6 +1625,10 @@ destroy_class:
 static void ssi_disconnect(struct g955n_ssi *ssi)
 {
 	mutex_lock(&ssi->lock);
+	if (ssi->removed) {
+		mutex_unlock(&ssi->lock);
+		return;
+	}
 	WRITE_ONCE(ssi->removed, true);
 	if (ssi->opened)
 		disable_irq(ssi->irq);
@@ -1474,7 +1640,7 @@ static void ssi_disconnect(struct g955n_ssi *ssi)
 		dev_err(&ssi->spi->dev, "cannot restore GNSS enable on removal\n");
 	mutex_unlock(&ssi->lock);
 	cancel_delayed_work_sync(&ssi->stream_work);
-	cancel_delayed_work_sync(&ssi->accel_idle);
+	cancel_delayed_work_sync(&ssi->sensor_idle);
 	wake_up_interruptible(&ssi->wait);
 }
 
@@ -1494,8 +1660,9 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (probe_legacy_ssp && !expose_legacy_control)
 		return dev_err_probe(dev, -EINVAL, "SSP probe requires BBD control\n");
 
-	if (expose_legacy_accel && (!probe_legacy_ssp || !expose_legacy_stream))
-		return dev_err_probe(dev, -EINVAL, "accelerometer requires the legacy SSI bridge\n");
+	if ((expose_legacy_accel || expose_legacy_environment) &&
+	    (!probe_legacy_ssp || !expose_legacy_stream))
+		return dev_err_probe(dev, -EINVAL, "sensor IIO requires the legacy SSI bridge\n");
 
 	ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
 	if (!ssi)
@@ -1504,7 +1671,7 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	mutex_init(&ssi->lock);
 	init_waitqueue_head(&ssi->wait);
 	INIT_DELAYED_WORK(&ssi->stream_work, ssi_stream_worker);
-	INIT_DELAYED_WORK(&ssi->accel_idle, ssi_accel_idle);
+	INIT_DELAYED_WORK(&ssi->sensor_idle, ssi_sensor_idle);
 	ssi->spi = spi;
 	ssi->tx = devm_kzalloc(dev, SSI_HEADER + SSI_PAYLOAD, GFP_KERNEL);
 	ssi->rx = devm_kzalloc(dev, SSI_HEADER + SSI_PAYLOAD, GFP_KERNEL);
@@ -1631,7 +1798,15 @@ static int g955n_ssi_probe(struct spi_device *spi)
 			goto deregister_power;
 	}
 	if (expose_legacy_accel) {
-		ret = ssi_register_accel(ssi);
+		ret = ssi_register_sensor(ssi, SSI_ACCEL);
+		if (ret)
+			goto deregister_sensor;
+	}
+	if (expose_legacy_environment) {
+		ret = ssi_register_sensor(ssi, SSI_LIGHT);
+		if (ret)
+			goto deregister_sensor;
+		ret = ssi_register_sensor(ssi, SSI_PROX);
 		if (ret)
 			goto deregister_sensor;
 	}
@@ -1639,6 +1814,8 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	return 0;
 
 deregister_sensor:
+	ssi_disconnect(ssi);
+	ssi_unregister_sensors(ssi);
 	misc_deregister(&ssi->sensor);
 deregister_power:
 	if (expose_legacy_power) {
@@ -1684,8 +1861,7 @@ static void g955n_ssi_remove(struct spi_device *spi)
 		misc_deregister(&ssi->patch);
 	misc_deregister(&ssi->misc);
 	ssi_disconnect(ssi);
-	if (ssi->accel)
-		iio_device_unregister(ssi->accel);
+	ssi_unregister_sensors(ssi);
 	free_irq(ssi->irq, ssi);
 	kref_put(&ssi->refs, ssi_free);
 }

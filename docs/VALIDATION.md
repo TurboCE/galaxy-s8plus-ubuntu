@@ -6489,3 +6489,28 @@ GDM, NetworkManager, Wi-Fi, and the default lower-speaker output were
 present after the same boot. The prior module and service were
 retained in a private pre-accelerometer backup. Physical rotation
 and other sensor measurements remain open.
+
+### 6.18 simultaneous light, proximity and acceleration
+
+The canonical and renamed sensor modules built for ARM64 with `W=1`.
+A temporary same-device trial read all three native IIO devices
+concurrently. Acceleration still matched the stationary gravity
+reading, light reported 7–8 lux, and proximity reported far with
+ADC count 232. The far state was the actual firmware detection byte.
+The original sensor binding was restored before staging the update.
+
+Rebooted the integrated kernel with the verified updated module. The
+original hub daemon was ready with zero automatic restarts. Parallel
+IIO reads returned acceleration, illuminance, and proximity. Proximity
+continued reporting far with an ADC count of 250. Ubuntu's packaged
+SensorProxy reported all three capabilities through D-Bus. Its normal
+monitor showed changes to 5 and 6 lux. No physical near-state transition
+was induced, and factory calibration coefficients were not written.
+
+The kernel still exposes no backlight class device. GNOME Power Screen
+reported brightness -1, so automatic brightness and the hardware
+slider are still unavailable. A root-owned ephemeral user dconf
+file was returned to the Ubuntu desktop account before rechecking the
+setting. The installed GNOME session could then read the enabled
+ambient option without the earlier permissions error. The GNOME login
+manager, Wi-Fi, and lower-speaker default remained available after boot.

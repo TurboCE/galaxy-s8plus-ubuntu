@@ -1,0 +1,2 @@
+# The primary channel carries the firmware's binary outcome as 0 or 2.
+SUBSYSTEM=="iio", KERNEL=="iio:device*", ATTR{name}=="g955n-bcm4773-proximity", ENV{PROXIMITY_NEAR_LEVEL}="1"

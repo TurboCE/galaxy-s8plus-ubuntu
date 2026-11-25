@@ -2717,3 +2717,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   applies the handset display mount matrix through udev.
 - Verified live acceleration values after reboot and a positive
   SensorProxy accelerometer property on the handset.
+
+## 2026-11-25 — Native BCM4773 light and proximity
+
+- Added illuminance and proximity IIO devices alongside acceleration.
+  SSP stream requests share one ordered controller, with idle handling
+  per sensor and the firmware's proximity decision retained.
+- After reboot, standard SensorProxy recognized all three devices and
+  reported actual light changes in lux and the far proximity state.
