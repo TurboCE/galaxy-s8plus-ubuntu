@@ -2978,3 +2978,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   clamp and a standard ALSA Headphone Jack state.
 - Kept the bottom speaker, receiver and built-in microphone paths out
   of the detector. The DT opt-in is separate from the audio module.
+
+
+## 2026-11-26 — Wired headphones in the Ubuntu audio profile
+
+- Added the CS47L93 stereo HPOUT2 route to the HiFi UCM profile
+  when the standard Headphone Jack control exists.
+- Marked wired headphones and the bottom speaker as conflicting
+  because they share the ABOX playback DMA.

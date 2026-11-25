@@ -7290,3 +7290,24 @@ unreachable. No hardware registers, audio module or BOOT partition
 were changed. Actual insertion events, audio playback and capture,
 and preservation of acoustic bottom-speaker playback on the trial
 remain to be checked on the handset.
+
+
+## 2026-11-26 — Wired headphones UCM validation
+
+Samsung's mixer configuration routes AIF1RX1 and AIF1RX2 to the
+stereo HPOUT2 outputs. Mainline CS47L92/93 provides the matching
+mixer controls and a hardware short-circuit protection control.
+The UCM sequence mutes first, enables protection, sets both levels
+to -28 dB, wires the input mixers, and then unmutes. Disconnecting
+the UCM route mutes it before removing the sources.
+
+Ran unchanged profile files against Ubuntu's libasound 1.2.11 with
+a simulated ALSA control device, both with and without the CARD
+Headphone Jack control. Without it, the only HiFi devices were the
+bottom speaker and built-in microphone. With it, UCM resolved
+Headphones to PCM 2, used the correct jack control, issued all
+expected HPOUT2 writes in order and rejected conflicting playback
+selections in both orders. The built-in microphone could be
+selected alongside Headphones and remained selected when returning
+to Speaker. USB Ethernet and Tailscale remained unavailable, so
+hardware sound, jack-state changes and GNOME routing are unverified.

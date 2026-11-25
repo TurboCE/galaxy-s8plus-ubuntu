@@ -113,7 +113,14 @@ ALSA `Headphone Jack` control. It releases the interrupts and restores
 its detector fields when the codec link is removed. The existing PCM
 routes remain available if the optional detector fails to initialize.
 
-The stock wired headphones use HPOUT2L/HPOUT2R, and the headset
-microphone uses IN1BL with MICBIAS2A. Physical jack-state validation,
-accessory and microphone classification, and the UCM playback and
-capture routes are separate steps.
+The HiFi UCM profile offers Wired Headphones when the ALSA jack
+control is available. It uses the existing AIF1 playback PCM 2 to
+feed HPOUT2L/HPOUT2R and keeps the codec's short-circuit protection
+enabled. The two playback routes share the ABOX RDMA, so UCM marks
+Headphones and Speaker as conflicting devices. The headphone route
+initializes its two digital volumes to -28 dB. The built-in microphone
+remains available on PCM 1.
+
+The stock headset microphone uses IN1BL with MICBIAS2A. Physical jack
+state, actual headphone sound and headset microphone classification
+and recording remain separate handset checks.
