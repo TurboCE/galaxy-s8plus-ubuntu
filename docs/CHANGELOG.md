@@ -3144,3 +3144,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   and Ethernet after boot and RTC-woken s2idle.
 - Rechecked GNOME Wayland software display off and on after the
   reported black screen and handset reboot.
+
+
+## 2026-11-26 — Keep display and suspend diagnostics across reboot
+
+- Record the power key, DRM blank and wake requests and confirmations,
+  and the suspend hooks in a bounded private log on the handset.

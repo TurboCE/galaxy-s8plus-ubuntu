@@ -8102,3 +8102,32 @@ brightness 12. USB high-speed device mode, Wi-Fi and the default
 bottom speaker remained available. The kernel logged a Broadcom
 Wi-Fi scan-suppression error after resume. These trials did not
 reproduce the black screen or exercise the physical power key.
+
+
+## 2026-11-26 — Persist diagnostics for intermittent display wake failures
+
+Tested a display marker written to ramoops pmsg before a normal
+reboot. The recovered record contained the 64-byte uniLoader and
+kernel startup trace. The uniLoader relocation code resets that
+pmsg header before recording the current boot stages. This explains
+why the userspace markers were missing from the recovered record.
+Kept the startup trace and added a separate bounded, root-only
+display log with synchronous writes.
+
+On the SM-G955N, backed up and replaced only the power-key handler
+and systemd sleep hook. The handset blanked and reported DSI
+Off/disabled before suspend. An RTC alarm woke s2idle on the same
+boot with one new success and no new failures. DSI reported On
+after resume. The wake command also confirmed DSI On/enabled and
+nonzero brightness. After a normal reboot, the private log had
+mode 0600 and retained the ordered blank request, blank confirmation,
+pre and post suspend hooks, wake IRQ, wake request and wake
+confirmation. GDM, the power-key service, Wi-Fi, the USB gadget and
+the default bottom-speaker route were present.
+
+The 13 power-key tests passed, including log permissions, ordering
+and the size limit. The sleep hook passed shell syntax validation.
+This verifies ordinary reboot retention and one RTC wake from a
+blank display. The intermittent black screen and physical-key wake
+remain unverified, as does retention after a forced reset during
+a kernel hang.

@@ -5,8 +5,15 @@ printk=/proc/sys/kernel/printk
 saved=/run/g955n-suspend-console-level
 display_suspend=/run/g955n-display-suspend
 
+record_transition() {
+    handler=/usr/local/lib/g955n/g955n-power-key.py
+    [ -f "$handler" ] || return 0
+    /usr/bin/python3 "$handler" --record "$1" || :
+}
+
 case "$1" in
     pre)
+        record_transition 'Systemd suspend pre hook'
         printf 'sleeping\n' > "$display_suspend"
         # This kernel briefly switches the display to its reserved suspend VT.
         # Keep ordinary kernel messages in the ring buffer during the switch.
@@ -20,6 +27,7 @@ case "$1" in
         exit 0
         ;;
     post)
+        record_transition 'Systemd suspend post hook'
         # /proc/uptime uses the same clock as the reader's input event timestamps.
         awk 'NR == 1 {print $1}' /proc/uptime > "$display_suspend.new" &&
             mv -f "$display_suspend.new" "$display_suspend"
@@ -40,6 +48,7 @@ irq=$(cat /sys/power/pm_wakeup_irq 2>/dev/null) || irq=
 case "$irq" in
     ''|*[!0-9]*)
         printf 'g955n-suspend: wake IRQ unavailable\n'
+        record_transition 'Wake IRQ unavailable'
         ;;
     *)
         source=$(awk -v irq="$irq:" '
@@ -54,6 +63,7 @@ case "$irq" in
             }
         ' /proc/interrupts)
         printf 'g955n-suspend: wake IRQ %s (%s)\n' "$irq" "${source:-unknown}"
+        record_transition "Wake IRQ $irq"
         case "$source" in
             'Power'|'gpio-keys: KEY_POWER')
                 if systemctl is-active --quiet g955n-power-key.service; then

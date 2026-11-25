@@ -2,6 +2,7 @@
 """Blank, wake, or ask to power off from the handset power key."""
 
 import fcntl
+import os
 from pathlib import Path
 import pwd
 import select
@@ -24,8 +25,24 @@ GPIO_KEYS = (
 )
 PANEL_RUNTIME = Path('/sys/class/graphics/fb0/device/power/runtime_status')
 SLEEP_MARKER = Path('/run/g955n-display-suspend')
+TRANSITION_LOG = Path('/var/lib/g955n/display-transitions.log')
+TRANSITION_LOG_LIMIT = 64 * 1024
 MUTTER = 'org.gnome.Mutter.DisplayConfig'
 MUTTER_PATH = '/org/gnome/Mutter/DisplayConfig'
+
+
+def record_transition(event):
+    print(event, flush=True)
+    line = f'{time.time():.3f} g955n-display: {event}\n'.encode('ascii')
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_DSYNC | os.O_NOFOLLOW
+    try:
+        with os.fdopen(os.open(TRANSITION_LOG, flags, 0o600), 'ab', buffering=0) as trace:
+            fcntl.flock(trace, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            if os.fstat(trace.fileno()).st_size + len(line) > TRANSITION_LOG_LIMIT:
+                trace.truncate(0)
+            trace.write(line)
+    except OSError:
+        pass
 
 
 def read_command(*args, timeout=3):
@@ -63,6 +80,7 @@ def display_environment(run, keys):
 
 def wake_display(session):
     _, session_type, run = session
+    record_transition('Display wake requested')
     if session_type == 'x11':
         # Mutter's property does not drive DPMS on the native X11 server.
         env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
@@ -77,7 +95,7 @@ def wake_display(session):
                      MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '0')
     wait_for_panel(on=True)
     SLEEP_MARKER.unlink(missing_ok=True)
-    print('Power key confirmed display on', flush=True)
+    record_transition('Power key confirmed display on')
 
 
 def session_locked(session):
@@ -116,6 +134,7 @@ def lock_before_blank(session):
 def blank_display(session):
     _, session_type, run = session
     # Lock while the compositor can still present the lock screen.
+    record_transition('Display blank requested')
     try:
         lock_before_blank(session)
         if session_type == 'x11':
@@ -127,7 +146,7 @@ def blank_display(session):
             read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
                          MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '3')
         wait_for_panel(on=False)
-        print('Power key confirmed display off', flush=True)
+        record_transition('Power key confirmed display off')
     except (OSError, RuntimeError, subprocess.SubprocessError):
         try:
             wake_display(session)
@@ -200,6 +219,12 @@ def should_blank(session, panel_was_on):
 def main():
     if b'SM-G955N' not in Path('/proc/device-tree/model').read_bytes():
         raise SystemExit('Unexpected device model')
+    if len(sys.argv) == 3 and sys.argv[1] == '--record':
+        event = sys.argv[2]
+        if not 1 <= len(event) <= 100 or not event.isascii() or not event.isprintable():
+            raise SystemExit('Invalid display transition')
+        record_transition(event)
+        return
     if sys.argv[1:] == ['--wake']:
         if session := active_session():
             wake_display(session)
@@ -252,7 +277,7 @@ def watch_keys(key):
         if (kind, code) != POWER_KEY:
             continue
         if value == 1:
-            print(f'Power key pressed (panel was {"on" if was_on else "off"})', flush=True)
+            record_transition(f'Power key pressed (panel was {"on" if was_on else "off"})')
             press = (was_on, sec + usec / 1_000_000)
         elif value == 0 and press is not None:
             before, pressed_at = press

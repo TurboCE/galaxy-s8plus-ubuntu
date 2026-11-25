@@ -44,6 +44,13 @@ hook also records the kernel-reported wake IRQ in
 entry, exit and RTC handler messages. A PMIC IRQ by itself does not
 identify which PMIC event woke the handset.
 
+On installations with `/var/lib/g955n/`, the key handler also records
+timestamped markers in the root-only `display-transitions.log` there.
+The sleep hook uses the same recorder. The file distinguishes a key
+press, a display request, the confirmed DRM transition and the sleep
+hooks. Each record uses a synchronous write so it can be read after
+reboot. The file starts over when it reaches 64 KiB.
+
 The image builder retains the initial masks. To return an enabled handset to
 that baseline, mask the two targets again and remove the installed GNOME
 profile files followed by `dconf update`. The key service can be disabled

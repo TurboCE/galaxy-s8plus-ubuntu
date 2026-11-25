@@ -11,6 +11,11 @@ m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 
 class PowerKeyDisplayTests(unittest.TestCase):
+    def setUp(self):
+        trace = patch.object(m, 'record_transition')
+        self.addCleanup(trace.stop)
+        self.trace = trace.start()
+
     def test_late_decon_connector_takes_over_panel_state(self):
         with tempfile.TemporaryDirectory() as directory:
             drm = Path(directory)
@@ -68,6 +73,7 @@ class PowerKeyDisplayTests(unittest.TestCase):
                 m.wake_display(session)
         self.assertEqual(command.call_args.args[-3:], ('PowerSaveMode', 'i', '0'))
         marker.unlink.assert_not_called()
+        self.trace.assert_called_once_with('Display wake requested')
 
     def test_x11_locks_and_blanks_without_requesting_sleep(self):
         calls=[]
@@ -148,6 +154,27 @@ class PowerKeyDisplayTests(unittest.TestCase):
                 m.wake_display(session)
                 self.assertTrue(m.should_blank(session, True))
                 self.assertFalse(m.should_blank(session, False))
+
+
+class PersistentTransitionTests(unittest.TestCase):
+    @patch('builtins.print')
+    def test_retains_order_and_limits_log_size(self, journal):
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / 'transitions'
+            with patch.object(m, 'TRANSITION_LOG', trace), \
+                 patch.object(m, 'TRANSITION_LOG_LIMIT', 160), \
+                 patch.object(m.time, 'time', return_value=12.0):
+                m.record_transition('Display wake requested')
+                m.record_transition('Power key confirmed display on')
+                self.assertEqual(trace.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(trace.read_bytes(),
+                                 b'12.000 g955n-display: Display wake requested\n'
+                                 b'12.000 g955n-display: Power key confirmed display on\n')
+                m.record_transition('Power key pressed (panel was off)')
+                m.record_transition('Display wake requested')
+                self.assertEqual(trace.read_bytes(),
+                                 b'12.000 g955n-display: Display wake requested\n')
+        self.assertEqual(journal.call_count, 4)
 
 
 if __name__=='__main__':unittest.main()
