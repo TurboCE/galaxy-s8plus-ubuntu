@@ -19,5 +19,9 @@ motor enable and stops PWM on cancellation, suspend, shutdown or
 timeout. It preserves the initial mode and bias settings and leaves
 the PMIC's shared boost configuration alone.
 
-The candidate DTB and driver object built successfully. A real motor
-pulse and its stop behavior still require a boot with PWM enabled.
+The first PWM-enabled handset trial registered the input device
+and produced real pulses that stopped normally or on cancellation.
+The trial also exposed a sensor hub regression from the build's
+baseline source. The original BOOT was restored. Use the exact
+integrated clock and SPI source when building the next trial.
+Suspend cancellation still requires a handset test.

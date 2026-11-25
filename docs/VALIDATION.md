@@ -6710,3 +6710,23 @@ the expected clock, channel and inherited I²C bus. The FF_RUMBLE
 driver compiled as an ARM64 object against the 6.18 interfaces.
 The installed kernel still has PWM disabled, so motor motion,
 force-feedback playback and suspend cancellation are unverified.
+
+## 2026-11-25 — Real haptic pulses and baseline restoration
+
+A BOOT trial with PWM and FF memless registered the
+`SM-G955N Haptics` input device. Three 50-percent FF_RUMBLE
+requests ran through evdev. Two elapsed naturally and the middle
+request was cancelled explicitly. The handset microphone measured
+140–180 Hz amplitude of 8.6–16.6 during the pulses and 0.15–0.20
+afterward, with a pre-test noise floor of 0.18. The temporary
+recording was removed. GDM and OLED backlight remained active.
+
+The trial kernel did not retain the BCM4773 firmware handshake.
+The inner DT comparison showed only haptic additions. The trial
+kernel source differed from the known-good integrated clock and
+SPI overlay files. Restored the original full BOOT through TWRP,
+verified the readback and rebooted. The BCM4773 daemon again
+reported ready, and GDM and backlight were active. A corrected
+candidate based on the integrated source is required before the
+haptic driver can be retained. Suspend cancellation still needs
+a handset test.

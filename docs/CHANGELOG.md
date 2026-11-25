@@ -2796,3 +2796,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Confirmed the MAX77865 haptic block on the running revision 10
   handset. Added the matching PWM wiring, kernel config and Linux
   force-feedback driver for the candidate build.
+
+## 2026-11-25 — Verify real MAX77865 vibration and stop
+
+- The haptic BOOT trial registered a Linux force-feedback input.
+  The handset microphone detected bounded motor pulses and returned
+  to the noise floor after normal stop and explicit cancellation.
+- Restored the integrated BOOT after the trial regressed the BCM4773
+  firmware handshake. Identified the missing sensor clock and SPI
+  overlay files in the trial's source tree.
