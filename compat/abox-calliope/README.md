@@ -113,13 +113,14 @@ ALSA `Headphone Jack` control. It releases the interrupts and restores
 its detector fields when the codec link is removed. The existing PCM
 routes remain available if the optional detector fails to initialize.
 
-The HiFi UCM profile offers Wired Headphones when the ALSA jack
-control is available. It uses the existing AIF1 playback PCM 2 to
-feed HPOUT2L/HPOUT2R and keeps the codec's short-circuit protection
-enabled. The two playback routes share the ABOX RDMA, so UCM marks
-Headphones and Speaker as conflicting devices. The headphone route
-initializes its two digital volumes to -28 dB. The built-in microphone
-remains available on PCM 1.
+UCM offers a separate Wired Headphones profile when ALSA provides the
+jack control. The profile feeds HPOUT2L/HPOUT2R through AIF1 playback
+PCM 2, enables short-circuit protection and starts both channels at
+-28 dB. The Standard profile uses PCM 0 for the bottom speaker.
+Both outputs share ABOX RDMA0. A single profile containing both PCMs
+caused PipeWire profile probing to fail with EBUSY on the handset.
+The Standard, Voice and Wired Headphones profiles all use the same
+built-in microphone configuration on PCM 1.
 
 The stock headset microphone uses IN1BL with MICBIAS2A. Physical jack
 state, actual headphone sound and headset microphone classification

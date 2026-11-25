@@ -4,19 +4,20 @@ Register the optional wired jack after the established microphone
 initialization and release it before the codec link is removed.
 Keep the existing card and PCM routes if jack setup is unavailable.
 
-Apply after the Calliope receiver and geometry overlays.
+Apply after the receiver PCM overlay. The same hooks can also be used
+with the Calliope speaker variant.
 
 diff --git a/sound/soc/samsung/g955n-abox-speaker.c b/sound/soc/samsung/g955n-abox-speaker.c
 --- a/sound/soc/samsung/g955n-abox-speaker.c
 +++ b/sound/soc/samsung/g955n-abox-speaker.c
-@@ -30,6 +30,7 @@
+@@ -24,6 +24,7 @@
+ #include <linux/sizes.h>
+ #include <sound/pcm_params.h>
+ #include <sound/soc.h>
++#include "g955n-wired-jack.h"
+ #include <linux/mfd/madera/core.h>
  #include <linux/mfd/madera/registers.h>
  #include "../codecs/madera.h"
- #include "calliope.h"
-+#include "g955n-wired-jack.h"
- 
- static bool use_dsm;
- module_param(use_dsm, bool, 0400);
 @@ -125,6 +126,7 @@
  	void __iomem *sfr;
  	void __iomem *cmu;

@@ -3095,3 +3095,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Record handset power-key input and confirm the DRM connector's
   enabled and DPMS states after a display request.
 - Keep the resume marker until the display actually reports on.
+
+
+## 2026-11-26 — Connect the wired headphone jack to Ubuntu audio profiles
+
+- Qualified the CS47L93 jack control and clamp IRQ registration on the
+  native receiver-driver baseline.
+- Separated the Standard and Wired Headphones UCM profiles because
+  their playback PCMs share RDMA0. The profiles keep the same
+  built-in microphone.

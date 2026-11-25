@@ -7878,3 +7878,36 @@ eight seconds. The active session, its lock state, SensorProxy and
 the default bottom-speaker route remained in place. This verifies
 the display transition and the handler, with the physical key and
 the original intermittent failure still to be reproduced.
+
+
+## 2026-11-26 — Live CS47L93 jack and separate headphone UCM profile
+
+Built the jack hooks against the source of the installed direct
+receiver and speaker module for ARM64 with W=1. The trial's flattened
+board tree differed only by the headphone jack opt-in. The kernel
+Image, initramfs and outer Samsung DT were byte-identical. Verified
+a fresh private BOOT backup and confirmed protected partitions
+were unchanged across the BOOT-only write.
+
+The codec registered both Madera clamp IRQ handlers and exposed
+the standard ALSA Headphone Jack control. It reported off with no
+plug present. The first UCM trial placed PCM 0 and PCM 2 in the
+same HiFi verb. Even with ConflictingDevice set, the packaged
+PipeWire card probe returned EBUSY from ABOX prepare and dropped
+HiFi. WirePlumber consequently selected Voice and the earpiece.
+
+Put the headphone PCM in a separate UCM verb and shared the
+built-in microphone configuration. Stock ALSA and PipeWire
+enumerated Standard, Voice and Wired Headphones. Standard regained
+the default bottom speaker and built-in microphone. The phone
+microphone detected 523, 733 and 1031 Hz in order while the bottom
+speaker streamed those tones through PipeWire. The temporary
+recording was removed after the check.
+
+The corrected configuration survived an ordinary reboot with no
+ABOX prepare errors. Wired Headphones was exposed as unavailable
+while unplugged, with HiFi still selected. The two clamp counters
+did not advance during a stationary observation. Retained the
+tested image and removed the trial return timer. Physical
+insertion, headphone acoustic output and headset mic capture
+remain to be verified.
