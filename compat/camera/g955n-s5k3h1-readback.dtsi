@@ -1,0 +1,71 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/clock/samsung,exynos8895.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/soc/samsung,exynos-usi.h>
+
+&{/soc@0/usi@10900000/i2c@0/torch@59/regulators} {
+	front_sensor_dvdd: ldo5 {
+		regulator-name = "camera-front-dvdd-1v05";
+		regulator-min-microvolt = <1050000>;
+		regulator-max-microvolt = <1050000>;
+	};
+
+	front_sensor_avdd: ldo13 {
+		regulator-name = "camera-front-avdd-2v8";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+	};
+
+	front_sensor_afvdd: ldo16 {
+		regulator-name = "camera-front-af-2v8";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+	};
+};
+
+&{/soc@0/pinctrl@10980000} {
+	front_cam_mclk_idle: front-cam-mclk-idle-pins {
+		samsung,pins = "gpk0-1";
+		samsung,pin-function = <0>;
+		samsung,pin-pud = <0>;
+		samsung,pin-drv = <1>;
+	};
+
+	front_cam_mclk: front-cam-mclk-pins {
+		samsung,pins = "gpk0-1";
+		samsung,pin-function = <2>;
+		samsung,pin-pud = <0>;
+		samsung,pin-drv = <1>;
+	};
+};
+
+&{/soc@0/usi@10920000} {
+	samsung,mode = <USI_MODE_I2C0_1>;
+};
+
+&{/soc@0/usi@10920000/i2c@0} {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	camera@35 {
+		compatible = "samsung,sm-g955n-s5k3h1-readback";
+		reg = <0x35>;
+		clocks = <&{/soc@0/clock-controller@15a80000} CLK_DOUT_CMU_CIS_CLK1>;
+		clock-names = "xclk";
+		assigned-clocks = <&{/soc@0/clock-controller@15a80000} CLK_MOUT_CMU_CIS_CLK1>,
+				  <&{/soc@0/clock-controller@15a80000} CLK_DOUT_CMU_CIS_CLK1>;
+		assigned-clock-parents = <&{/osc-clock}>;
+		assigned-clock-rates = <0 26000000>;
+		pinctrl-names = "default", "mclk";
+		pinctrl-0 = <&front_cam_mclk_idle>;
+		pinctrl-1 = <&front_cam_mclk>;
+		reset-gpios = <&{/soc@0/pinctrl@10980000/gpc0-gpio-bank} 3 GPIO_ACTIVE_LOW>;
+		afvdd-supply = <&front_sensor_afvdd>;
+		avdd-supply = <&front_sensor_avdd>;
+		iovdd-supply = <&{/soc@0/usi@10900000/i2c@0/torch@59/regulators/ldo6}>;
+		dvdd-supply = <&front_sensor_dvdd>;
+	};
+};

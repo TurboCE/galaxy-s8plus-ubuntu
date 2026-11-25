@@ -51,3 +51,21 @@ module is S5K3H1 and the rear module is S5K2L2.
 The ROM path supplies the camera module information for this unit. The
 sensor clock, power and reset sequence for streaming, CSI receiver and
 V4L2 capture path still need their own bring-up.
+
+## Front imaging sensor
+
+Include `g955n-s5k3h1-readback.dtsi` after the camera ROM fragment.
+The added driver controls the front sensor on USI11 HSI2C27 at 0x35.
+The front EEPROM remains on HSI2C28. The front sensor takes its stock
+four rails from the S2MPB02 and a 26 MHz CIS_CLK1 on GPK0-1. GPC0-3
+is the active-low reset. The regulator provider verifies every configured
+selector before exposing the corresponding rail.
+
+The root-only `sensor_registers` attribute checks the powered sensor
+model, revision and standby state. Writing `1` to root-only
+`stream_probe` applies the stock 1632×918 at 30 fps mode, watches the
+sensor frame counter advance and checks the return to standby.
+Both operations assert reset, idle the clock pin and drop the power
+rails at the end. The probe generates and discards the sensor stream.
+A separate CSI receiver and media pipeline are needed to capture pixels
+in V4L2.

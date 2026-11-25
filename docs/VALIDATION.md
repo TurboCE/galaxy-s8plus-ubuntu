@@ -7127,3 +7127,36 @@ the end. USB and Wi-Fi responded, GDM remained active, and PipeWire
 still listed the bottom speaker as its default. One existing temporary
 brcmfmac scan suppression occurred after resume. Camera sensor clocks,
 CSI streaming, V4L2 capture and iris support have yet to be verified.
+
+
+## 2026-11-26 — Front sensor control at 26 MHz
+
+On the handset, the unused S2MPB02 LDO5, LDO13 and LDO16 selectors
+read 0x24, 0x58 and 0x58 while disabled. The stock standalone S5K3H1
+power sequence uses these rails at 1.05, 2.8 and 2.8 V together with
+the shared 1.8 V I/O rail. The new provider checks the selectors
+and only registers rails present in the board description.
+
+USI11 switched to dual-channel I²C mode to preserve the established
+front EEPROM bus and enable the sensor bus at address 0x35. The
+sensor driver follows the stock reset and clock pin order. With
+26 MHz reported by the clock framework, it read sensor ID 0x3081
+and revision 0xa3 three times. Each read verified standby, then idled
+the clock pin, asserted reset and released all four regulators.
+
+The stock Set A 1632×918 at 30 fps table has 83 16-bit writes. The
+matching width and height values were checked against the source.
+Three consecutive bounded tests on the handset saw the hardware
+counter advance from 1 to 4. Each test stopped the stream, observed
+the counter return to 0xff with mode 0, then verified all four
+regulators off. The same test passed before and after RTC-woken
+s2idle on the same boot. The front and rear ROMs remained accessible.
+
+The updated modules built with W=1. The tracked DT fragment built to
+the same DTB as the verified trial. Removed the trial timer and kept
+the tested image after a normal reboot. NFC initialization, discovery
+and shutdown, 48-frame optical capture, GDM, USB and Wi-Fi connectivity
+and the default bottom speaker route remained available. One
+brcmfmac temporary scan suppression was logged after resume. The
+front test observes the sensor frame counter. CSI reception, pixel
+capture and Ubuntu camera app operation have yet to be verified.

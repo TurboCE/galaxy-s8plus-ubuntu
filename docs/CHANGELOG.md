@@ -2924,3 +2924,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Linux controllers and exposed root-only model attributes.
 - Identified the installed S5K3H1 front module and S5K2L2 rear module.
   Both returned the same model after normal reboot and RTC-woken s2idle.
+
+
+## 2026-11-26 — S5K3H1 front sensor power and frame generation
+
+- Enabled direct front sensor control through the verified 26 MHz CIS
+  clock, reset line and four stock S2MPB02 supplies.
+- Confirmed direct chip reads and advancing frame counters in the stock
+  1632×918 mode before and after RTC-woken s2idle.
