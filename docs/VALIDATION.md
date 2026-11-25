@@ -5807,3 +5807,42 @@ This test confirms different I2C command sequences. It does not
 test acoustic output or measure the amplifier's incoming I2S
 PCM. The observer modules were removed by reboot. The handset
 was returned to the previously verified R100 ASRC0 trial state.
+
+
+### Stepwise MAX98506 parity on the R100 ASRC0 path
+
+On the same R100 boot ran one control and four cumulative playback
+trials with a matched five-second 48 kHz S16 stereo fixture, ASRC0,
+and the #58-size RDMA0 buffer. The temporary codec first wrote
+gain 0x01 instead of 0x67, then also issued the vendor block writes
+`36 80` and `36 90` before `38 80`, then omitted the R100 trigger
+write `1a 46`, and then also set the boost register to 0xf0.
+Each change was observed in the actual I2C transfer. After the
+boost trial, playback teardown restored the saved value with
+`37 00`. All five playbacks and seven-second microphone captures
+returned zero, with 336,000 captured frames each. None reproduced
+the ordered 523.25 Hz and 697 Hz reference.
+
+Replayed the cumulative variant twice on one-boot speaker modules.
+The first changed the ASoC start order so amp global enable preceded
+the firmware RDMA0 programming log by about 12 ms. The second
+preserved that start order and skipped the Calliope VI monitor setup
+on the transmit-only #58 route. The latter removed the previous
+`36 03` write from the trace. Both duplex runs completed with
+336,000 microphone frames and no matching acoustic tones.
+
+These captures tested the selected commands and their order.
+The gap from the final block write to global enable remained
+about 4 to 8 ms in the matching-sequence trials, compared with
+about 0.10 ms in the earlier #58 capture. Samsung's Exynos
+adapter driver defaults to 400 kHz on the board's HSI2C node.
+The R100 binding does not set clock-frequency and the Linux
+6.18 adapter driver defaults to 100 kHz. Those are source and
+configuration values, not measured bus rates or evidence that
+the bus timing causes silence. The cold-init and teardown write
+sequences were not matched in these tests.
+
+Raw microphone recordings were not retained. No temporary codec
+or diagnostic speaker changes were kept. The handset returned to
+the ASRC0 comparison configuration with the installed MAX98506
+codec module.

@@ -2551,3 +2551,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Recorded the bytes submitted to the EXYNOS I2C adapter on #58,
   stock R100 audio, and R100 Calliope ASRC0. Both R100 paths differed
   from #58 in gain, enable sequence, and teardown writes.
+
+
+### Stepwise #58 MAX98506 playback parity tests
+
+- Compared gain, staged amplifier enable, MDLL write omission, boost,
+  codec-first trigger order, and omission of the VI prepare write on
+  the R100 ASRC0 route. None recovered the ordered loudspeaker tones.
+  Restored the previous codec and ASRC0 configuration.
