@@ -1,0 +1,15 @@
+Subject: [PATCH] arm64: dts: exynos: use Fast-mode I2C for dream2lteks speaker
+
+Set the dedicated MAX98506 adapter to 400 kHz, the default rate
+used for the same HSI2C controller by the Samsung Exynos8895 tree.
+
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -524,6 +524,7 @@
+ &hsi2c_11 {
+ 	#address-cells = <1>;
+ 	#size-cells = <0>;
++	clock-frequency = <400000>;
+ 	status = "okay";
+ 
+ 	g955n_speaker_amp: amplifier@31 {

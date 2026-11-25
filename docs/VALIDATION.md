@@ -5846,3 +5846,40 @@ Raw microphone recordings were not retained. No temporary codec
 or diagnostic speaker changes were kept. The handset returned to
 the ASRC0 comparison configuration with the installed MAX98506
 codec module.
+
+
+### R100 MAX98506 I2C fast-mode and shutdown parity
+
+Booted R100 with a DT-only change on the MAX98506 adapter under
+USI3. The kernel and initramfs payloads match the preceding R100
+boot image. The live DT contains `clock-frequency = <400000>`.
+Read back the updated BOOT and verified the protected partitions
+through the model-specific TWRP path.
+
+Replayed the 48 kHz coded reference on the same ASRC0 and 64 KiB
+path at 400 kHz with the R100 control settings and the cumulative
+#58 amplifier settings. Both playback and capture completed.
+Submission intervals from the final block write to the global
+enable were 0.242 ms and 0.237 ms respectively, compared to
+4–8 ms in the previous cumulative trials and about 0.102 ms
+on #58. The bus speed is the live controller configuration.
+The interval is measured at software transfer submission.
+
+In a separate one-boot experiment, retained codec-first start
+and omitted VI monitor preparation. A direct 0x38 write removed
+the intermediate read. The block-to-global submission intervals
+were 0.096–0.100 ms. The active sequence was `36 80`, `36 90`,
+and `38 80`, before firmware RDMA0 start. Also used only `38 00`
+at stop, preserving the blocks and 0xf0 boost for the next stream.
+The warm repeat was acoustically silent by the ordered-tone test,
+as was the direct-write trial. The warm pair both completed
+playback and capture. Only the second warm recording was analyzed
+because both runs used the same temporary capture filename.
+The final control restored blocks-off and the saved boost value.
+
+Removed the temporary codec and speaker variants. Retained the
+400 kHz DT change and verified the original codec and previous
+ASRC0 comparison setup. The matched enable timing and warm
+teardown do not account for the observed lower speaker silence.
+The cold-boot codec initialization and signal at the amplifier
+I2S input remain unverified.

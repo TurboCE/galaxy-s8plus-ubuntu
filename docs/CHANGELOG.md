@@ -2559,3 +2559,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   codec-first trigger order, and omission of the VI prepare write on
   the R100 ASRC0 route. None recovered the ordered loudspeaker tones.
   Restored the previous codec and ASRC0 configuration.
+
+
+### SM-G955N speaker I2C fast mode and #58 timing comparison
+
+- Set the dedicated MAX98506 adapter to the Samsung 400 kHz rate.
+  R100 playback and capture completed under the new DT setting.
+- Matched the #58 enable-write interval and tested global-only
+  amplifier shutdown without recovering the lower speaker tones.
