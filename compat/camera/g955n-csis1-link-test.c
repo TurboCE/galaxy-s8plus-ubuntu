@@ -29,6 +29,7 @@
 #define CAM_DMA_QE_QCH		0x3038
 #define CAM_GATE_MANUAL		BIT(20)
 #define CAM_GATE_AUTO		BIT(28)
+#define CAM_QCH_REQUESTED	(BIT(0) | BIT(1))
 #define CAM_SYSREG_RESET	0x12c21050
 #define CAM_CSIS1_RESET		BIT(2)
 #define CAM_CSIS3_RESET		BIT(3)
@@ -72,6 +73,13 @@
 #define CSIS_RX_ERRORS		GENMASK(19, 0)
 #define CSIS_DMA_DISABLE	BIT(0)
 #define CSIS_DMA_UPDATE		BIT(1)
+#define CSIS_DMA_COMMON_BASE	0x12ce0000
+#define CSIS_DMA_COMMON_ARB	0x00
+#define CSIS_DMA_COMMON_CTRL	0x08
+#define CSIS_DMA_COMMON_SRAM	0x0c
+#define CSIS_DMA_COMMON_MATRIX	0x10
+#define CSIS_DMA_IP_PROCESSING	BIT(1)
+#define CSIS_DMA_SW_RESET	BIT(0)
 
 static bool clock_status;
 module_param(clock_status, bool, 0400);
@@ -79,11 +87,15 @@ MODULE_PARM_DESC(clock_status, "Read the three CSIS1 gates with the camera bus e
 static uint clock_register;
 module_param(clock_register, uint, 0400);
 MODULE_PARM_DESC(clock_register, "Read one selected CAM CMU mux, DMA gate or Q-channel offset");
+static bool dma_common_status;
+module_param(dma_common_status, bool, 0400);
+MODULE_PARM_DESC(dma_common_status, "Read the CSISx4 DMA common control with its clocks held");
+static bool dma_common_setup;
+module_param(dma_common_setup, bool, 0400);
+MODULE_PARM_DESC(dma_common_setup, "Verify and restore the stock CSISx4 DMA common settings");
 
-/* Claim only these registers. The CAM0 System MMU owns its separate gate. */
-static int g955n_csis1_clock_read(u32 offset, u32 *value)
+static int g955n_csis1_read_register(resource_size_t addr, u32 *value)
 {
-	resource_size_t addr = CAM_CMU_BASE + offset;
 	void __iomem *reg;
 	int ret = 0;
 
@@ -107,10 +119,11 @@ static int g955n_csis1_check_clocks(const u32 *offsets, size_t count)
 	int ret;
 
 	for (i = 0; i < count; i++) {
-		ret = g955n_csis1_clock_read(offsets[i], &value);
+		ret = g955n_csis1_read_register(CAM_CMU_BASE + offsets[i], &value);
 		if (ret)
 			return ret;
-		if (!(value & CAM_GATE_ON)) {
+		if (!(value & CAM_GATE_ON) ||
+		    (!(value & CAM_GATE_MANUAL) && (value & CAM_GATE_AUTO))) {
 			pr_info(KBUILD_MODNAME ": camera clock gate %#x is off (%#x)\n",
 				offsets[i], value);
 			return -EACCES;
@@ -134,7 +147,7 @@ static int g955n_csis1_clock_status(void)
 	int ret;
 
 	for (i = 0; i < ARRAY_SIZE(gates); i++) {
-		ret = g955n_csis1_clock_read(gates[i].offset, &value);
+		ret = g955n_csis1_read_register(CAM_CMU_BASE + gates[i].offset, &value);
 		if (ret)
 			return ret;
 		pr_info(KBUILD_MODNAME ": %s=%#08x manual=%u gate=%u auto=%u\n",
@@ -166,12 +179,96 @@ static int g955n_csis1_read_selected_clock(void)
 	int ret;
 
 	pr_notice(KBUILD_MODNAME ": before CAM CMU register %#x\n", clock_register);
-	ret = g955n_csis1_clock_read(clock_register, &value);
+	ret = g955n_csis1_read_register(CAM_CMU_BASE + clock_register, &value);
 	if (ret)
 		return ret;
 	pr_notice(KBUILD_MODNAME ": after CAM CMU register %#x value %#010x\n",
 		  clock_register, value);
 	return 0;
+}
+
+static int g955n_csis1_dma_common(void)
+{
+	static const u32 clocks[] = { CAM_DMA_ACLK, CAM_DMA_APB_ASYNCM, CAM_DMA_APB_ASYNCS };
+	static const u32 qchannels[] = { CAM_DMA_QCH, CAM_DMA_QE_QCH };
+	static const struct {
+		u32 offset;
+		u32 mask;
+		u32 value;
+	} stock[] = {
+		{ CSIS_DMA_COMMON_ARB, GENMASK(3, 0), 0x6 },
+		{ CSIS_DMA_COMMON_CTRL, CSIS_DMA_IP_PROCESSING, CSIS_DMA_IP_PROCESSING },
+		{ CSIS_DMA_COMMON_SRAM, GENMASK(25, 16) | GENMASK(9, 0), 0x01400140 },
+		{ CSIS_DMA_COMMON_MATRIX, GENMASK(4, 0), 0 },
+	};
+	const unsigned int size = CSIS_DMA_COMMON_MATRIX + sizeof(u32);
+	u32 saved[ARRAY_SIZE(stock)];
+	void __iomem *regs;
+	u32 value;
+	unsigned int i;
+	int ret;
+
+	ret = g955n_csis1_read_register(CAM_CMU_BASE + CAM_BUS_USER, &value);
+	if (ret)
+		return ret;
+	if (!(value & BIT(4)))
+		return -EACCES;
+	ret = g955n_csis1_check_clocks(clocks, ARRAY_SIZE(clocks));
+	if (ret)
+		return ret;
+	for (i = 0; i < ARRAY_SIZE(qchannels); i++) {
+		ret = g955n_csis1_read_register(CAM_CMU_BASE + qchannels[i], &value);
+		if (ret)
+			return ret;
+		if ((value & CAM_QCH_REQUESTED) != CAM_QCH_REQUESTED)
+			return -EACCES;
+	}
+
+	pr_notice(KBUILD_MODNAME ": before CSISx4 DMA common control read\n");
+	if (!request_mem_region(CSIS_DMA_COMMON_BASE, size, KBUILD_MODNAME))
+		return -EBUSY;
+	regs = ioremap(CSIS_DMA_COMMON_BASE, size);
+	if (!regs) {
+		ret = -ENOMEM;
+		goto release;
+	}
+	value = readl(regs + CSIS_DMA_COMMON_CTRL);
+	pr_notice(KBUILD_MODNAME ": CSISx4 DMA common control %#010x\n", value);
+	if (!dma_common_setup)
+		goto unmap;
+	if (value & (CSIS_DMA_IP_PROCESSING | CSIS_DMA_SW_RESET)) {
+		ret = -EBUSY;
+		goto unmap;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(stock); i++)
+		saved[i] = readl(regs + stock[i].offset);
+	for (i = 0; i < ARRAY_SIZE(stock); i++) {
+		value = (saved[i] & ~stock[i].mask) | stock[i].value;
+		writel(value, regs + stock[i].offset);
+		if ((readl(regs + stock[i].offset) & stock[i].mask) != stock[i].value) {
+			ret = -EIO;
+			break;
+		}
+	}
+	if (!ret)
+		pr_info(KBUILD_MODNAME ": stock CSISx4 DMA common settings read back\n");
+
+	for (i = ARRAY_SIZE(stock); i-- > 0;) {
+		writel(saved[i], regs + stock[i].offset);
+		if (readl(regs + stock[i].offset) != saved[i]) {
+			pr_err(KBUILD_MODNAME ": CSISx4 DMA common restore failed at %#x\n",
+			       stock[i].offset);
+			ret = -EIO;
+		}
+	}
+	if (!ret)
+		pr_info(KBUILD_MODNAME ": CSISx4 DMA common settings restored\n");
+unmap:
+	iounmap(regs);
+release:
+	release_mem_region(CSIS_DMA_COMMON_BASE, size);
+	return ret;
 }
 
 struct csis_phy_register {
@@ -304,7 +401,7 @@ static int g955n_csis1_test(struct regmap *pmu)
 	unsigned int bus, isolation, reset_state;
 	int ret;
 
-	ret = g955n_csis1_clock_read(CAM_BUS_USER, &bus);
+	ret = g955n_csis1_read_register(CAM_CMU_BASE + CAM_BUS_USER, &bus);
 	if (ret)
 		return ret;
 	if (!(bus & BIT(4)))
@@ -370,8 +467,8 @@ static int __init g955n_csis1_link_test(void)
 
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
-	if (clock_register &&
-	    (clock_status || !g955n_csis1_has_clock_register(clock_register)))
+	if (clock_status + dma_common_status + dma_common_setup + !!clock_register > 1 ||
+	    (clock_register && !g955n_csis1_has_clock_register(clock_register)))
 		return -EINVAL;
 	pmu = syscon_regmap_lookup_by_compatible("samsung,exynos8895-pmu");
 	if (IS_ERR(pmu))
@@ -406,6 +503,8 @@ static int __init g955n_csis1_link_test(void)
 			ret = g955n_csis1_read_selected_clock();
 		else if (clock_status)
 			ret = g955n_csis1_clock_status();
+		else if (dma_common_status || dma_common_setup)
+			ret = g955n_csis1_dma_common();
 		else
 			ret = g955n_csis1_test(pmu);
 		clk_disable_unprepare(bus);

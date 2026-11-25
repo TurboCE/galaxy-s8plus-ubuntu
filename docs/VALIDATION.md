@@ -8131,3 +8131,29 @@ This verifies ordinary reboot retention and one RTC wake from a
 blank display. The intermittent black screen and physical-key wake
 remain unverified, as does retention after a forced reset during
 a kernel hang.
+
+
+## 2026-11-26 — Live CSISx4 DMA common setup and front link regression
+
+With the camera bus held at 133.25 MHz, read all three CSIS1 gates,
+the DMA gates and the two DMA Q-channels individually. The mux
+reported 0x10, each gate 0x00200000 and each DMA Q-channel
+0x003f0003. The clock returned to 33.3125 MHz after each read.
+Compared the earlier stalled common trial's source and found that
+its read path bypassed the bus clock hold.
+
+The new explicit common-control mode read 0x00000004 from
+0x12ce0008 with the clock hold and gate checks. A second mode
+applied the stock arbitration, processing, SRAM split and matrix
+fields with the receiver disabled, read the values back and
+verified all four original registers on restore. The following
+read again returned 0x00000004. The ARM64 module build passed
+with W=1. Loaded it only as a temporary one-shot module.
+
+The default link test then received two front-sensor frames with
+frame-start and frame-end events, no receiver errors and PHY
+status 0x000000f0. All virtual-channel DMA remained disabled. The
+sensor rails, shared PHY and camera clock returned to idle.
+GDM and Wi-Fi were active and the bottom speaker stayed the
+default output route. No BOOT write was made. Pixel transfer
+into a mapped buffer and a V4L2 capture node remain unverified.

@@ -3150,3 +3150,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Record the power key, DRM blank and wake requests and confirmations,
   and the suspend hooks in a bounded private log on the handset.
+
+
+## 2026-11-26 — Qualify the front camera common DMA setup
+
+- Hold the camera clock while checking the CSISx4 common registers.
+  Verify and restore the stock arbitration, processing, SRAM split
+  and matrix settings before starting per-channel capture work.

@@ -123,7 +123,15 @@ and after that read. Both modes hold the camera bus at the same enabled
 rate as the link test, then restore the initial rate. Neither accesses
 the receiver or runs DMA. They return EAGAIN after a completed snapshot.
 Read-only snapshots without the bus hold interrupted handset response.
-The new diagnostic sequence has been built and awaits hardware validation.
+The bus-held sequence completed on the handset and restored the boot
+clock rate after each read.
+
+`dma_common_status=1` reads the shared DMA control while holding the
+same bus rate and checking the mux, three gates and both Q-channels.
+`dma_common_setup=1` additionally applies Samsung's arbitration,
+processing, SRAM split and matrix settings with the receiver idle,
+then verifies and restores all four registers. Both modes return
+EAGAIN after success. The test leaves the per-channel DMA disabled.
 
 For the front sensor's SBGGR10 mode, Samsung's receiver uses legacy
 2D RAW10 storage with the PACK12 flag set and the parallel DMA input.
