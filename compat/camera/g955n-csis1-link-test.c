@@ -15,12 +15,26 @@
 #include <linux/mfd/syscon.h>
 #include <linux/mm.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/sizes.h>
+
+#if IS_ENABLED(CONFIG_MEDIA_CONTROLLER) && IS_REACHABLE(CONFIG_VIDEO_DEV) && \
+	IS_REACHABLE(CONFIG_V4L2_FWNODE)
+#define G955N_CSIS1_MEDIA
+#include <linux/uaccess.h>
+#include <linux/vmalloc.h>
+#include <media/v4l2-async.h>
+#include <media/v4l2-device.h>
+#include <media/v4l2-fh.h>
+#include <media/v4l2-ioctl.h>
+#include <media/v4l2-subdev.h>
+#endif
 
 #define CAM_CMU_BASE		0x12c00000
 #define CAM_STATUS		0x4024
@@ -131,6 +145,13 @@ module_param(raw10_pack12, bool, 0400);
 MODULE_PARM_DESC(raw10_pack12, "Use the stock PACK12 flag during the VC0 RAW10 test");
 static bool capture_unsafe;
 
+struct csis_capture {
+	struct device *dev;
+	void *pixels;
+	int (*stream)(struct csis_capture *request, bool on);
+	bool pack12;
+};
+
 static int g955n_csis1_read_register(resource_size_t addr, u32 *value)
 {
 	void __iomem *reg;
@@ -224,9 +245,9 @@ static int g955n_csis1_read_selected_clock(void)
 	return 0;
 }
 
-static int g955n_csis1_test(struct regmap *pmu);
+static int g955n_csis1_test(struct regmap *pmu, struct csis_capture *request);
 
-static int g955n_csis1_dma_common(struct regmap *pmu)
+static int g955n_csis1_dma_common(struct regmap *pmu, struct csis_capture *request)
 {
 	static const u32 clocks[] = { CAM_DMA_ACLK, CAM_DMA_APB_ASYNCM, CAM_DMA_APB_ASYNCS };
 	static const u32 qchannels[] = { CAM_DMA_QCH, CAM_DMA_QE_QCH };
@@ -273,7 +294,7 @@ static int g955n_csis1_dma_common(struct regmap *pmu)
 	}
 	value = readl(regs + CSIS_DMA_COMMON_CTRL);
 	pr_notice(KBUILD_MODNAME ": CSISx4 DMA common control %#010x\n", value);
-	if (!dma_common_setup && !capture)
+	if (!dma_common_setup && !request)
 		goto unmap;
 	if (value & (CSIS_DMA_IP_PROCESSING | CSIS_DMA_SW_RESET)) {
 		ret = -EBUSY;
@@ -292,8 +313,8 @@ static int g955n_csis1_dma_common(struct regmap *pmu)
 	}
 	if (!ret)
 		pr_info(KBUILD_MODNAME ": stock CSISx4 DMA common settings read back\n");
-	if (!ret && capture)
-		ret = g955n_csis1_test(pmu);
+	if (!ret && request)
+		ret = g955n_csis1_test(pmu, request);
 	if (capture_unsafe)
 		goto unmap;
 
@@ -434,13 +455,13 @@ static int g955n_csis1_observe(void __iomem *regs)
 	return i == 180 ? -ETIMEDOUT : 0;
 }
 
-static int g955n_csis1_capture(void __iomem *regs)
+static int g955n_csis1_capture(void __iomem *regs, struct csis_capture *request)
 {
 	static const unsigned int offsets[] = {
 		CSIS_DMA0_FMT, CSIS_DMA0_SKIP, CSIS_DMA0_RESOL, CSIS_DMA0_SEQ, CSIS_DMA_DATA_CTRL,
 	};
-	const u32 settings[] = { raw10_pack12 ? CSIS_DMA_PACK12 : 0, 0, CSIS_WIDTH, 0xff, BIT(0) };
-	const unsigned int stride = CSIS_WIDTH * (raw10_pack12 ? 3 : 4) / 2;
+	const u32 settings[] = { request->pack12 ? CSIS_DMA_PACK12 : 0, 0, CSIS_WIDTH, 0xff, BIT(0) };
+	const unsigned int stride = CSIS_WIDTH * (request->pack12 ? 3 : 4) / 2;
 	const unsigned int frame_bytes = CSIS_DMA_HEIGHT * stride;
 	u32 saved[ARRAY_SIZE(offsets)], addr[CSIS_DMA_ADDR_COUNT];
 	struct platform_device *pdev, *cam0;
@@ -453,18 +474,23 @@ static int g955n_csis1_capture(void __iomem *regs)
 	u32 events = 0, rx_source, status;
 	unsigned int i;
 	int ret, stopped;
+	bool streaming = false;
 
 	if (readl(regs + CSIS_DMA_INT_MASK) || readl(regs + CSIS_DMA_INT_SOURCE) ||
 	    readl(regs + CSIS_DMA_CTRL))
 		return -EBUSY;
-	node = of_find_compatible_node(NULL, NULL, "samsung,sm-g955n-csis1-buffer-test");
-	if (!node)
-		return -ENODEV;
-	pdev = of_find_device_by_node(node);
-	of_node_put(node);
-	if (!pdev)
-		return -ENODEV;
-	dev = &pdev->dev;
+	if (request->dev) {
+		dev = get_device(request->dev);
+	} else {
+		node = of_find_compatible_node(NULL, NULL, "samsung,sm-g955n-csis1-buffer-test");
+		if (!node)
+			return -ENODEV;
+		pdev = of_find_device_by_node(node);
+		of_node_put(node);
+		if (!pdev)
+			return -ENODEV;
+		dev = &pdev->dev;
+	}
 	domain = iommu_get_domain_for_dev(dev);
 	ret = -ENODEV;
 	if (!domain || !iommu_is_dma_domain(domain) ||
@@ -523,6 +549,12 @@ static int g955n_csis1_capture(void __iomem *regs)
 
 	/* Keep output disabled until the sensor has delivered a complete CSI frame. */
 	pr_notice(KBUILD_MODNAME ": VC0 waiting for first CSI frame with DMA disabled\n");
+	if (request->stream) {
+		ret = request->stream(request, true);
+		if (ret)
+			goto restore;
+		streaming = true;
+	}
 	ret = readl_poll_timeout(regs + CSIS_INTERRUPT_SOURCE, status,
 				 status & CSIS_VC0_END, 150, 2000000);
 	if (ret)
@@ -556,6 +588,10 @@ static int g955n_csis1_capture(void __iomem *regs)
 		/* Keep the IOVA valid if completion of outstanding writes is unknown. */
 		capture_unsafe = true;
 		pr_err(KBUILD_MODNAME ": VC0 DMA stop not confirmed, retaining mapped buffer\n");
+		if (request->dev)
+			__module_get(THIS_MODULE);
+		if (streaming)
+			request->stream(request, false);
 		return stopped;
 	}
 	writel(0, regs + CSIS_DMA_CTRL);
@@ -579,7 +615,7 @@ static int g955n_csis1_capture(void __iomem *regs)
 			pr_info(KBUILD_MODNAME ": VC0 RAW10 %u rows at %u bytes per row, tail intact\n",
 				lines, stride);
 		}
-		if (!ret && !raw10_pack12) {
+		if (!ret && !request->pack12) {
 			const __le16 *samples = (const __le16 *)pixels;
 			unsigned int outside = 0;
 			u16 minimum = U16_MAX, maximum = 0;
@@ -599,7 +635,13 @@ static int g955n_csis1_capture(void __iomem *regs)
 	}
 	if ((events & CSIS_DMA_ERRORS) || (rx_source & CSIS_RX_ERRORS))
 		ret = -EIO;
+	if (!ret && request->pixels)
+		memcpy(request->pixels, pixels, frame_bytes);
 restore:
+	if (streaming) {
+		stopped = request->stream(request, false);
+		ret = ret ?: stopped;
+	}
 	for (i = 0; i < CSIS_DMA_ADDR_COUNT; i++)
 		writel(addr[i], regs + CSIS_DMA0_ADDR + i * sizeof(u32));
 	for (i = 0; i < ARRAY_SIZE(offsets); i++)
@@ -618,7 +660,7 @@ put:
 	return ret;
 }
 
-static int g955n_csis1_test(struct regmap *pmu)
+static int g955n_csis1_test(struct regmap *pmu, struct csis_capture *request)
 {
 	static const u32 clocks[] = {
 		CAM_CSIS1_ACLK, CAM_CSIS1_APB_ASYNCM, CAM_CSIS1_APB_ASYNCS,
@@ -663,7 +705,7 @@ static int g955n_csis1_test(struct regmap *pmu)
 	writel(reset_state | CAM_CSIS1_RESET, reset);
 	ret = g955n_csis1_arm(regs, &saved);
 	if (!ret) {
-		ret = capture ? g955n_csis1_capture(regs) : g955n_csis1_observe(regs);
+		ret = request ? g955n_csis1_capture(regs, request) : g955n_csis1_observe(regs);
 		if (capture_unsafe) {
 			writel(readl(reset) & ~CAM_CSIS1_RESET, reset);
 			readl(reset);
@@ -688,7 +730,7 @@ release_csis:
 	return ret;
 }
 
-static int __init g955n_csis1_link_test(void)
+static int g955n_csis1_run(struct csis_capture *request)
 {
 	struct of_phandle_args spec = { .args_count = 1, .args = { CLK_DOUT_CMU_CAM_BUS } };
 	struct regmap *pmu;
@@ -699,9 +741,8 @@ static int __init g955n_csis1_link_test(void)
 
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
-	if (clock_status + dma_common_status + dma_common_setup + capture + !!clock_register > 1 ||
-	    (clock_register && !g955n_csis1_has_clock_register(clock_register)))
-		return -EINVAL;
+	if (capture_unsafe)
+		return -EIO;
 	pmu = syscon_regmap_lookup_by_compatible("samsung,exynos8895-pmu");
 	if (IS_ERR(pmu))
 		return PTR_ERR(pmu);
@@ -735,13 +776,13 @@ static int __init g955n_csis1_link_test(void)
 			ret = g955n_csis1_read_selected_clock();
 		else if (clock_status)
 			ret = g955n_csis1_clock_status();
-		else if (dma_common_status || dma_common_setup || capture)
-			ret = g955n_csis1_dma_common(pmu);
+		else if (dma_common_status || dma_common_setup || request)
+			ret = g955n_csis1_dma_common(pmu, request);
 		else
-			ret = g955n_csis1_test(pmu);
+			ret = g955n_csis1_test(pmu, NULL);
 		/* A failed stop requires reboot. Do not unload or release the buffer. */
 		if (capture_unsafe)
-			return 0;
+			return ret;
 		clk_disable_unprepare(bus);
 	}
 	clk_rate_exclusive_put(bus);
@@ -752,10 +793,321 @@ static int __init g955n_csis1_link_test(void)
 		pr_info("g955n-csis1-link-test: CAM clock restored to %lu Hz\n", initial_rate);
 put:
 	clk_put(bus);
-	/* Release the one-shot module so it can be used again without a reboot. */
+	return ret;
+}
+
+#ifdef G955N_CSIS1_MEDIA
+struct csis_video {
+	struct v4l2_device v4l2;
+	struct v4l2_async_notifier notifier;
+	struct mutex lock;
+	struct video_device *video;
+	struct v4l2_subdev *sensor;
+	u32 sensor_pad;
+};
+
+struct csis_video_capture {
+	struct csis_capture request;
+	struct csis_video *camera;
+};
+
+static bool video;
+module_param(video, bool, 0400);
+MODULE_PARM_DESC(video, "Register the DT-connected V4L2 read capture device");
+
+static int g955n_csis1_video_stream(struct csis_capture *request, bool on)
+{
+	struct csis_video_capture *capture = container_of(request, struct csis_video_capture, request);
+	struct csis_video *camera = capture->camera;
+
+	if (on)
+		return v4l2_subdev_enable_streams(camera->sensor, camera->sensor_pad, BIT_ULL(0));
+	return v4l2_subdev_disable_streams(camera->sensor, camera->sensor_pad, BIT_ULL(0));
+}
+
+static ssize_t g955n_csis1_video_read(struct file *file, char __user *buf,
+				     size_t size, loff_t *pos)
+{
+	struct csis_video *camera = video_drvdata(file);
+	const unsigned int bytes = CSIS_WIDTH * CSIS_DMA_HEIGHT * sizeof(u16);
+	struct csis_video_capture frame = {
+		.camera = camera,
+		.request.stream = g955n_csis1_video_stream,
+	};
+	ssize_t ret;
+
+	if (!size)
+		return 0;
+	if (size < bytes)
+		return -EINVAL;
+	if (file->f_flags & O_NONBLOCK)
+		return -EAGAIN;
+	if (mutex_lock_interruptible(&camera->lock))
+		return -ERESTARTSYS;
+	ret = -ENODEV;
+	if (!camera->sensor || camera->video != video_devdata(file))
+		goto unlock;
+	frame.request.dev = camera->v4l2.dev;
+	frame.request.pixels = kvzalloc(bytes, GFP_KERNEL);
+	if (!frame.request.pixels) {
+		ret = -ENOMEM;
+		goto unlock;
+	}
+	ret = g955n_csis1_run(&frame.request);
+	if (!ret) {
+		if (copy_to_user(buf, frame.request.pixels, bytes))
+			ret = -EFAULT;
+		else
+			ret = bytes;
+	}
+	kvfree_sensitive(frame.request.pixels, bytes);
+unlock:
+	mutex_unlock(&camera->lock);
+	return ret;
+}
+
+static int g955n_csis1_querycap(struct file *file, void *fh, struct v4l2_capability *cap)
+{
+	strscpy(cap->driver, "g955n-csis1", sizeof(cap->driver));
+	strscpy(cap->card, "SM-G955N Front Camera", sizeof(cap->card));
+	strscpy(cap->bus_info, "platform:12cb0000.csis", sizeof(cap->bus_info));
+	return 0;
+}
+
+static int g955n_csis1_enum_fmt(struct file *file, void *fh, struct v4l2_fmtdesc *fmt)
+{
+	if (fmt->index)
+		return -EINVAL;
+	fmt->pixelformat = V4L2_PIX_FMT_SBGGR10;
+	return 0;
+}
+
+static int g955n_csis1_fmt(struct file *file, void *fh, struct v4l2_format *fmt)
+{
+	fmt->fmt.pix = (struct v4l2_pix_format) {
+		.width = CSIS_WIDTH,
+		.height = CSIS_DMA_HEIGHT,
+		.pixelformat = V4L2_PIX_FMT_SBGGR10,
+		.field = V4L2_FIELD_NONE,
+		.bytesperline = CSIS_WIDTH * sizeof(u16),
+		.sizeimage = CSIS_WIDTH * CSIS_DMA_HEIGHT * sizeof(u16),
+		.colorspace = V4L2_COLORSPACE_RAW,
+		.quantization = V4L2_QUANTIZATION_FULL_RANGE,
+		.xfer_func = V4L2_XFER_FUNC_NONE,
+	};
+	return 0;
+}
+
+static int g955n_csis1_enum_framesizes(struct file *file, void *fh,
+				       struct v4l2_frmsizeenum *size)
+{
+	if (size->index || size->pixel_format != V4L2_PIX_FMT_SBGGR10)
+		return -EINVAL;
+	size->type = V4L2_FRMSIZE_TYPE_DISCRETE;
+	size->discrete.width = CSIS_WIDTH;
+	size->discrete.height = CSIS_DMA_HEIGHT;
+	return 0;
+}
+
+static const struct v4l2_ioctl_ops g955n_csis1_video_ioctls = {
+	.vidioc_querycap = g955n_csis1_querycap,
+	.vidioc_enum_fmt_vid_cap = g955n_csis1_enum_fmt,
+	.vidioc_g_fmt_vid_cap = g955n_csis1_fmt,
+	.vidioc_try_fmt_vid_cap = g955n_csis1_fmt,
+	.vidioc_s_fmt_vid_cap = g955n_csis1_fmt,
+	.vidioc_enum_framesizes = g955n_csis1_enum_framesizes,
+};
+
+static const struct v4l2_file_operations g955n_csis1_video_fops = {
+	.owner = THIS_MODULE,
+	.open = v4l2_fh_open,
+	.release = v4l2_fh_release,
+	.read = g955n_csis1_video_read,
+	.unlocked_ioctl = video_ioctl2,
+};
+
+static int g955n_csis1_video_bound(struct v4l2_async_notifier *notifier,
+				   struct v4l2_subdev *sd, struct v4l2_async_connection *asc)
+{
+	struct csis_video *camera = container_of(notifier, struct csis_video, notifier);
+	struct v4l2_subdev_format format = { .which = V4L2_SUBDEV_FORMAT_ACTIVE };
+	int pad, ret;
+
+	pad = media_entity_get_fwnode_pad(&sd->entity, asc->match.fwnode, MEDIA_PAD_FL_SOURCE);
+	if (pad < 0)
+		return pad;
+	format.pad = pad;
+	ret = v4l2_subdev_call_state_active(sd, pad, get_fmt, &format);
+	if (ret)
+		return ret;
+	if (format.format.width != CSIS_WIDTH || format.format.height != CSIS_HEIGHT ||
+	    format.format.code != MEDIA_BUS_FMT_SBGGR10_1X10)
+		return -EINVAL;
+	mutex_lock(&camera->lock);
+	camera->sensor = sd;
+	camera->sensor_pad = pad;
+	mutex_unlock(&camera->lock);
+	return 0;
+}
+
+static int g955n_csis1_video_complete(struct v4l2_async_notifier *notifier)
+{
+	struct csis_video *camera = container_of(notifier, struct csis_video, notifier);
+	struct video_device *vdev;
+	int ret;
+
+	vdev = video_device_alloc();
+	if (!vdev)
+		return -ENOMEM;
+	strscpy(vdev->name, "SM-G955N CSIS1", sizeof(vdev->name));
+	vdev->v4l2_dev = &camera->v4l2;
+	vdev->fops = &g955n_csis1_video_fops;
+	vdev->ioctl_ops = &g955n_csis1_video_ioctls;
+	vdev->release = video_device_release;
+	vdev->lock = &camera->lock;
+	vdev->device_caps = V4L2_CAP_VIDEO_CAPTURE | V4L2_CAP_READWRITE;
+	video_set_drvdata(vdev, camera);
+	mutex_lock(&camera->lock);
+	ret = video_register_device(vdev, VFL_TYPE_VIDEO, -1);
+	if (!ret)
+		camera->video = vdev;
+	mutex_unlock(&camera->lock);
+	if (ret)
+		video_device_release(vdev);
+	return ret;
+}
+
+static void g955n_csis1_video_unbind(struct v4l2_async_notifier *notifier,
+				     struct v4l2_subdev *sd, struct v4l2_async_connection *asc)
+{
+	struct csis_video *camera = container_of(notifier, struct csis_video, notifier);
+	struct video_device *vdev;
+
+	mutex_lock(&camera->lock);
+	vdev = camera->video;
+	camera->video = NULL;
+	camera->sensor = NULL;
+	mutex_unlock(&camera->lock);
+	video_unregister_device(vdev);
+}
+
+static const struct v4l2_async_notifier_operations g955n_csis1_video_notifier_ops = {
+	.bound = g955n_csis1_video_bound,
+	.complete = g955n_csis1_video_complete,
+	.unbind = g955n_csis1_video_unbind,
+};
+
+static void g955n_csis1_video_release(struct v4l2_device *v4l2)
+{
+	struct csis_video *camera = container_of(v4l2, struct csis_video, v4l2);
+
+	mutex_destroy(&camera->lock);
+	kfree(camera);
+}
+
+static int g955n_csis1_video_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct v4l2_async_connection *asc;
+	struct fwnode_handle *endpoint;
+	struct csis_video *camera;
+	int ret;
+
+	if (!of_machine_is_compatible("samsung,dream2lteks"))
+		return -ENODEV;
+	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+	if (ret)
+		return ret;
+	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(dev), NULL);
+	if (!endpoint)
+		return -ENODEV;
+	camera = kzalloc(sizeof(*camera), GFP_KERNEL);
+	if (!camera) {
+		fwnode_handle_put(endpoint);
+		return -ENOMEM;
+	}
+	mutex_init(&camera->lock);
+	camera->v4l2.release = g955n_csis1_video_release;
+	ret = v4l2_device_register(dev, &camera->v4l2);
+	if (ret) {
+		fwnode_handle_put(endpoint);
+		g955n_csis1_video_release(&camera->v4l2);
+		return ret;
+	}
+
+	v4l2_async_nf_init(&camera->notifier, &camera->v4l2);
+	camera->notifier.ops = &g955n_csis1_video_notifier_ops;
+	asc = v4l2_async_nf_add_fwnode_remote(&camera->notifier, endpoint,
+					    struct v4l2_async_connection);
+	fwnode_handle_put(endpoint);
+	ret = IS_ERR(asc) ? PTR_ERR(asc) : v4l2_async_nf_register(&camera->notifier);
+	if (ret) {
+		v4l2_async_nf_cleanup(&camera->notifier);
+		v4l2_device_unregister(&camera->v4l2);
+		v4l2_device_put(&camera->v4l2);
+	}
+	return ret;
+}
+
+static void g955n_csis1_video_remove(struct platform_device *pdev)
+{
+	struct v4l2_device *v4l2 = platform_get_drvdata(pdev);
+	struct csis_video *camera = container_of(v4l2, struct csis_video, v4l2);
+
+	v4l2_async_nf_unregister(&camera->notifier);
+	v4l2_async_nf_cleanup(&camera->notifier);
+	v4l2_device_unregister(v4l2);
+	v4l2_device_put(v4l2);
+}
+
+static const struct of_device_id g955n_csis1_video_match[] = {
+	{ .compatible = "samsung,sm-g955n-csis1" },
+	{ }
+};
+
+static struct platform_driver g955n_csis1_video_driver = {
+	.probe = g955n_csis1_video_probe,
+	.remove = g955n_csis1_video_remove,
+	.driver = {
+		.name = "g955n-csis1",
+		.of_match_table = g955n_csis1_video_match,
+	},
+};
+#endif
+
+static int __init g955n_csis1_link_test(void)
+{
+	struct csis_capture request = { .pack12 = raw10_pack12 };
+	int modes = clock_status + dma_common_status + dma_common_setup + capture + !!clock_register;
+	int ret;
+
+#ifdef G955N_CSIS1_MEDIA
+	if (video) {
+		if (modes)
+			return -EINVAL;
+		return platform_driver_register(&g955n_csis1_video_driver);
+	}
+#endif
+	if (modes > 1 || (clock_register && !g955n_csis1_has_clock_register(clock_register)))
+		return -EINVAL;
+	ret = g955n_csis1_run(capture ? &request : NULL);
+	/* Release the one-shot module after a stopped trial. */
+	if (capture_unsafe) {
+		__module_get(THIS_MODULE);
+		return 0;
+	}
 	return ret ?: -EAGAIN;
 }
 
+#ifdef G955N_CSIS1_MEDIA
+static void __exit g955n_csis1_exit(void)
+{
+	if (video)
+		platform_driver_unregister(&g955n_csis1_video_driver);
+}
+module_exit(g955n_csis1_exit);
+#endif
+
 module_init(g955n_csis1_link_test);
-MODULE_DESCRIPTION("Exynos8895 CSIS1 short frame reception test");
+MODULE_DESCRIPTION("SM-G955N CSIS1 front camera receiver");
 MODULE_LICENSE("GPL");

@@ -8217,3 +8217,28 @@ returned to idle. USB device mode, Wi-Fi, GDM and the default
 bottom-speaker route were present. The one-shot test discarded the
 pixels and left BOOT and installed modules intact. A V4L2 capture
 device and camera app operation remain pending.
+
+
+## 2026-11-26 — Front-camera V4L2 read device and BOOT trial
+
+Built both drivers with ARM64 W=1 in the running and media-enabled
+6.18 configurations. Rebuilt the USB dual-role configuration with
+the media modules enabled, and checked the two-lane reciprocal
+graph in the packed trial DT. Verified the private protected
+partition backups and the BOOT readback before starting the trial.
+
+The first trial retained the buffer-only CAM0 node alongside the
+video receiver. Boot registered both consumers and reported a
+kernel paging fault in queued_spin_lock_slowpath from
+exynos_iommu_attach_device during deferred System MMU probe.
+USB and GNOME initially came up. The native sensor module had
+already loaded and this kernel did not permit module unloading.
+The media sensor and video read test therefore did not run.
+Requested a recovery reboot for rollback. Recovery did not
+enumerate and the USB serial port did not return a prompt.
+
+Changed the fragment to disable the buffer-only node when V4L2 is
+enabled. Built and decoded the corrected candidate to confirm a
+single enabled CAM0 consumer. The application-facing test still
+requires a boot of that candidate with the media sensor module
+selected before automatic camera probing.

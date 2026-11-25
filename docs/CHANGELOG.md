@@ -3171,3 +3171,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Hold CAM0 System MMU runtime PM through the VC0 transfer and
   unmap. Verified front-camera pixels in 16-bit and PACK12 storage,
   including 16-bit capture after same-boot s2idle.
+
+
+## 2026-11-26 — Add a front-camera V4L2 read capture trial
+
+- Connect the S5K3H1 subdevice to a CSIS1 video node that reads
+  one BG10 frame per request. Give the video node exclusive CAM0
+  ownership in the board fragment.

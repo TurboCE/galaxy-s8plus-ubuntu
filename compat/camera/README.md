@@ -170,6 +170,20 @@ On kernels without the media core, the module retains the readback
 interface. The endpoint is ready for a receiver link and a capture
 queue later. The subdevice alone provides no application capture node.
 
+## V4L2 read capture trial
+
+Apply `g955n-csis1-video.dtsi` over the board tree with the S5K3H1
+sensor and CAM0 provider. It links the receiver to the sensor and
+disables the old buffer-only CAM0 consumer. Build both drivers with
+the media-enabled kernel. After loading the matching S5K3H1 module,
+load `g955n-csis1-link-test` with `video=1`.
+
+The video device advertises blocking V4L2 `read()` for one native
+little-endian BG10 frame per request at 1632×922. It reuses the tested
+DMA sequence and starts and stops the sensor through its V4L2 subdevice.
+Capture is limited to one read at a time. Streaming queues and the
+active-image crop remain pending.
+
 For camera power failures, enable the front module's root-only
 `trace_power` parameter and run the existing `sensor_registers` check.
 The trace records the supply, clock, reset and I²C steps and the

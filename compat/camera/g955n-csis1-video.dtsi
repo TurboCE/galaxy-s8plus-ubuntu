@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/media/video-interfaces.h>
+
+&{/soc@0/csis1-buffer-test} {
+	status = "disabled";
+};
+
+&{/soc@0} {
+	csis@12cb0000 {
+		compatible = "samsung,sm-g955n-csis1";
+		reg = <0x12cb0000 0x1420>;
+		iommus = <&{/soc@0/iommu@12d10000}>;
+
+		port {
+			csis1_in: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+				remote-endpoint = <&csis1_sensor_out>;
+			};
+		};
+	};
+};
+
+&{/soc@0/usi@10920000/i2c@0/camera@35} {
+	port {
+		csis1_sensor_out: endpoint {
+			bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+			clock-lanes = <0>;
+			data-lanes = <1 2>;
+			remote-endpoint = <&csis1_in>;
+		};
+	};
+};
