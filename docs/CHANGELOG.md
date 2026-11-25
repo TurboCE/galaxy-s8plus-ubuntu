@@ -2567,3 +2567,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   R100 playback and capture completed under the new DT setting.
 - Matched the #58 enable-write interval and tested global-only
   amplifier shutdown without recovering the lower speaker tones.
+
+
+## 2026-11-25 — Tailscale kernel networking on R100
+
+- Added a 6.18 fragment for TUN, IPv4 and IPv6 policy routing,
+  and the nftables backend with connection marks. Rebuilt the
+  initramfs and versioned modules, including the deployed board
+  audio overrides. The authenticated handset now uses the
+  kernel TUN interface and reconnects automatically at boot.

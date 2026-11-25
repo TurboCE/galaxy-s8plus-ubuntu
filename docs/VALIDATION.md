@@ -5947,3 +5947,26 @@ An external measurement of DIN, BCLK and LRCLK remains outstanding.
 The trial recorded the difference and made no permanent audio
 driver or settings change. Raw microphone recordings are not
 retained.
+
+
+### SM-G955N Tailscale kernel-mode network validation
+
+R100 lacked IPv4 and IPv6 policy rules and the netfilter Netlink
+protocol. An isolated live TUN module test created and removed a
+TUN interface, but this did not add policy routing. A boot image
+with TUN, policy routing and nftables then booted with its own
+module release. Tailscale reported Operation not supported when
+installing connection-mark rules. Enabling NF_CONNTRACK_MARK in
+the next build removed that health error.
+
+Booted 6.18.0-g955n-usb-r100-vpn2 using the unchanged board DTB.
+Bootloader, recovery and calibration partitions were preserved
+and BOOT was read back. Checked the new UFS and Wi-Fi modules,
+internal audio endpoint registration, active display services and
+the existing 400 kHz audio I2C DT setting. With the authenticated
+Tailscale account and its existing DNS and routing preferences,
+the service installed IPv4/IPv6 policy rules and nftables chains,
+including conntrack mark rules, without a Tailscale health
+warning. The Mac connected directly by Tailscale ping and SSH
+to the handset. After a normal reboot the Mac reconnected over
+SSH through tailscale0, with Tailscale, GNOME and Wi-Fi active.

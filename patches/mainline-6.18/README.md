@@ -269,3 +269,17 @@ with the exact device serial. The reader reports matched stages and
 can save the raw pmsg record to a private file for diagnosis. A trace
 requires the RAM contents to survive the reset. A missing record
 does not establish that the bootloader rejected the image.
+
+## Tailscale kernel networking
+
+Merge `config/mainline618-tailscale.fragment` into the SM-G955N
+6.18 kernel configuration. Build the kernel, early UFS and PCIe
+modules, and the root filesystem modules from the resulting
+configuration for the same kernel release. Netfilter and
+connection tracking affect kernel networking structures used by
+modules, so deploy the rebuilt modules as a separate release.
+
+The tested Tailscale service uses the kernel TUN interface and
+the nftables firewall backend. It retains the existing tailnet
+account, DNS and route preferences. The previous userspace-mode
+service configuration is kept privately for rollback.
