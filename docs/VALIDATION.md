@@ -6933,3 +6933,25 @@ again and the same commands passed. Verified the MMC host, UPower wired
 input, haptic input and RGB LED interfaces. A manual Wi-Fi scan request
 was accepted and the device remained connected. The kernel error
 journal was empty at the NFC verification following the normal reboot.
+
+
+## 2026-11-25 — Optical sensor ID and S2DOS03 supplies
+
+The Korean revision 10 Samsung DTS assigns S2DOS03 LDO2 to optical
+logic at 1.8 V and LDO4 to the LED driver at 3.3 V. The temporary
+DT enabled the second USI5 I²C lane and bound the PMIC and optical
+addresses to a diagnostic rather than consumer drivers. The ARM64
+module built with W=1.
+
+With no PMIC writes, the S2DOS03 registers reported enable=0x15,
+LDO2=1800000 and LDO4=3300000. Both optical rails were off. In a
+separate explicit test of the same BOOT, enabled LDO2 only and read
+optical chip ID 0x0316. This is in Samsung's ADPD143 ID table. Readback
+after the test again showed enable=0x15 and identical selectors.
+The LED rail stayed off and no optical sample was requested.
+The kernel error journal was empty at the test and GDM, panel and
+the BCM4773 service remained active.
+
+Restored the verified NFC-capable BOOT and removed the optical trial
+module and recovery timer. Linux IIO exposure and physical sampling
+remain pending.

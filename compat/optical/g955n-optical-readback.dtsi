@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/soc/samsung,exynos-usi.h>
+
+/* S2DOS03 is on the second I2C lane of USI5. */
+&{/soc@0/usi@10860000} {
+	samsung,mode = <USI_MODE_I2C1>;
+	status = "okay";
+};
+
+&{/soc@0/usi@10860000/i2c@10000} {
+	clock-frequency = <100000>;
+	status = "okay";
+
+	pmic@60 {
+		compatible = "samsung,sm-g955n-s2dos03-readback";
+		status = "okay";
+	};
+};
+
+&{/soc@0/usi@10900000/i2c@10000} {
+	optical@64 {
+		compatible = "samsung,sm-g955n-adpd-id-test";
+		reg = <0x64>;
+	};
+};

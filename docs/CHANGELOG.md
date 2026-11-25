@@ -2869,3 +2869,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   early receive before the first I²C command was accepted.
 - Verified device-up, discovery start and stop, and device-down on
   the handset after both s2idle and an ordinary reboot.
+
+
+## 2026-11-25 — ADPD143 optical sensor identification
+
+- Read the optical supply configuration and identified the installed
+  device without enabling its emitters or capturing a biosignal.
