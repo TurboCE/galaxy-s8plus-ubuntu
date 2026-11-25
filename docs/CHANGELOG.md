@@ -2852,3 +2852,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   wired and wireless source states in UPower after reboot.
 - Enabled the USI10 I²C adapter used by the NFC and optical heart-rate
   sensors. The individual controllers still require driver integration.
+
+
+## 2026-11-25 — S3NRN82 NFC responds in normal mode
+
+- Confirmed on the handset that the Samsung post-enable wake signal
+  is required by the tested startup sequence. The chip replied twice
+  to a configuration-preserving NCI reset.
+- Prepared a Linux NCI class transport for the board and kept the
+  reset diagnostic out of the normal boot.

@@ -1,0 +1,3 @@
+# Linux NFC stack for the SM-G955N NCI transport trial.
+CONFIG_NFC=m
+CONFIG_NFC_NCI=m

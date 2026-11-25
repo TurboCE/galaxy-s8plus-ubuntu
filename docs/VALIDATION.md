@@ -6882,3 +6882,25 @@ registered again. The MMC host, BCM4773 hub, GNOME, panel, Wi-Fi and
 default bottom speaker route were still present. The kernel journal
 had no error-priority entries at verification. NFC transactions,
 optical sensing and charging transitions are still pending.
+
+
+## 2026-11-25 — S3NRN82 address ACK and CORE_RESET
+
+Built an ARM64 diagnostic with W=1 and verified the only DT change
+was an explicit test binding at USI10 I²C address 0x27. The test
+powered the NFC controller in normal mode, selected TCXO on the
+Exynos8895 CLKOUT1 register and sent CORE_RESET with Keep Configuration.
+The first attempt returned ENXIO during the I²C write.
+
+The downstream Samsung driver aliases its firmware-mode WAKE signal
+to the firmware strap. Asserted it after VEN and the power-up delay,
+keeping it low while VEN was asserted. On two attempts the PMU
+readback changed from disabled 0x1 to enabled 0x0, and CORE_RESET
+returned a 3-byte payload with status 0 and version 0x10. Each test
+powered the device down and restored the masked clock bits.
+
+Restored the previous verified 6.18 BOOT, removed the temporary
+diagnostic module and timer, and rechecked UPower, GNOME, Wi-Fi, the
+BCM4773 hub, the MMC host and the default bottom-speaker route.
+The standard NCI driver is a separate candidate. The discovery
+and tag-read paths have yet to be qualified.

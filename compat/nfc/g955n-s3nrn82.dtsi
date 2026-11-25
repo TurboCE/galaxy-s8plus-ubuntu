@@ -1,0 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/gpio/gpio.h>
+
+&{/soc@0/usi@10900000/i2c@10000} {
+	nfc@27 {
+		compatible = "samsung,sm-g955n-s3nrn82";
+		reg = <0x27>;
+		samsung,pmu = <&{/soc@0/system-controller@16480000}>;
+		enable-gpios = <&{/soc@0/pinctrl@164b0000/gpa4-gpio-bank} 5 GPIO_ACTIVE_LOW>;
+		firmware-gpios = <&{/soc@0/pinctrl@10980000/gpe6-gpio-bank} 4 GPIO_ACTIVE_HIGH>;
+		ready-gpios = <&{/soc@0/pinctrl@164b0000/gpa1-gpio-bank} 2 GPIO_ACTIVE_HIGH>;
+	};
+};
