@@ -3025,3 +3025,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verified independent and concurrent NFC and optical acquisition
   after ordinary reboot and RTC-woken s2idle. Recovered a retained
   console marker after an ordinary reboot.
+
+
+## 2026-11-26 — Front camera sensor and CSI link verified after reboot
+
+- Confirmed front S5K3H1 sensor reads and CSI frame events after a
+  normal reboot with the CAM0 translated buffer driver bound.

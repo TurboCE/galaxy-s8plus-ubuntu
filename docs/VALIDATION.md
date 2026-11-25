@@ -7437,3 +7437,26 @@ after s2idle and the built-in bottom speaker stayed the default route.
 A temporary brcmfmac scan suppression was logged on resume.
 Physical NFC tag reading and optical signal interpretation remain
 unverified; this test did not use a physical tag or derive heart rate.
+
+
+## 2026-11-26 — Front camera sensor, pin states and CSI link after reboot
+
+On the combined board image, S5K3H1 responded with chip ID 0x3081
+and revision 0xa3. Samsung's optional 3H1-C3 path enables LDO7
+for I²C pull-ups. A temporary comparison confirmed the chip ID
+before, during and after enabling that rail, both on the boot
+following the earlier s2idle cycle and after a separate normal
+reboot. The rail was enabled from 0x30 to 0xb0 and restored to
+0x30 in each comparison. These tests do not establish the cause
+of the earlier ENXIO or characterize a fully cold power cycle.
+
+A bounded pin read found the reset GPIO low with MCLK mux
+function 0 before and after the sensor check. During the active
+read it found reset high and MCLK mux function 2. Both I²C pins
+retained function 2. With CAM0 bound, the revised CSI link probe
+received two frames with start and end events, no receiver errors,
+and PHY status 0x000000f0. It restored the CAM bus clock to
+33.3125 MHz. GDM and the location hub were active, Wi-Fi was
+connected, and the bottom speaker was still the default sink.
+The CSI test observes frame boundaries. DMA pixel transfer and
+camera apps remain unverified.
