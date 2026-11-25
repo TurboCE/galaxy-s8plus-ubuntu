@@ -7034,3 +7034,38 @@ receiver stop. Neither desktop trial reported satellites or a GNSS fix.
 No location coordinates, device-owned vendor files or receiver cache
 were added to Git. The release-upgrade flow and outdoor acquisition
 remain separate verification tasks.
+
+
+## 2026-11-26 — S2MPB02 bus bring-up and USI10 coexistence
+
+Samsung's revision 10 Korean Dream2 device tree puts S2MPB02 at address
+0x59 on USI10 HSI2C25. Opening the adjacent HSI2C26 bus only received
+an address NACK. Merely enabling the HSI2C25 platform child registered
+an adapter, but its transfer timed out while the USI remained in
+single-channel mode. The Samsung board selects both channels. Using
+the Linux USI_MODE_I2C0_1 selection and enabling the HSI2C25 child
+at 100 kHz restored bus communication.
+
+The read-only test observed ID 0x00, idle FLED control 0x33 and 0x38,
+current byte 0xcc, timeout byte 0x7f, and boost configuration 0x90.
+Samsung's probe uses 0x90 to identify revision 1. The diagnostic
+released the temporary I2C client and did not enable an emitter or
+change regulator state. Module unloading is unavailable on this
+kernel. An ordinary reboot removed the diagnostic.
+
+The first chained trial stopped at its partition guard. Backups from
+two recovery entries showed an EFS mount count increment and changes
+confined to four superblock bytes. The PARAM archive payload was
+identical with two trailing bytes changed outside the archive. The
+second trial used a fresh verified recovery snapshot for the protected
+partition comparisons and retained the original BOOT rollback copy.
+Neither protected partition was written by the trial.
+
+With both USI channels enabled, the readback DTB matched the baseline
+outside the parent mode, channel status and clock frequency. The
+GNOME display manager, Wi-Fi, GeoClue socket and default bottom
+speaker route remained available after reboot. NFC initialization,
+discovery and shutdown passed, and optical acquisition yielded
+48 frames before returning both supplies to off. No priority-error
+kernel entries were present at the end of those checks. Camera
+streaming, flash emission and iris support remain unverified.

@@ -2899,3 +2899,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   Ubuntu rootfs builds. Retained network positioning in GeoClue.
 - Verified native receiver NMEA and the GNOME location service after a
   normal reboot. A satellite fix remains to be verified outdoors.
+
+
+## 2026-11-26 — S2MPB02 camera and flash bus initialization
+
+- Matched Samsung's dual-channel USI10 mode and enabled HSI2C25 alongside
+  the active NFC and optical sensor bus.
+- Identified the camera and flash power IC on the handset with read-only
+  register checks. Verified NFC and buffered optical acquisition again
+  after a normal reboot.

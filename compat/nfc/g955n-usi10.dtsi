@@ -2,9 +2,14 @@
 
 #include <dt-bindings/soc/samsung,exynos-usi.h>
 
-/* Samsung HSI2C26, shared by the NFC and heart-rate controllers. */
+/* HSI2C25 is the camera power IC bus. HSI2C26 serves NFC and optical IIO. */
 &{/soc@0/usi@10900000} {
-	samsung,mode = <USI_MODE_I2C1>;
+	samsung,mode = <USI_MODE_I2C0_1>;
+	status = "okay";
+};
+
+&{/soc@0/usi@10900000/i2c@0} {
+	clock-frequency = <100000>;
 	status = "okay";
 };
 
