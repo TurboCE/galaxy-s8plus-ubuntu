@@ -133,27 +133,27 @@ processing, SRAM split and matrix settings with the receiver idle,
 then verifies and restores all four registers. Both modes return
 EAGAIN after success. The test leaves the per-channel DMA disabled.
 
-For the front sensor's SBGGR10 mode, Samsung's receiver uses legacy
-2D RAW10 storage with the PACK12 flag set and the parallel DMA input.
-The stock buffer sizing is `ALIGN(width * 5 / 4, 16) * height`, or
-2048 bytes per line and 1,880,064 bytes per frame at 1632×918.
-The single-buffer setup points all eight VC0 slots at the same mapped
-address. A capture test must confirm the actual format and write
-extent, DMA completion and quiescence before returning the buffer.
+The front sensor's 1632×918 mode uses legacy 2D RAW10 storage and
+the parallel DMA input. The extent depends on the PACK12 flag.
+With it set, the handset wrote 922 rows at 2448 bytes per row.
+With it clear, it wrote 922 rows at 3264 bytes per row, with
+right-aligned 10-bit samples in little-endian 16-bit words.
+The sensor's reported image height is 918. Preserve space for the
+four extra rows and identify their position before cropping frames
+for an application.
 
-`capture=1` runs a bounded VC0 test using the stock setup and the
-translated CAM0 DMA device. Start the sensor's short `stream_probe`
+`capture=1` runs a bounded VC0 test using the stock common setup
+and the translated CAM0 DMA device. It holds a runtime PM reference
+on the System MMU until DMA has stopped and the buffer is unmapped.
+Use `raw10_pack12=1` to test the alternate packed storage mode.
+Start the sensor's short `stream_probe`
 after `VC0 waiting for first CSI frame with DMA disabled`. The test
 checks two DMA completion events, disables VC0 and waits for the
 abort acknowledgement before examining the buffer. It verifies that
-each of the 918 rows changed and that the memory beyond the expected
+each of the 922 rows changed and that the memory beyond the expected
 frame remains intact. Pixel data is discarded in the kernel. If DMA
-stop cannot be confirmed, the test retains the mapping and holds
-CSIS1 in reset until reboot.
-
-On the handset the test currently reaches both completion events and
-stops the engine, with the entire checked frame still at its initial
-value. It returns EIO for that result.
+stop cannot be confirmed, the test retains the mapping and the runtime
+PM reference and holds CSIS1 in reset until reboot.
 
 ## V4L2 front sensor subdevice
 

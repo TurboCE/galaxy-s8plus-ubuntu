@@ -8189,3 +8189,31 @@ rails returned to idle. GDM and Wi-Fi were available and PipeWire
 reported the bottom speaker as the default route. No BOOT write
 or persistent module installation was made. V4L2 pixel capture
 remains pending.
+
+
+## 2026-11-26 — Front camera writes with CAM0 runtime PM held
+
+The installed CAM0 System MMU was runtime-suspended while the
+buffer-only consumer retained a translated domain. Changed the VC0
+test to resume that provider under the held camera bus clock and
+keep the runtime PM reference through DMA stop and unmap. It
+reported active during capture and returned to suspended after
+the test. No CAM0 IOMMU fault appeared in the scoped journal.
+
+Both storage modes delivered real buffer writes. The mode with
+PACK12 set changed all 922 rows at 2448 bytes per row, and the
+memory beyond 2,257,056 bytes retained its sentinel. The mode with
+PACK12 clear changed all 922 rows at 3264 bytes per row, with its
+sentinel intact beyond 3,009,408 bytes. In the latter mode the
+little-endian 16-bit samples varied and were all within the 10-bit
+range. The sensor mode reports 1632 by 918. The extra four rows
+are part of the measured write extent. Their placement relative to
+the active image has yet to be verified, so no crop is defined.
+
+The ARM64 module built with W=1. The 16-bit test passed before and
+after an RTC-woken s2idle cycle on the same boot. The receiver,
+common DMA and clock state were restored and the front sensor rails
+returned to idle. USB device mode, Wi-Fi, GDM and the default
+bottom-speaker route were present. The one-shot test discarded the
+pixels and left BOOT and installed modules intact. A V4L2 capture
+device and camera app operation remain pending.

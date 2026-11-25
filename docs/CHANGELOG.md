@@ -3164,3 +3164,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added the opt-in VC0 RAW10 test with a mapped buffer and checked
   DMA shutdown. The handset signaled completion with zero changed
   rows, so pixel capture remains unverified.
+
+
+## 2026-11-26 — Keep CAM0 powered during front camera DMA
+
+- Hold CAM0 System MMU runtime PM through the VC0 transfer and
+  unmap. Verified front-camera pixels in 16-bit and PACK12 storage,
+  including 16-bit capture after same-boot s2idle.

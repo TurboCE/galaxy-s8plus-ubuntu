@@ -18,6 +18,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/sizes.h>
 
@@ -105,8 +106,8 @@
 #define CSIS_DMA_ADDR_COUNT	8
 #define CSIS_WIDTH		1632
 #define CSIS_HEIGHT		918
-#define CSIS_DMA_STRIDE_BYTES	ALIGN(CSIS_WIDTH * 5 / 4, 16)
-#define CSIS_FRAME_BYTES	(CSIS_HEIGHT * CSIS_DMA_STRIDE_BYTES)
+/* Both storage modes write four additional rows in this sensor mode. */
+#define CSIS_DMA_HEIGHT		922
 #define CSIS_BUFFER_BYTES	SZ_4M
 #define CSIS_DMA_SENTINEL	0xa5
 
@@ -125,6 +126,9 @@ MODULE_PARM_DESC(dma_common_setup, "Verify and restore the stock CSISx4 DMA comm
 static bool capture;
 module_param(capture, bool, 0400);
 MODULE_PARM_DESC(capture, "Check VC0 writes to a translated buffer without exporting pixels");
+static bool raw10_pack12;
+module_param(raw10_pack12, bool, 0400);
+MODULE_PARM_DESC(raw10_pack12, "Use the stock PACK12 flag during the VC0 RAW10 test");
 static bool capture_unsafe;
 
 static int g955n_csis1_read_register(resource_size_t addr, u32 *value)
@@ -435,9 +439,11 @@ static int g955n_csis1_capture(void __iomem *regs)
 	static const unsigned int offsets[] = {
 		CSIS_DMA0_FMT, CSIS_DMA0_SKIP, CSIS_DMA0_RESOL, CSIS_DMA0_SEQ, CSIS_DMA_DATA_CTRL,
 	};
-	static const u32 settings[] = { CSIS_DMA_PACK12, 0, CSIS_WIDTH, 0xff, BIT(0) };
+	const u32 settings[] = { raw10_pack12 ? CSIS_DMA_PACK12 : 0, 0, CSIS_WIDTH, 0xff, BIT(0) };
+	const unsigned int stride = CSIS_WIDTH * (raw10_pack12 ? 3 : 4) / 2;
+	const unsigned int frame_bytes = CSIS_DMA_HEIGHT * stride;
 	u32 saved[ARRAY_SIZE(offsets)], addr[CSIS_DMA_ADDR_COUNT];
-	struct platform_device *pdev;
+	struct platform_device *pdev, *cam0;
 	struct iommu_domain *domain;
 	struct device_node *node;
 	struct device *dev;
@@ -464,10 +470,27 @@ static int g955n_csis1_capture(void __iomem *regs)
 	if (!domain || !iommu_is_dma_domain(domain) ||
 	    dev->coherent_dma_mask != DMA_BIT_MASK(32))
 		goto put;
+
+	/* The buffer-only platform device does not take a runtime PM reference. */
+	node = of_parse_phandle(dev->of_node, "iommus", 0);
+	if (!node)
+		goto put;
+	cam0 = of_find_device_by_node(node);
+	of_node_put(node);
+	if (!cam0)
+		goto put;
+	ret = pm_runtime_resume_and_get(&cam0->dev);
+	if (ret < 0)
+		goto put_cam0;
+	if (!pm_runtime_active(&cam0->dev)) {
+		ret = -EIO;
+		goto suspend_cam0;
+	}
+	pr_info(KBUILD_MODNAME ": CAM0 System MMU active for VC0 DMA\n");
 	ret = -ENOMEM;
 	pages = alloc_pages(GFP_KERNEL | __GFP_NOWARN, get_order(CSIS_BUFFER_BYTES));
 	if (!pages)
-		goto put;
+		goto suspend_cam0;
 	pixels = page_address(pages);
 	memset(pixels, CSIS_DMA_SENTINEL, CSIS_BUFFER_BYTES);
 	iova = dma_map_page(dev, pages, 0, CSIS_BUFFER_BYTES, DMA_BIDIRECTIONAL);
@@ -540,20 +563,38 @@ static int g955n_csis1_capture(void __iomem *regs)
 	pr_info(KBUILD_MODNAME ": VC0 DMA abort acknowledged and output inactive\n");
 	if (events & CSIS_DMA_VC0_END) {
 		unsigned int lines = 0;
-		bool tail_changed;
+		unsigned int extent = CSIS_BUFFER_BYTES;
 
 		dma_sync_single_for_cpu(dev, iova, CSIS_BUFFER_BYTES, DMA_BIDIRECTIONAL);
-		for (i = 0; i < CSIS_FRAME_BYTES; i += CSIS_DMA_STRIDE_BYTES)
-			if (memchr_inv(pixels + i, CSIS_DMA_SENTINEL, CSIS_WIDTH * 5 / 4))
+		for (i = 0; i < frame_bytes; i += stride)
+			if (memchr_inv(pixels + i, CSIS_DMA_SENTINEL, stride))
 				lines++;
-		tail_changed = memchr_inv(pixels + CSIS_FRAME_BYTES, CSIS_DMA_SENTINEL,
-					 CSIS_BUFFER_BYTES - CSIS_FRAME_BYTES) != NULL;
-		if (lines != CSIS_HEIGHT || tail_changed) {
-			pr_err(KBUILD_MODNAME ": VC0 DMA extent failed: %u/%u lines, tail changed=%u\n",
-			       lines, CSIS_HEIGHT, tail_changed);
+		while (extent && pixels[extent - 1] == CSIS_DMA_SENTINEL)
+			extent--;
+		if (lines != CSIS_DMA_HEIGHT || extent > frame_bytes) {
+			pr_err(KBUILD_MODNAME ": VC0 DMA extent failed: %u/%u rows, %u bytes (expected at most %u)\n",
+			       lines, CSIS_DMA_HEIGHT, extent, frame_bytes);
 			ret = -EIO;
 		} else {
-			pr_info(KBUILD_MODNAME ": VC0 RAW10 %u lines changed, tail intact\n", CSIS_HEIGHT);
+			pr_info(KBUILD_MODNAME ": VC0 RAW10 %u rows at %u bytes per row, tail intact\n",
+				lines, stride);
+		}
+		if (!ret && !raw10_pack12) {
+			const __le16 *samples = (const __le16 *)pixels;
+			unsigned int outside = 0;
+			u16 minimum = U16_MAX, maximum = 0;
+
+			for (i = 0; i < frame_bytes / sizeof(*samples); i++) {
+				u16 value = le16_to_cpu(samples[i]);
+
+				outside += value > GENMASK(9, 0);
+				minimum = min(minimum, value);
+				maximum = max(maximum, value);
+			}
+			pr_info(KBUILD_MODNAME ": VC0 little-endian samples outside 10-bit range=%u varied=%u\n",
+				outside, minimum != maximum);
+			if (outside || minimum == maximum)
+				ret = -EIO;
 		}
 	}
 	if ((events & CSIS_DMA_ERRORS) || (rx_source & CSIS_RX_ERRORS))
@@ -568,6 +609,10 @@ unmap:
 free:
 	memzero_explicit(pixels, CSIS_BUFFER_BYTES);
 	__free_pages(pages, get_order(CSIS_BUFFER_BYTES));
+suspend_cam0:
+	pm_runtime_put_sync(&cam0->dev);
+put_cam0:
+	put_device(&cam0->dev);
 put:
 	put_device(dev);
 	return ret;
