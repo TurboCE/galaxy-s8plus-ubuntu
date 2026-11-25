@@ -178,6 +178,10 @@ static int g955n_dsim_set_offset(void __iomem *dsi, u8 offset)
 	return g955n_dsim_wait_tx(dsi);
 }
 
+#ifdef G955N_WITH_AID
+int g955n_aid_verify(const u8 *mtp);
+#endif
+
 static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
 				     size_t len)
 {
@@ -202,6 +206,10 @@ static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
 	if (!ret)
 		pr_info("g955n-dsim: DCS %02x calibration: %zu stable nonblank bytes\n",
 			address, len);
+#ifdef G955N_WITH_AID
+	if (!ret && address == S6E3HA6_MTP)
+		ret = g955n_aid_verify(first);
+#endif
 	memzero_explicit(first, sizeof(first));
 	memzero_explicit(second, sizeof(second));
 	return ret;

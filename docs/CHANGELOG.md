@@ -2743,3 +2743,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added a panel-specific resource probe for MTP, ELVSS and HBM gamma
   through DSIM0. Verified repeated live reads, offset reset, lock-key
   transmission and DSIM timeout restoration on the SM-G955N.
+
+## 2026-11-25 — Compute calibrated OLED gamma on the handset
+
+- Added an optional AID probe using the pinned Samsung Dream2 A3
+  tuning data and calculator. The 6.18 handset generated 74 gamma
+  rows from factory MTP. Panel brightness remained unchanged.

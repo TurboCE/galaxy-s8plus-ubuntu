@@ -39,3 +39,24 @@ The matching vendor table applies gamma, AOR, temperature and supply
 compensation, ACL and a latch command. A backlight implementation needs
 the calibrated tables and a managed DSIM command path before exposing
 brightness to Ubuntu.
+
+## Calculate the normal-brightness gamma rows
+
+The optional AID build reuses Samsung's GPL calculator and Dream2 A3
+tuning rows. Stage the sources from the SM-G955N Samsung kernel tree.
+The staging script checks the exact source hashes and disables vendor
+debug output before building.
+
+```sh
+python3 compat/display/dsim/prepare-aid.py \
+    "$SAMSUNG_KERNEL/drivers/video/fbdev/exynos/panel" compat/display/dsim
+make -C "$KERNEL_BUILD" M="$PWD/compat/display/dsim" \
+    ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- G955N_WITH_AID=1 W=1 modules
+sudo insmod compat/display/dsim/g955n-dsim-aid-probe.ko read_calibration=Y
+```
+
+The AID build calculates all 74 normal-brightness rows from live MTP
+data. It checks every packed row for nonblank output and the endpoints
+for different contents. Calibration and computed bytes stay in scratch
+memory. HBM gamma is read in the resource diagnostic. No calculated
+row is sent to the panel by this probe.

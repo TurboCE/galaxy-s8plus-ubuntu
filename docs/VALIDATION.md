@@ -6562,3 +6562,15 @@ were not logged. No brightness or gamma settings were applied.
 Afterward GDM, Wi-Fi and the sensor hub were active, the native DSI
 connector was connected, and the PipeWire default sink still pointed
 to the bottom speaker. The Linux backlight class remained absent.
+
+## 2026-11-25 — Calculate native OLED gamma from live MTP
+
+Built the DSIM-only and optional AID probes with the running ARM64
+6.18 kernel interface and `W=1`. Staged the original Samsung GPL
+calculator and Dream2 A3 tuning rows with verified source hashes.
+The live AID probe decoded factory MTP and computed 74 gamma rows
+for the vendor's 2–420 nit range. Each packed row was nonblank
+and the first and last rows differed. The probe sent no gamma
+packets. MTP, ELVSS and HBM resource checks, lock-key transmission
+and DSIM timeout restoration also completed. GDM and the BCM4773
+service remained active. The Linux backlight remains to be wired.
