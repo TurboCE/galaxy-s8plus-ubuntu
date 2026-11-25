@@ -14,8 +14,13 @@ make -C /path/to/kernel-build M="$PWD" ARCH=arm64 \
 ```
 
 The module uses the stock firmware function-state and low-power status
-registers. Read the attachment, data-role, power-role and safety flags
-through the bus driver's sysfs directory:
+registers. With [CONFIG_TYPEC](../../config/mainline618-typec.fragment)
+enabled, it also reports the port, partner and current roles through
+`/sys/class/typec/`. The driver refreshes the firmware state on a
+freezable workqueue and provides no userspace role setters.
+
+The bus driver's diagnostic attribute remains available with or without
+the Type-C class:
 
 ```sh
 cat /sys/bus/i2c/drivers/g955n-s2mm005-status/*-0033/port_status

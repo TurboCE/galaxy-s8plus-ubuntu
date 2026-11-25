@@ -3122,3 +3122,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Enabled the stock S2MM005 I²C path in the board trial and added a
   read-only status driver while retaining DWC3 peripheral mode.
+
+
+## 2026-11-26 — Publish SM-G955N USB-C state through the Linux Type-C class
+
+- Connected the S2MM005 attachment and current roles to the standard
+  Type-C port and partner devices while retaining the diagnostic attribute.

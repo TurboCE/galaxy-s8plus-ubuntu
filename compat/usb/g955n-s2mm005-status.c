@@ -5,6 +5,8 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/unaligned.h>
+#include <linux/usb/typec.h>
+#include <linux/workqueue.h>
 
 #define S2MM005_FUNC_STATE	0x0020
 #define S2MM005_LP_STATE	0x0060
@@ -65,6 +67,96 @@ static struct attribute *s2mm005_status_attrs[] = {
 };
 ATTRIBUTE_GROUPS(s2mm005_status);
 
+#if IS_REACHABLE(CONFIG_TYPEC)
+struct s2mm005_typec {
+	struct i2c_client *client;
+	struct delayed_work refresh;
+	struct typec_port *port;
+	struct typec_partner *partner;
+};
+
+static void s2mm005_report_typec(struct s2mm005_typec *status, u32 state)
+{
+	struct typec_partner_desc desc = { .accessory = TYPEC_ACCESSORY_NONE };
+	struct typec_partner *partner;
+
+	if (!(state & S2MM005_ATTACH_DONE) || !(state & S2MM005_PD_STATE)) {
+		typec_unregister_partner(status->partner);
+		status->partner = NULL;
+		return;
+	}
+
+	typec_set_data_role(status->port, state & S2MM005_IS_DFP ? TYPEC_HOST : TYPEC_DEVICE);
+	typec_set_pwr_role(status->port, state & S2MM005_IS_SOURCE ? TYPEC_SOURCE : TYPEC_SINK);
+	if (status->partner)
+		return;
+
+	partner = typec_register_partner(status->port, &desc);
+	if (IS_ERR(partner))
+		dev_warn_ratelimited(&status->client->dev, "cannot report Type-C partner: %pe\n",
+				     partner);
+	else
+		status->partner = partner;
+}
+
+static void s2mm005_refresh_typec(struct work_struct *work)
+{
+	struct s2mm005_typec *status = container_of(to_delayed_work(work),
+						   struct s2mm005_typec, refresh);
+	u32 state;
+
+	if (!s2mm005_read_state(status->client, S2MM005_FUNC_STATE, &state))
+		s2mm005_report_typec(status, state);
+	queue_delayed_work(system_freezable_wq, &status->refresh,
+			   round_jiffies_relative(2 * HZ));
+}
+
+static void s2mm005_unregister_typec(void *data)
+{
+	struct s2mm005_typec *status = data;
+
+	cancel_delayed_work_sync(&status->refresh);
+	typec_unregister_partner(status->partner);
+	typec_unregister_port(status->port);
+}
+
+static int s2mm005_register_typec(struct i2c_client *client, u32 state)
+{
+	const struct typec_capability cap = {
+		.type = TYPEC_PORT_DRP,
+		.data = TYPEC_PORT_DRD,
+		.prefer_role = TYPEC_NO_PREFERRED_ROLE,
+	};
+	struct device *dev = &client->dev;
+	struct s2mm005_typec *status;
+	int ret;
+
+	status = devm_kzalloc(dev, sizeof(*status), GFP_KERNEL);
+	if (!status)
+		return -ENOMEM;
+
+	status->client = client;
+	INIT_DELAYED_WORK(&status->refresh, s2mm005_refresh_typec);
+	status->port = typec_register_port(dev, &cap);
+	if (IS_ERR(status->port))
+		return dev_err_probe(dev, PTR_ERR(status->port), "cannot register Type-C port\n");
+
+	ret = devm_add_action_or_reset(dev, s2mm005_unregister_typec, status);
+	if (ret)
+		return ret;
+
+	s2mm005_report_typec(status, state);
+	queue_delayed_work(system_freezable_wq, &status->refresh,
+			   round_jiffies_relative(2 * HZ));
+	return 0;
+}
+#else
+static int s2mm005_register_typec(struct i2c_client *client, u32 state)
+{
+	return 0;
+}
+#endif
+
 static int s2mm005_status_probe(struct i2c_client *client)
 {
 	u32 state;
@@ -75,7 +167,10 @@ static int s2mm005_status_probe(struct i2c_client *client)
 		return -ENODEV;
 
 	ret = s2mm005_read_state(client, S2MM005_FUNC_STATE, &state);
-	return ret ? dev_err_probe(&client->dev, ret, "cannot read Type-C firmware state\n") : 0;
+	if (ret)
+		return dev_err_probe(&client->dev, ret, "cannot read Type-C firmware state\n");
+
+	return s2mm005_register_typec(client, state);
 }
 
 static const struct of_device_id s2mm005_status_of_match[] = {

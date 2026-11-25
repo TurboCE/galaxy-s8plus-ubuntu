@@ -8011,3 +8011,29 @@ The diagnostic establishes the cable-state input needed for role
 switching. Host operation still requires the standard Type-C role
 path, DWC3 dual-role and xHCI support, board VBUS control, and an
 actual USB peripheral test.
+
+
+## 2026-11-26 — Live standard Type-C port and partner reporting
+
+Built the Linux 6.18 Type-C class module against the running kernel.
+The S2MM005 status module built with and without that class, both with
+W=1, and passed checkpatch. Backed up the original module and installed
+only the two new modules. BOOT remained byte-identical.
+
+After reboot, the standard Type-C class reported a partner, device
+data role and sink power role, matching the S2MM005 status with
+the Mac attached. Both role attributes were read-only. The DWC3
+gadget remained configured at high speed and carried USB SSH.
+Unbinding the S2MM005 status driver removed the Type-C port and
+partner. Rebinding restored them without disconnecting the gadget.
+
+The phone then completed RTC-woken s2idle on the same boot with one
+additional successful suspend and no additional failures. It retained
+the partner and roles, read fresh S2MM005 status, and restored USB
+Ethernet and Wi-Fi. The bottom speaker remained the default sink.
+This was a port and partner reporting test. Physical cable insertion,
+host switching and VBUS sourcing remain unverified.
+
+A separate olddefconfig check resolved DWC3 dual role, USB role
+switch, xHCI HCD and platform xHCI together. Those settings were
+checked offline and were not installed in the running kernel.

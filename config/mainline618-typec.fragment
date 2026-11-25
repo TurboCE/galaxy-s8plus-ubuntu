@@ -1,0 +1,2 @@
+# Expose the SM-G955N S2MM005 roles through the standard Linux Type-C class.
+CONFIG_TYPEC=m
