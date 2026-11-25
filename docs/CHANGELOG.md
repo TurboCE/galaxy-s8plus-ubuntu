@@ -2591,3 +2591,17 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   DMA frame on display disable. This keeps the boot console out
   of the output-off transition while retaining direct desktop
   scanout on enable.
+
+## 2026-11-25 — VPN2 speaker lifecycle and #58 internal PCM comparison
+
+- A bounded VPN2 MAX98506 and Calliope lifecycle trial matched
+  the observed #58 amplifier activation and buffer geometry
+  without restoring acoustic output.
+- Captured #58 SIFS1 PCM through the vendor NSRC0 and WDMA1 route,
+  then replayed the captured signal on VPN2 under the same trial
+  configuration. Restored VPN2 BOOT and installed audio modules.
+- Qualified the MAX98506 voltage/current feedback on audible Samsung
+  #58 using the same stereo stimulus and an ADC-off control. On 6.18,
+  bypassing capture ASRC1 removed the feedback PCM read error, but the
+  captured frames were all zero. This is diagnostic evidence and does
+  not change the installed playback or microphone driver.

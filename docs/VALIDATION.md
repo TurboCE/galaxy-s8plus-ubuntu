@@ -5997,3 +5997,108 @@ and desktop frame. The firmware frame was not selected during
 those cycles and there was no new suspend entry or latch timeout.
 This test validates the selected scanout buffer. The inherited
 DSI timing and panel power remain under the existing handoff.
+
+### VPN2 amplifier lifecycle and #58 SIFS1 replay
+
+Verified the live SM-G955N VPN2 BOOT hash, stock module hashes and
+400 kHz amplifier bus configuration before staging the mutually
+matched temporary codec and speaker modules. Confirmed both built
+module identities were running. The five-second reference WAV hash
+matched the previous audible #58 input. ALSA playback and microphone
+capture completed, with 384,000 captured stereo frames. The active
+amp readback showed blocks 0x90, global 0x80, gain 0x01 and boost
+0xf0 before UAIF4 TX and during playback. The I2C submission interval
+between the final block control and global enable was 92 microseconds.
+No corresponding ordered tone sequence was heard by the microphone.
+
+Booted the known #58 image with the complete VPN2 BOOT saved. Routed
+SIFS1 through NSRC0 and SIFM0 to WDMA1 (hw:0,9), with the vendor
+capture ASRC enabled. Playback kept UAIF4 on SIFS1. ALSA playback
+completed and capture produced 240,640 stereo S16 frames before a
+read EIO after the playback clock stopped. The digital capture
+contains both expected frequencies and both asymmetric word-marker
+segments. It is a software capture across the internal capture
+path. It does not establish the waveform outside the SoC.
+
+Aligned the capture to the five-second fixture, adding 261 frames
+of leading silence for the capture offset. On VPN2 replayed those
+samples via the same temporary amp lifecycle configuration and 64 KiB
+buffer with eight 8 KiB periods. Playback and independent microphone
+capture completed with 384,000 frames. The measured amplifier readback
+matched the first trial and the I2C submission interval was 91
+microseconds. The expected ordered acoustic peaks did not return.
+Restored the complete VPN2 BOOT and verified the installed codec and
+speaker module hashes, the speaker service, the receiver and microphone
+PCM mapping, and WirePlumber. The private PCM fixture represents the
+DSP plus the vendor capture path and was not committed.
+
+#### MAX98506 feedback from #58 and VPN2
+
+The #58 MAX98506 driver exposes the VMON and IMON ADCs through
+the board's ADC Enable control. With the same WAV and playback
+buffer, UAIF4 RX through NSRC0 and SIFM0 into WDMA1 captured 288,000
+stereo frames with the ADCs off and 288,000 with them on. The first
+capture was all zero. With the ADCs on, the amplifier block register
+changed from 0x90 to 0x93, the signal peaked at 518 counts, and both
+marker frequencies appeared in the expected time windows. A second
+ADC-on run with passive register tracing confirmed the result and
+peaked at 543 counts. Readbacks during successful capture showed UAIF4
+0x01000007/0x0984f000, capture route 0x0000c00c and SPUM
+0x00000012/0x00000900. This is a usable positive control for the
+amplifier feedback path on this handset, with no gain or calibration
+changes.
+
+The first VPN2 diagnostic had a hardcoded 0x90 amplifier check and
+therefore stopped the ADC-on trial before playback. The corrected
+diagnostic accepted the two observed block enables, 0x90 and 0x93.
+Playback completed in both cases. Readbacks matched #58 for UAIF4
+control and SPUM, and WDMA1 showed initial progress after it was
+enabled, but the ALSA capture returned EIO with zero recorded frames
+in both cases. That capture does not resolve whether the amplifier
+received the PCM. The VPN2 capture transport needs a positive
+control of its own.
+
+Leaving the amplifier ADCs enabled, compared the #58 SPUM ASRC1
+setting with ASRC1 bypassed on VPN2. With ASRC1 enabled, the WDMA
+pointer initially advanced a few bytes, followed by the same EIO.
+Bypassing only ASRC1 (SPUM0 0x12 to 0x02) let WDMA1 and ALSA record
+216,000 frames without errors. Every sample was zero, including
+snapshots of the coherent DMA buffer throughout the test signal.
+This separates the VPN2 capture stall from the lack of the
+expected nonzero amplifier feedback. It still does not establish
+which side of the UAIF4 link lost the signal.
+
+With SPUM ASRC1 also bypassed on #58, the same signal and
+ADC-on fixture produced 288,000 frames with nonzero feedback and a
+peak of 940 counts. Bypassing ASRC1 alone therefore does not suppress
+valid feedback. During separate active playback, read 36 MAX98506
+registers directly from silicon on both kernels, twice per run.
+All 36 values matched at both active sample points, including the
+I2S format, BCLK source, receive and feedback slots, live status,
+boost, blocks 0x93 and global enable 0x80. At idle the vendor format
+was 0xc2 rather than 0x42, consistent with a pre-stream format,
+and matched once playback was active. The snapshot module only
+read registers. Calibration and protection values were untouched.
+
+Isolated UAIF4 BCLK polarity on VPN2 using the documented Samsung
+CTRL1 bit 23. The two active format readbacks were 0x0984f000 and
+0x0904f000. No other format bit or amplifier setting changed;
+ADC monitoring stayed on and capture ASRC1 stayed bypassed.
+Each ALSA playback and feedback capture completed with 216,000
+captured frames and all-zero samples. Neither sampling polarity
+restored the expected voltage/current return. The remaining gap
+is between the qualified SIFS1 PCM and the amplifier feedback:
+the tests cannot separate the outbound serial data from the
+amp's analog stage or the serial feedback return. No permanent
+speaker change was applied.
+
+Qualified the VPN2 feedback capture transport with a positive
+control in the same boot, keeping UAIF4 TX and RX active, the
+amp ADCs enabled, SPUM ASRC1 bypassed and the same WDMA1 buffer.
+Changing only NSRC0 from UAIF4 (route 0x0000c00c) to SIFS1
+(0x0000c002) changed the capture from 216,000 zero frames to
+216,000 frames with the expected tones, peaking at 5,899 counts.
+This verifies that the 6.18 diagnostic can record a real signal
+from the internal SIFS1 tap under the same stream setup. The
+remaining failure is beyond that tap or in the amp feedback
+return. It is reproducible without changing the recording API.
