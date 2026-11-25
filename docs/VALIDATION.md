@@ -7484,3 +7484,48 @@ free in a later snapshot. These are display-path errors. There is no
 event-level evidence yet tying them to the physical rotation symptom
 or proving that CMA pressure is the cause. The sensor matrix, GNOME
 settings and installed kernel were left unchanged.
+
+
+## 2026-11-26 — DECON allocation under native GNOME Wayland
+
+On the running 96 MiB display pool, a non-modesetting DRM test
+allocated a 720×1480 dumb buffer and imported it into the Panfrost
+render node. The same code returned ENOMEM from CREATE_DUMB for
+1440×2960 and 2960×1440. Ordinary Panfrost shmem allocations exported
+as DMA-BUF but could not be imported into DECON.
+
+Applied proposal 0146 to a copy of the reviewed board tree. The
+packed trial changed exactly one embedded DTB size cell plus the
+boot-header image ID. The kernel payload, initramfs, outer Samsung
+DT and load addresses were verified against the running reference.
+Made a fresh private recovery backup, flashed BOOT only, and
+verified readback and protected partition digests.
+
+The 160 MiB display pool booted on the same kernel release. The
+DRM test allocated and shared both panel-sized geometries. Mesa
+GBM allocated three concurrent linear scanout buffers in each
+geometry. An additional EGL test identified Panfrost/Mali-G71 and
+rendered into three DECON GBM buffers without changing the panel
+mode. This passed three runs after an earlier ENOMEM in that test.
+
+GNOME held the DECON card and Panfrost render node, and still
+managed orientation. USB SSH returned, Wi-Fi was connected, the
+location hub was active and PipeWire kept the built-in bottom
+speaker as the default output. Retained the BOOT and removed the
+trial return timer. The speaker route was checked without replay.
+
+Over the first 203 seconds, the journal still had 51 GNOME Mesa
+scanout-resource messages and six DECON SWIOTLB failures. The
+preceding boot had 1227 Mesa messages and ten DECON failures in
+a longer observation with different workloads. The counts do not
+quantify the improvement under a controlled workload. General
+Panfrost shmem imports still failed. The enlarged pool improves
+allocation headroom. It does not establish elimination of graphics
+errors, a DRM presentation timing improvement or correct physical
+rotation in all four positions.
+
+Samsung's Exynos8895 DTS describes the active G0 IDMA register
+bank as a client of DPU1 SysMMU at 0x12910000. The current DECON
+handoff binds the G0 bank, keeps the boot framebuffer available
+and has no translated DPU1 domain. A future domain handoff needs
+to preserve that framebuffer while changing scanout translations.

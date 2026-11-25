@@ -3031,3 +3031,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Confirmed front S5K3H1 sensor reads and CSI frame events after a
   normal reboot with the CAM0 translated buffer driver bound.
+
+
+## 2026-11-26 — More low-address CMA for DECON scanout
+
+- Raised the SM-G955N DECON-only reusable DMA pool from 96 to 160 MiB.
+- Verified full-panel DECON allocation, PRIME imports into Panfrost
+  and hardware rendering on the existing stock Wayland desktop.
