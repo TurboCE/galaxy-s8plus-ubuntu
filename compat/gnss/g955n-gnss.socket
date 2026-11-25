@@ -1,5 +1,6 @@
 [Unit]
 Description=SM-G955N GNSS NMEA stream for GeoClue
+ConditionKernelVersion=4.4.*-g955n-ubuntu*
 
 [Socket]
 ListenStream=/run/g955n-gnss/nmea.sock

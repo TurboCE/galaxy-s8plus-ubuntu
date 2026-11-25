@@ -1,5 +1,6 @@
 [Unit]
 Description=SM-G955N GNSS acquisition for GeoClue
+ConditionKernelVersion=4.4.*-g955n-ubuntu*
 Requires=g955n-gnss-bsp.service
 BindsTo=g955n-location-hub.service
 Wants=g955n-gnss-assist.service g955n-gnss-lto.service

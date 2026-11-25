@@ -1,5 +1,6 @@
 [Unit]
 Description=Prepare the SM-G955N vendor GNSS paths
+ConditionKernelVersion=4.4.*-g955n-ubuntu*
 Requires=g955n-hardware.service
 After=g955n-hardware.service g955n-native-gpu-prepare.service
 Before=g955n-location-hub.service

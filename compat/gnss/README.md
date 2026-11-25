@@ -24,6 +24,11 @@ and a nonzero stop result.
 
 ## Ubuntu Location Services
 
+The receiver bridge below uses the Samsung 4.4 board services. On
+Linux 6.18 use the network-only `70-g955n-network-location.conf` profile
+until a native receiver path is qualified. A network fix does not
+qualify a satellite fix.
+
 The desktop integration connects GeoClue to `/run/g955n-gnss/nmea.sock`.
 The socket admits the GeoClue account and activates the Samsung GNSS engine
 on demand. The relay forwards checksum-valid receiver sentences. The vendor
