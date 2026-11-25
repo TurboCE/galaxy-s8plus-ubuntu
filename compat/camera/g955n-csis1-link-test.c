@@ -29,8 +29,6 @@
 #define CAM_DMA_QE_QCH		0x3038
 #define CAM_GATE_MANUAL		BIT(20)
 #define CAM_GATE_AUTO		BIT(28)
-#define CAM_QCH_ENABLE		BIT(0)
-#define CAM_QCH_REQUEST		BIT(1)
 #define CAM_SYSREG_RESET	0x12c21050
 #define CAM_CSIS1_RESET		BIT(2)
 #define CAM_CSIS3_RESET		BIT(3)
@@ -77,7 +75,10 @@
 
 static bool clock_status;
 module_param(clock_status, bool, 0400);
-MODULE_PARM_DESC(clock_status, "Read only the CAM CMU clocks used by CSIS1 and shared DMA");
+MODULE_PARM_DESC(clock_status, "Read the three CSIS1 gates with the camera bus enabled");
+static uint clock_register;
+module_param(clock_register, uint, 0400);
+MODULE_PARM_DESC(clock_register, "Read one selected CAM CMU mux, DMA gate or Q-channel offset");
 
 /* Claim only these registers. The CAM0 System MMU owns its separate gate. */
 static int g955n_csis1_clock_read(u32 offset, u32 *value)
@@ -127,26 +128,11 @@ static int g955n_csis1_clock_status(void)
 		{ CAM_CSIS1_ACLK, "CSIS1 ACLK" },
 		{ CAM_CSIS1_APB_ASYNCM, "CSIS1 async master" },
 		{ CAM_CSIS1_APB_ASYNCS, "CSIS1 async peripheral" },
-		{ CAM_DMA_ACLK, "CSISx4 DMA ACLK" },
-		{ CAM_DMA_APB_ASYNCM, "CSISx4 DMA async master" },
-		{ CAM_DMA_APB_ASYNCS, "CSISx4 DMA async peripheral" },
-	};
-	static const struct {
-		u32 offset;
-		const char *name;
-	} qch[] = {
-		{ CAM_DMA_QCH, "CSISx4 DMA" },
-		{ CAM_DMA_QE_QCH, "CSISx4 DMA QoS" },
 	};
 	unsigned int i;
 	u32 value;
 	int ret;
 
-	pr_info(KBUILD_MODNAME ": CAM CMU snapshot begin\n");
-	ret = g955n_csis1_clock_read(CAM_BUS_USER, &value);
-	if (ret)
-		return ret;
-	pr_info(KBUILD_MODNAME ": CAM bus user=%#08x\n", value);
 	for (i = 0; i < ARRAY_SIZE(gates); i++) {
 		ret = g955n_csis1_clock_read(gates[i].offset, &value);
 		if (ret)
@@ -155,15 +141,36 @@ static int g955n_csis1_clock_status(void)
 			gates[i].name, value, !!(value & CAM_GATE_MANUAL),
 			!!(value & CAM_GATE_ON), !!(value & CAM_GATE_AUTO));
 	}
-	for (i = 0; i < ARRAY_SIZE(qch); i++) {
-		ret = g955n_csis1_clock_read(qch[i].offset, &value);
-		if (ret)
-			return ret;
-		pr_info(KBUILD_MODNAME ": %s Q-channel=%#08x enable=%u request=%u\n",
-			qch[i].name, value, !!(value & CAM_QCH_ENABLE),
-			!!(value & CAM_QCH_REQUEST));
+	pr_info(KBUILD_MODNAME ": CSIS1 gate snapshot complete\n");
+	return 0;
+}
+
+static bool g955n_csis1_has_clock_register(uint offset)
+{
+	switch (offset) {
+	case CAM_BUS_USER:
+	case CAM_DMA_ACLK:
+	case CAM_DMA_APB_ASYNCM:
+	case CAM_DMA_APB_ASYNCS:
+	case CAM_DMA_QCH:
+	case CAM_DMA_QE_QCH:
+		return true;
+	default:
+		return false;
 	}
-	pr_info(KBUILD_MODNAME ": CAM CMU snapshot complete\n");
+}
+
+static int g955n_csis1_read_selected_clock(void)
+{
+	u32 value;
+	int ret;
+
+	pr_notice(KBUILD_MODNAME ": before CAM CMU register %#x\n", clock_register);
+	ret = g955n_csis1_clock_read(clock_register, &value);
+	if (ret)
+		return ret;
+	pr_notice(KBUILD_MODNAME ": after CAM CMU register %#x value %#010x\n",
+		  clock_register, value);
 	return 0;
 }
 
@@ -363,6 +370,9 @@ static int __init g955n_csis1_link_test(void)
 
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
+	if (clock_register &&
+	    (clock_status || !g955n_csis1_has_clock_register(clock_register)))
+		return -EINVAL;
 	pmu = syscon_regmap_lookup_by_compatible("samsung,exynos8895-pmu");
 	if (IS_ERR(pmu))
 		return PTR_ERR(pmu);
@@ -371,10 +381,6 @@ static int __init g955n_csis1_link_test(void)
 		return ret;
 	if ((state & CAM_PWR_MASK) != CAM_PWR_MASK)
 		return -EACCES;
-	if (clock_status) {
-		ret = g955n_csis1_clock_status();
-		return ret ?: -EAGAIN;
-	}
 	spec.np = of_find_node_by_path("/soc@0/clock-controller@15a80000");
 	if (!spec.np)
 		return -ENODEV;
@@ -392,9 +398,16 @@ static int __init g955n_csis1_link_test(void)
 		goto put;
 	ret = clk_prepare_enable(bus);
 	if (!ret) {
-		pr_info("g955n-csis1-link-test: CAM clock %lu Hz in reception window\n",
+		pr_info("g955n-csis1-link-test: CAM clock %lu Hz in probe window\n",
 			clk_get_rate(bus));
-		ret = clk_get_rate(bus) == 133250000 ? g955n_csis1_test(pmu) : -ERANGE;
+		if (clk_get_rate(bus) != 133250000)
+			ret = -ERANGE;
+		else if (clock_register)
+			ret = g955n_csis1_read_selected_clock();
+		else if (clock_status)
+			ret = g955n_csis1_clock_status();
+		else
+			ret = g955n_csis1_test(pmu);
 		clk_disable_unprepare(bus);
 	}
 	clk_rate_exclusive_put(bus);

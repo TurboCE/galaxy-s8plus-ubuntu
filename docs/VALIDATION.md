@@ -7690,3 +7690,30 @@ bottom speaker remained the default PipeWire sink. The test did
 not replay audio or repeat physical rotation and touch. The 32 MiB
 global CMA and the previously verified sensor rule were left in
 place. Removed the trial return timer and retained the tested BOOT.
+
+
+## 2026-11-26 — Camera clock snapshots and handset recovery
+
+On the retained DPU1 boot, USB-network SSH, Tailscale and the serial
+console stopped responding while the idle CAM CMU snapshot ran.
+After a normal restart the handset returned. A second snapshot
+limited to the three CSIS1 gates also interrupted response. This
+second test still ran before acquiring the camera bus clock.
+The archived synchronous abort belongs to the older optional CAM0
+capability read. No new record in pstore or the previous journal
+identified a failing instruction in either clock snapshot.
+
+The previously successful link test reads those three gates after
+enabling the camera bus at 133.25 MHz. Changed the source to use
+that same clock ownership and rate window for snapshots. The link
+snapshot reads only its three gates. An additional CAM CMU read
+requires one individually allowlisted offset, with markers before
+and after the read. ARM64 W=1 build passed. The changed diagnostics
+were not run on the handset after the second restart.
+
+After the second restart, the retained BOOT checksum, absence of
+the DECON-only CMA pool, active DPU1 domain and both directions of
+full-size PRIME sharing were verified again. GDM, USB SSH, the
+location hub and Wi-Fi returned. PipeWire reported the built-in
+bottom speaker as default. The diagnostic never enabled camera DMA
+or wrote BOOT, and camera pixel capture remains unverified.

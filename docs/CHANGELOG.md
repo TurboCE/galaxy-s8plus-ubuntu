@@ -3056,3 +3056,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Dropped the 160 MiB display-only pool when using DPU1-translated
   scanout. The 32 MiB global CMA pool remains available.
+
+
+## 2026-11-26 — Isolate camera clock diagnostics
+
+- Moved the CSIS1 clock snapshots into the enabled camera bus window
+  and made each extra DMA clock register an explicit one-shot selection.

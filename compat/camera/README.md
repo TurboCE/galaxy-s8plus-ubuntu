@@ -117,12 +117,13 @@ from the automatic clock-gating bit. The common DMA register window
 starts at 0x12ce0000. A gate snapshot alone does not establish that
 the common block is accessible.
 
-Load the link module with `clock_status=1` to take an idle CAM CMU
-snapshot. The module reports each gate's raw, manual, gate and
-automatic fields and both Q-channel enable and request fields. This
-path validates CAM power first and touches only the clock controller.
-It performs no clock writes, receiver accesses or DMA test. The
-module returns EAGAIN after a complete snapshot so it can be repeated.
+`clock_status=1` reports the three CSIS1 gates. `clock_register=` selects
+one additional, allowlisted CAM CMU register and logs immediately before
+and after that read. Both modes hold the camera bus at the same enabled
+rate as the link test, then restore the initial rate. Neither accesses
+the receiver or runs DMA. They return EAGAIN after a completed snapshot.
+Read-only snapshots without the bus hold interrupted handset response.
+The new diagnostic sequence has been built and awaits hardware validation.
 
 For the front sensor's SBGGR10 mode, Samsung's receiver uses legacy
 2D RAW10 storage with the PACK12 flag set and the parallel DMA input.
