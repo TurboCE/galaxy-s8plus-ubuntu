@@ -8,6 +8,8 @@
 #include <linux/regmap.h>
 #include <linux/workqueue.h>
 
+#include "g955n-max77865-rgb.h"
+
 #define MAX77865_PMIC_ID	0x00
 #define MAX77865_MAINCTRL1	0x02
 #define MAX77865_MOTOR_CONFIG	0x10
@@ -206,7 +208,7 @@ static int g955n_haptic_probe(struct i2c_client *client)
 	static const struct regmap_config config = {
 		.reg_bits = 8,
 		.val_bits = 8,
-		.max_register = MAX77865_MOTOR_CONFIG,
+		.max_register = G955N_MAX77865_RGB_LAST_REG,
 	};
 	struct device *dev = &client->dev;
 	struct g955n_haptic *haptic;
@@ -263,7 +265,16 @@ static int g955n_haptic_probe(struct i2c_client *client)
 	if (ret)
 		return ret;
 	i2c_set_clientdata(client, haptic);
-	return input_register_device(input);
+	ret = input_register_device(input);
+	if (ret)
+		return ret;
+
+	if (IS_REACHABLE(CONFIG_LEDS_CLASS)) {
+		ret = g955n_max77865_rgb_register(dev, haptic->regmap);
+		if (ret)
+			dev_warn(dev, "notification LED registration failed: %d\n", ret);
+	}
+	return 0;
 }
 
 static void g955n_haptic_shutdown(struct i2c_client *client)

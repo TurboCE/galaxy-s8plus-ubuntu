@@ -2810,3 +2810,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Extended the read-only MAX77865 probe to confirm the notification
   LED register block on the same handset and I²C address as haptics.
+
+## 2026-11-25 — Expose the MAX77865 notification LEDs
+
+- Added three standard Linux LED class devices with Samsung current
+  limits, a shared haptic regmap, and a standalone LED-only binding.
+  Verified each color's on and off register state on the handset.

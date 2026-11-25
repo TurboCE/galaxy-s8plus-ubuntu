@@ -6747,3 +6747,18 @@ the known-good BCM4773 clock and SPI overlay exactly. The corrected
 build config enables only PWM, Samsung PWM and FF memless relative to
 the integrated kernel. No corrected BOOT had been installed at the
 time of this entry.
+
+## 2026-11-25 — Notification LED class on the original BOOT
+
+Built the LED-only module and the combined PWM-capable modules
+for ARM64 with `W=1`. On the verified integrated BOOT, temporarily
+bound the LED-only driver to MAX77865 address 0x66. Linux exposed
+red, green and blue indicator class devices, with maximum current
+codes 82, 7 and 15 from the Samsung normal-mode ratios. Each
+channel read back level 3 after a sysfs brightness request and
+zero after switching off. Removed the temporary I²C client after
+all three outputs returned to off. GNOME, OLED backlight and
+the BCM4773 service were still active.
+
+This test verifies LED class and register delivery. Optical output
+and combined haptic and LED operation after reboot remain open.

@@ -19,7 +19,7 @@ it does not qualify a device on the current mainline boot.
 | LTE | ModemManager is active and lists no modem. | Securely bring up the Exynos modem transport, then validate SIM registration and mobile data in NetworkManager. |
 | Cameras and iris sensor | No video device. Samsung's board source lists alternatives for the front and rear sensor modules, so the actual variant must be identified. | Qualify capture through the Linux media stack and a standard Ubuntu camera app. Iris functionality needs a separate userspace interface and security review. |
 | NFC | The handset's own firmware inventory identifies S3NRN82. Samsung's board DTS shows the I²C address and GPIOs, and the vendor driver controls the NFC supply and an AP clock. The Linux 6.18 S3FWRN5 I²C match table does not include this variant. | Qualify the exact I²C transport, clock and supply before attempting read-only tag discovery. Exposing a controller is separate from card emulation or payment support. |
-| Fingerprint, haptics and LEDs | No fingerprint service or LED class devices observed. No haptics event device. | Identify and qualify the actual board interfaces, then prove fingerprint enrollment/unlock, force feedback, and LED output separately. |
+| Fingerprint, haptics and LEDs | No fingerprint service observed. A MAX77865 trial produced force-feedback vibration. A separate LED-class trial verified RGB on/off register state. | Validate the combined MAX77865 driver with the integrated sensor kernel, measure LED light output, and qualify fingerprint enrollment and unlock. |
 
 The legacy GNSS socket and its daemons require the Samsung 4.4 board-service
 stack. On the mainline boot the unit files now match that kernel requirement.

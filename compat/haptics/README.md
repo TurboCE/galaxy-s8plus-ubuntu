@@ -31,3 +31,13 @@ the same PMIC address. Stock Dream2 maps red, green and blue to
 MAX77865 outputs 1, 2 and 3. The handset reported all three off.
 A future Linux LED class driver must share the existing PMIC client
 with haptics.
+
+The notification LED driver registers `red:indicator`,
+`green:indicator`, and `blue:indicator`. It limits each channel
+to the corresponding Samsung normal-mode current value and
+reads the current and enable state back from the PMIC. The
+PWM haptic driver shares its regmap with these LED class devices.
+For a kernel without PWM, an explicit LED-only I²C binding is
+available at the same address. The handset passed a temporary
+LED-only trial on the known-good BOOT. Each color was switched to
+level 3 and back to off through the Linux LED class.
