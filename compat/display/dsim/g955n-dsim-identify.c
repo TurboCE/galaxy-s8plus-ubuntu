@@ -9,7 +9,15 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/regmap.h>
+#include <linux/slab.h>
 #include <video/mipi_display.h>
+
+#ifdef G955N_WITH_BACKLIGHT
+#include <linux/backlight.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
+#include <linux/suspend.h>
+#endif
 
 #ifdef G955N_WITH_AID
 #include "g955n-panel-profile.h"
@@ -61,6 +69,12 @@ MODULE_PARM_DESC(test_aor, "Temporarily dim via AOR and verify restoration");
 static int test_brightness = -1;
 module_param(test_brightness, int, 0400);
 MODULE_PARM_DESC(test_brightness, "Apply and restore a Samsung brightness level from 0 to 255");
+#endif
+
+#ifdef G955N_WITH_BACKLIGHT
+static bool enable_backlight;
+module_param(enable_backlight, bool, 0400);
+MODULE_PARM_DESC(enable_backlight, "Register the OLED with Linux backlight");
 #endif
 
 #define S6E3HA6_MTP		0xc8
@@ -351,6 +365,7 @@ static int g955n_dsim_test_profile(void __iomem *dsi)
 {
 	struct g955n_panel_profile saved, trial;
 	u8 mtp[S6E3HA6_MTP_LEN];
+	struct g955n_gamma_table *table;
 	int ret, restore;
 
 	ret = g955n_dsim_read_profile(dsi, &saved);
@@ -360,10 +375,16 @@ static int g955n_dsim_test_profile(void __iomem *dsi)
 		return ret;
 
 	trial = saved;
+	table = kzalloc(sizeof(*table), GFP_KERNEL);
+	if (!table)
+		return -ENOMEM;
 	ret = g955n_dsim_read(dsi, S6E3HA6_MTP, mtp, sizeof(mtp));
 	if (!ret)
-		ret = g955n_build_panel_profile(mtp, test_brightness, &trial);
+		ret = g955n_compile_gamma(mtp, table);
 	memzero_explicit(mtp, sizeof(mtp));
+	if (!ret)
+		ret = g955n_build_panel_profile(table, test_brightness, &trial);
+	kfree_sensitive(table);
 	if (ret)
 		return ret;
 	if (!memcmp(&saved, &trial, sizeof(saved)))
@@ -414,12 +435,184 @@ static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
 			address, len);
 #ifdef G955N_WITH_AID
 	if (!ret && address == S6E3HA6_MTP)
-		ret = g955n_aid_verify(first);
+		ret = g955n_compile_gamma(first, NULL);
 #endif
 	memzero_explicit(first, sizeof(first));
 	memzero_explicit(second, sizeof(second));
 	return ret;
 }
+
+#ifdef G955N_WITH_BACKLIGHT
+static struct {
+	void __iomem *dsi;
+	struct regmap *pmu;
+	struct backlight_device *device;
+	struct g955n_gamma_table gamma;
+	struct g955n_panel_profile applied;
+	int level;
+	bool suspended;
+} g955n_backlight;
+
+static DEFINE_MUTEX(g955n_backlight_lock);
+
+static int g955n_dsim_display_powered(struct regmap *pmu)
+{
+	unsigned int power;
+	int ret = regmap_read(pmu, DISP_POWER_STATUS, &power);
+
+	if (ret)
+		return ret;
+	return (power & DISP_POWER_MASK) == DISP_POWER_MASK ? 0 : -EHOSTDOWN;
+}
+
+static int g955n_capture_backlight(void __iomem *dsi)
+{
+	u8 mtp[S6E3HA6_MTP_LEN];
+	int ret;
+
+	ret = g955n_dsim_read_profile(dsi, &g955n_backlight.applied);
+	if (!ret)
+		ret = g955n_dsim_check_profile(dsi, &g955n_backlight.applied);
+	if (!ret)
+		ret = g955n_dsim_read(dsi, S6E3HA6_MTP, mtp, sizeof(mtp));
+	if (!ret)
+		ret = g955n_compile_gamma(mtp, &g955n_backlight.gamma);
+	memzero_explicit(mtp, sizeof(mtp));
+	if (!ret)
+		g955n_backlight.level = g955n_estimate_panel_brightness(&g955n_backlight.applied);
+	return ret;
+}
+
+static int g955n_backlight_apply(unsigned int level)
+{
+	void __iomem *dsi = g955n_backlight.dsi;
+	struct g955n_panel_profile next = g955n_backlight.applied;
+	u32 timeout;
+	int ret, lock_error;
+
+	ret = g955n_dsim_display_powered(g955n_backlight.pmu);
+	if (!ret)
+		ret = g955n_dsim_ready(dsi);
+	if (ret)
+		return ret;
+
+	ret = g955n_build_panel_profile(&g955n_backlight.gamma, level, &next);
+	if (ret)
+		return ret;
+
+	timeout = readl(dsi + DSIM_TIMEOUT);
+	writel((timeout & ~DSIM_BTA_TIMEOUT) |
+	       FIELD_PREP(DSIM_BTA_TIMEOUT, G955N_BTA_WAIT), dsi + DSIM_TIMEOUT);
+	ret = g955n_dsim_long3(dsi, 0xf0, 0x5a, 0x5a);
+	if (!ret) {
+		ret = g955n_dsim_write_profile(dsi, &next);
+		if (!ret)
+			ret = g955n_dsim_check_profile(dsi, &next);
+		if (ret && g955n_dsim_write_profile(dsi, &g955n_backlight.applied))
+			pr_err("g955n-dsim: failed to roll back brightness\n");
+	}
+	lock_error = g955n_dsim_long3(dsi, 0xf0, 0xa5, 0xa5);
+	writel(timeout, dsi + DSIM_TIMEOUT);
+
+	if (lock_error) {
+		pr_err("g955n-dsim: failed to send brightness lock key: %d\n",
+		       lock_error);
+		return lock_error;
+	}
+	if (ret)
+		return ret;
+
+	g955n_backlight.applied = next;
+	WRITE_ONCE(g955n_backlight.level, level);
+	pr_info("g955n-dsim: Linux backlight level %u verified at panel\n", level);
+	return 0;
+}
+
+static int g955n_backlight_update(struct backlight_device *device)
+{
+	int ret = 0;
+
+	mutex_lock(&g955n_backlight_lock);
+	/* DECON owns display blanking. Avoid DSI transactions during sleep. */
+	if (g955n_backlight.suspended)
+		ret = -EAGAIN;
+	else if (!backlight_is_blank(device) && device->props.brightness != g955n_backlight.level)
+		ret = g955n_backlight_apply(device->props.brightness);
+	mutex_unlock(&g955n_backlight_lock);
+	return ret;
+}
+
+static int g955n_backlight_get(struct backlight_device *device)
+{
+	return READ_ONCE(g955n_backlight.level);
+}
+
+static const struct backlight_ops g955n_backlight_ops = {
+	.update_status = g955n_backlight_update,
+	.get_brightness = g955n_backlight_get,
+};
+
+static int g955n_backlight_pm(struct notifier_block *nb, unsigned long event, void *unused)
+{
+	mutex_lock(&g955n_backlight_lock);
+	switch (event) {
+	case PM_SUSPEND_PREPARE:
+	case PM_HIBERNATION_PREPARE:
+	case PM_RESTORE_PREPARE:
+		g955n_backlight.suspended = true;
+		break;
+	case PM_POST_SUSPEND:
+	case PM_POST_HIBERNATION:
+	case PM_POST_RESTORE:
+		g955n_backlight.suspended = false;
+		break;
+	}
+	mutex_unlock(&g955n_backlight_lock);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block g955n_backlight_pm_notifier = {
+	.notifier_call = g955n_backlight_pm,
+};
+
+static int g955n_register_backlight(void __iomem *dsi, struct regmap *pmu)
+{
+	struct backlight_properties props = {
+		.type = BACKLIGHT_RAW,
+		.max_brightness = 255,
+		.brightness = g955n_backlight.level,
+		.scale = BACKLIGHT_SCALE_NON_LINEAR,
+	};
+	struct platform_device *decon;
+	struct device_node *node;
+	int ret;
+
+	node = of_find_compatible_node(NULL, NULL, "samsung,sm-g955n-decon-handoff-test");
+	if (!node)
+		return -ENODEV;
+	decon = of_find_device_by_node(node);
+	of_node_put(node);
+	if (!decon)
+		return -ENODEV;
+
+	g955n_backlight.dsi = dsi;
+	g955n_backlight.pmu = pmu;
+	ret = register_pm_notifier(&g955n_backlight_pm_notifier);
+	if (!ret) {
+		g955n_backlight.device = backlight_device_register("g955n-panel",
+					&decon->dev, NULL, &g955n_backlight_ops, &props);
+		if (IS_ERR(g955n_backlight.device)) {
+			ret = PTR_ERR(g955n_backlight.device);
+			unregister_pm_notifier(&g955n_backlight_pm_notifier);
+		}
+	}
+	put_device(&decon->dev);
+	if (!ret)
+		pr_info("g955n-dsim: registered Linux backlight, initial estimated level %d\n",
+			props.brightness);
+	return ret;
+}
+#endif
 
 static int g955n_dsim_check_calibration(void __iomem *dsi)
 {
@@ -448,6 +641,11 @@ static int g955n_dsim_check_calibration(void __iomem *dsi)
 		ret = g955n_dsim_check_aor(dsi);
 	if (!ret && test_brightness >= 0)
 		ret = g955n_dsim_test_profile(dsi);
+#endif
+
+#ifdef G955N_WITH_BACKLIGHT
+	if (!ret && enable_backlight)
+		ret = g955n_capture_backlight(dsi);
 #endif
 
 	while (opened) {
@@ -503,6 +701,10 @@ static int __init g955n_dsim_identify(void)
 	if (test_brightness < -1 || test_brightness > 255)
 		return -ERANGE;
 #endif
+#ifdef G955N_WITH_BACKLIGHT
+	if (enable_backlight && (!read_calibration || test_aor || test_brightness >= 0))
+		return -EINVAL;
+#endif
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
 
@@ -532,6 +734,14 @@ static int __init g955n_dsim_identify(void)
 		readl(dsi + DSIM_TIMEOUT), readl(dsi + DSIM_CMD_CONFIG));
 	if (read_id || read_calibration)
 		ret = g955n_dsim_identify_panel(dsi);
+#ifdef G955N_WITH_BACKLIGHT
+	if (!ret && enable_backlight) {
+		ret = g955n_register_backlight(dsi, pmu);
+		if (!ret)
+			return 0;
+	}
+	memzero_explicit(&g955n_backlight.gamma, sizeof(g955n_backlight.gamma));
+#endif
 	iounmap(dsi);
 
 release:
@@ -539,6 +749,21 @@ release:
 	return ret;
 }
 module_init(g955n_dsim_identify);
+
+#ifdef G955N_WITH_BACKLIGHT
+static void __exit g955n_dsim_exit(void)
+{
+	if (!enable_backlight)
+		return;
+
+	backlight_device_unregister(g955n_backlight.device);
+	unregister_pm_notifier(&g955n_backlight_pm_notifier);
+	iounmap(g955n_backlight.dsi);
+	release_mem_region(DSIM_BASE, DSIM_SIZE);
+	memzero_explicit(&g955n_backlight.gamma, sizeof(g955n_backlight.gamma));
+}
+module_exit(g955n_dsim_exit);
+#endif
 
 MODULE_DESCRIPTION("SM-G955N inherited DSI status and panel identification");
 MODULE_LICENSE("GPL");

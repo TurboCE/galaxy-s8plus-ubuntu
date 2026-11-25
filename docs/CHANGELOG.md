@@ -2761,3 +2761,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added the Samsung normal-brightness profile builder and an opt-in
   reversible panel test. The live panel accepted all eight brightness
   registers and returned the original profile after restoration.
+
+## 2026-11-25 — Expose the OLED through Linux backlight
+
+- Added standard backlight registration and cached gamma profiles.
+  Validated stock GNOME power service brightness requests through
+  to the real OLED registers on the running 6.18 handset.

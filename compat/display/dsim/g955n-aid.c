@@ -7,8 +7,6 @@
 
 #include "g955n-panel-profile.h"
 
-#define DREAM2_GAMMA_LEN 35
-
 int g955n_aor_trial_value(const u8 saved[2], u8 trial[2])
 {
 	unsigned int baseline = (saved[0] << 8) | saved[1];
@@ -49,12 +47,14 @@ static void dream2_decode_mtp(struct tp *tp, const u8 *mtp)
 	tp[0].offset[BLUE] = mtp[pos + 1] & 0x0f;
 }
 
-static int g955n_generate_gamma(const u8 *mtp, unsigned int selected, u8 *output)
+int g955n_compile_gamma(const u8 *mtp, struct g955n_gamma_table *table)
 {
 	struct dimming_tp_output *points;
 	struct dimming_info *dim;
-	u8 gamma[DREAM2_GAMMA_LEN], first[DREAM2_GAMMA_LEN];
+	u8 gamma[G955N_GAMMA_LEN], first[G955N_GAMMA_LEN];
 	int row, ret = -ENOMEM;
+
+	static_assert(G955N_GAMMA_ROWS == S6E3HA6_NR_LUMINANCE);
 
 	dim = kzalloc(sizeof(*dim), GFP_KERNEL);
 	if (!dim)
@@ -92,8 +92,8 @@ static int g955n_generate_gamma(const u8 *mtp, unsigned int selected, u8 *output
 		}
 		if (!row)
 			memcpy(first, gamma, sizeof(first));
-		if (output && row == selected)
-			memcpy(output, gamma, sizeof(gamma));
+		if (table)
+			memcpy(table->rows[row], gamma, sizeof(gamma));
 	}
 	if (!memcmp(first, gamma, sizeof(gamma))) {
 		ret = -ENODATA;
@@ -113,17 +113,38 @@ free:
 	return ret;
 }
 
-int g955n_aid_verify(const u8 *mtp)
+static unsigned int g955n_brightness_step(unsigned int brightness)
 {
-	return g955n_generate_gamma(mtp, 0, NULL);
+	unsigned int step = 0;
+
+	while (dream2_a3_sa_brt_to_step_tbl[step] < brightness * 100)
+		step++;
+	return step;
 }
 
-int g955n_build_panel_profile(const u8 *mtp, unsigned int brightness,
+int g955n_estimate_panel_brightness(const struct g955n_panel_profile *profile)
+{
+	unsigned int brightness, best = 0;
+	unsigned int smallest = UINT_MAX;
+	int saved = (profile->aor[0] << 8) | profile->aor[1];
+
+	for (brightness = 0; brightness <= 255; brightness++) {
+		const u8 *aor = dream2_a3_sa_aor_table[g955n_brightness_step(brightness)];
+		unsigned int delta = abs(((aor[0] << 8) | aor[1]) - saved);
+
+		if (delta < smallest) {
+			smallest = delta;
+			best = brightness;
+		}
+	}
+	return best;
+}
+
+int g955n_build_panel_profile(const struct g955n_gamma_table *table, unsigned int brightness,
 			      struct g955n_panel_profile *profile)
 {
-	unsigned int row = 0, step = 0, plane = 0;
+	unsigned int row = 0, step, plane = 0;
 	u8 tset = profile->elvss[0];
-	int ret;
 
 	if (brightness > 255)
 		return -ERANGE;
@@ -137,12 +158,8 @@ int g955n_build_panel_profile(const u8 *mtp, unsigned int brightness,
 	/* Samsung uses the first entry at or above the scaled brightness. */
 	while (dream2_a3_sa_brt_tbl[row] < brightness * 100)
 		row++;
-	while (dream2_a3_sa_brt_to_step_tbl[step] < brightness * 100)
-		step++;
-
-	ret = g955n_generate_gamma(mtp, row, profile->gamma);
-	if (ret)
-		return ret;
+	step = g955n_brightness_step(brightness);
+	memcpy(profile->gamma, table->rows[row], sizeof(profile->gamma));
 
 	memcpy(profile->aor, dream2_a3_sa_aor_table[step], sizeof(profile->aor));
 	memcpy(profile->irc, dream2_a3_sa_irc_table[step], sizeof(profile->irc));

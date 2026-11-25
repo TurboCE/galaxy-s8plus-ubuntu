@@ -6601,3 +6601,24 @@ keys were sent and the DSIM timeout read back as `0x00ffffff`.
 GDM and the BCM4773 daemon remained active. This measured register
 state. Physical luminance and the GNU/Linux backlight client path
 remain unverified.
+
+## 2026-11-25 — Linux backlight and stock GNOME manual brightness
+
+The existing VPN2 kernel has no built-in backlight class. Built
+the matching upstream 6.18 backlight core as a temporary module,
+then built the Dream2 A3 driver with its exported symbols and
+`W=1`. The live probe registered the raw backlight with range 0–255
+and estimated the inherited level as 128 without writing it.
+Direct sysfs requests for 100 and 128 matched actual brightness
+and all eight verified panel registers.
+
+Temporarily restarted only the user GNOME power service with the
+packaged `/usr/libexec/gsd-power` executable and automatic brightness
+disabled. GNOME D-Bus reported 50 percent on startup. Requests for
+39 and 50 percent produced actual device levels 101 and 129,
+respectively. Kernel readback confirmed the expected OLED profiles.
+The temporary service override was removed and the previous service
+and ambient setting were restored. Wi-Fi, DSI, the sensor hub and
+the bottom-speaker routing remained available. Integrated boot,
+suspend/resume, automatic brightness response and optical
+luminance have not yet been validated.

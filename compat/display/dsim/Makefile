@@ -7,3 +7,10 @@ CFLAGS_aid-source/dimming.o += -Wno-missing-prototypes -Wno-missing-declarations
 else
 obj-m := g955n-dsim-identify.o
 endif
+
+ifeq ($(G955N_WITH_BACKLIGHT),1)
+ifneq ($(G955N_WITH_AID),1)
+$(error G955N_WITH_BACKLIGHT requires G955N_WITH_AID=1)
+endif
+ccflags-y += -DG955N_WITH_BACKLIGHT
+endif

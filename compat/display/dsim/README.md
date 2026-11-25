@@ -78,3 +78,21 @@ gamma, ELVSS and IRC tables, sends the brightness sequence and reads
 back its registers. The probe reapplies and verifies the live
 pre-test profile before relocking the panel. The test preserves the
 panel temperature byte, factory compensation byte and POC policy.
+
+## Register the Linux backlight
+
+Merge [backlight.config](backlight.config) into the 6.18 kernel
+configuration. Build the AID module with both `G955N_WITH_AID=1` and
+`G955N_WITH_BACKLIGHT=1`. Load it with
+`read_calibration=Y enable_backlight=Y` after DECON and the panel
+are active. It registers `/sys/class/backlight/g955n-panel` and
+keeps the bootloader's initial OLED configuration. The driver
+caches all 74 gamma rows, estimates the initial slider position
+from the inherited AOR, and validates all eight registers before
+reporting an applied update. DECON continues to own display
+blanking and the backlight defers writes during system suspend.
+
+The running VPN2 kernel had the Linux 6.18 backlight core disabled.
+The live test loaded the matching upstream backlight core as a
+temporary module and left BOOT intact. The kernel config fragment
+enables the same core for a future integrated kernel build.
