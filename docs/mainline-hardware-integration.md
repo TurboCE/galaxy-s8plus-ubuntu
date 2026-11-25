@@ -18,17 +18,17 @@ it does not qualify a device on the current mainline boot.
 | Wi-Fi and Bluetooth | NetworkManager reports Wi-Fi connected. BlueZ sees a powered controller with Samsung firmware build 0405. A bounded Adapter1 discovery session received eight advertising peers and stopped cleanly. | Bluetooth pairing and data/audio, Wi-Fi reconnect across sleep and two-band checks on this build. |
 | Battery and charging | UPower reports MAX77865 battery voltage and capacity. A standard power-supply binding autoloads at boot and reports USB online and Qi offline in UPower. | Verify actual wired and wireless charging and battery charge-state transitions. |
 | USB and storage | USB Ethernet carried authenticated device queries. The installed Ubuntu filesystem boots from internal UFS. | USB host and accessory operation. The microSD host registers automatically. Both 2.8 V supplies were enabled during detection. The detect line indicated insertion, but no card enumerated. Known-good media and read/write testing remain pending. |
-| Location | GeoClue returns an approximate network location. Native BCM4773 exposes no GNSS receiver source. | Qualify satellite reports and a receiver fix before enabling a native GeoClue GNSS feed. |
+| Location | GeoClue starts the BCM4773 GNSS receiver on demand and receives checksum-valid NMEA over a private Unix socket. The packaged GeoClue client also received a coarse network estimate. | Qualify outdoor satellite reports, a GNSS position fix and the effect of orbit assistance. |
 | LTE | ModemManager is active and lists no modem. | Securely bring up the Exynos modem transport, then validate SIM registration and mobile data in NetworkManager. |
 | Cameras and iris sensor | No video device. Samsung's board source lists alternatives for the front and rear sensor modules, so the actual variant must be identified. | Qualify capture through the Linux media stack and a standard Ubuntu camera app. Iris functionality needs a separate userspace interface and security review. |
 | NFC | The S3NRN82 binds to the Linux NFC class at boot. Generic netlink device-up completed CORE_RESET and CORE_INIT, discovery started and stopped, and power-down succeeded. The sequence passed after s2idle and an ordinary reboot. | Identify and read a physical tag. |
 | Optical heart-rate sensor | The ADPD143 exposes buffered red and infrared intensity through Linux IIO. Both S2DOS03 optical supplies turn on only during acquisition. Actual FIFO samples were read on boot and with an active buffer across s2idle. | Qualify measurements on a physical target and physiological processing. |
 | Fingerprint, haptics and LEDs | No fingerprint service observed. The haptic actuator exposes force feedback through Linux input. The accelerometer detected vibration and confirmed it stopped. Haptics and the three Linux LED class devices ran alongside the BCM4773 hub before and after s2idle. | Measure LED light output, connect and test desktop notification policies if supported, and qualify fingerprint enrollment and unlock. |
 
-The legacy GNSS socket and its daemons require the Samsung 4.4 board-service
-stack. On the mainline boot the unit files now match that kernel requirement.
-The live root filesystem uses the shipped network-only GeoClue profile. The
-previous mixed profile and unit copies are in a private backup on the device.
+The live Linux 6.18 boot uses the [mainline GNSS relay](../compat/gnss/README.md)
+with the same GeoClue interface as the earlier Samsung 4.4 setup. The two
+sockets have separate kernel conditions. Network-based location remains
+enabled alongside the receiver.
 
 ## BCM4773 sensor and GNSS transport
 

@@ -27,7 +27,7 @@ def main():
                         help='Stage the reviewed AArch64 SM-G955N GNSS client and GeoClue configuration')
     args = parser.parse_args()
     if args.mainline618 and any((args.sensor_daemon, args.ambient_power_daemon,
-                                args.audio_build, args.gnss_client)):
+                                args.audio_build)):
         parser.error('--mainline618 uses the stock Ubuntu hardware services')
     if args.mainline_modules and not args.mainline618:
         parser.error('--mainline-modules requires --mainline618')

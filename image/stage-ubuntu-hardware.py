@@ -92,26 +92,31 @@ def link(root, name, target):
     file.symlink_to(target)
 
 
-def install_gnss(root, client):
+def install_gnss(root, client, *, mainline=False):
     binary = client.read_bytes()
     if not arm64_elf(client) or any(tag not in binary for tag in (
             b'/vendor/lib64/hw/gps.default.so', b'GPS XTRA injection result', b'--serve')):
         raise ValueError('Expected the reviewed AArch64 SM-G955N GNSS client')
     if not any(line.startswith('geoclue:') for line in (root / 'etc/group').read_text().splitlines()):
         raise ValueError('Install geoclue-2.0 in the Ubuntu rootfs before staging GNSS')
-    units = ('g955n-gnss.socket', 'g955n-gnss@.service',
-             'g955n-gnss-bsp.service', 'g955n-gnss-assist.service', 'g955n-gnss-lto.service')
+    socket = 'g955n-gnss-mainline' if mainline else 'g955n-gnss'
+    units = [socket + '.socket', socket + '@.service', 'g955n-gnss-assist.service']
+    helpers = ['serve.py', 'assistance.py', 'lto.py', 'run-probe.py']
+    if mainline:
+        helpers.append('serve-mainline.py')
+    else:
+        units.extend(('g955n-gnss-bsp.service', 'g955n-gnss-lto.service'))
     library = Path('usr/local/lib/g955n-gnss')
     stage(root, library / 'hal-probe', binary, 0o755)
-    for name in ('serve.py', 'assistance.py', 'lto.py', 'run-probe.py'):
+    for name in helpers:
         target = 'run_probe.py' if name == 'run-probe.py' else name
         stage(root, library / target, (GNSS / name).read_bytes())
     for name in units:
         stage(root, Path('etc/systemd/system') / name, (GNSS / name).read_bytes())
     name = '80-g955n-location.conf'
     stage(root, Path('etc/geoclue/conf.d') / name, (GNSS / name).read_bytes())
-    link(root, 'etc/systemd/system/sockets.target.wants/g955n-gnss.socket',
-         Path('../g955n-gnss.socket'))
+    link(root, f'etc/systemd/system/sockets.target.wants/{socket}.socket',
+         Path(f'../{socket}.socket'))
 
 
 def install_audio(root, build):
@@ -275,9 +280,11 @@ def main():
     if root == Path('/') or (root / 'etc/hostname').read_text().strip() != 'g955n-ubuntu':
         parser.error('requires the offline SM-G955N Ubuntu rootfs')
     if args.mainline618:
-        if any((args.sensor_daemon, args.ambient_power_daemon, args.audio_build, args.gnss_client)):
+        if any((args.sensor_daemon, args.ambient_power_daemon, args.audio_build)):
             parser.error('--mainline618 cannot be combined with downstream adapters')
         install_mainline618(root)
+        if args.gnss_client:
+            install_gnss(root, args.gnss_client, mainline=True)
         if args.mainline_modules:
             install_mainline_modules(root, args.mainline_modules)
         return

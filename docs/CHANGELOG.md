@@ -2890,3 +2890,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   both ADPD143 intensity slots through the standard buffered IIO API.
 - Verified hardware FIFO data, idle power-off, and resumption of an
   active acquisition after s2idle.
+
+
+## 2026-11-26 — Ubuntu Location on the Linux 6.18 BCM4773 hub
+
+- Connected packaged GeoClue to the handset GNSS receiver on demand.
+- Staged the matching socket and reviewed-client option for repeatable
+  Ubuntu rootfs builds. Retained network positioning in GeoClue.
+- Verified native receiver NMEA and the GNOME location service after a
+  normal reboot. A satellite fix remains to be verified outdoors.

@@ -7009,3 +7009,28 @@ channels, with the supplies returning to off. GDM, the panel, the sensor
 hub, NFC and the MMC host remained available. No kernel error-priority
 entries appeared at the post-reboot check. Physiological measurement
 and calibration remain unverified.
+
+
+## 2026-11-26 — GeoClue and BCM4773 receiver on Linux 6.18
+
+On the optical/NFC boot, the isolated Samsung GNSS trial started and
+stopped successfully and counted 101 checksum-valid NMEA sentences in
+35 seconds. Verified read-only EFS and Android system mounts and both
+original hub FIFO inodes. The network-isolated GNSS client processes
+ran in a private mount clone with a separate temporary cache.
+
+The socket accepted the GeoClue service account. A 55-second socket
+client read 65 checksum-valid sentences. The 25-second initial request
+had no NMEA and the 55-second run returned a vendor stop result of -1.
+For the packaged GeoClue demo, GNOME Location Services was enabled and
+GeoClue started the 6.18 receiver relay itself. It received a 25 km
+coarse network estimate and the relay recorded 317 valid NMEA sentences
+with vendor stop result 0.
+
+After an ordinary reboot the socket, BCM4773 hub, GDM and NetworkManager
+were active. The same GeoClue demo acquired a coarse estimate and the
+relay counted 281 NMEA sentences, one assistance request and a clean
+receiver stop. Neither desktop trial reported satellites or a GNSS fix.
+No location coordinates, device-owned vendor files or receiver cache
+were added to Git. The release-upgrade flow and outdoor acquisition
+remain separate verification tasks.

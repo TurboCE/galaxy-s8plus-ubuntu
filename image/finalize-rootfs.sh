@@ -53,6 +53,8 @@ chmod 755 "$R/usr/local/sbin/g955n-kernel-evidence"
 chroot "$R" systemctl enable g955n-grow-root.service g955n-kernel-evidence.service serial-getty@ttyGS0.service
 if [ "$profile" = legacy ]; then
   chroot "$R" systemctl enable g955n-hardware.service g955n-fb-display.service g955n-bluetooth-rom.service
+else
+  chroot "$R" systemctl enable g955n-location-hub-mainline.service
 fi
 chroot "$R" dconf update
 chroot "$R" systemctl set-default graphical.target

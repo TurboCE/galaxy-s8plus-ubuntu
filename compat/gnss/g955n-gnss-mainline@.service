@@ -1,0 +1,24 @@
+[Unit]
+Description=SM-G955N GNSS acquisition through the Linux 6.18 hub
+ConditionKernelVersion=6.18.*-g955n-*
+ConditionKernelCommandLine=g955n.bcm4773=1
+BindsTo=g955n-location-hub-mainline.service
+Wants=g955n-gnss-assist.service
+After=g955n-location-hub-mainline.service g955n-gnss-assist.service
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/local/lib/g955n-gnss/serve-mainline.py
+StandardInput=socket
+StandardOutput=journal
+StandardError=journal
+RuntimeDirectory=g955n-gnss-session
+RuntimeDirectoryMode=0700
+PrivateNetwork=yes
+DevicePolicy=closed
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+IPAddressDeny=any
+NoNewPrivileges=yes
+LimitCORE=0
+UMask=0077
+KillMode=mixed
+TimeoutStopSec=12s

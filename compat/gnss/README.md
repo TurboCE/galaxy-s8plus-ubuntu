@@ -24,18 +24,16 @@ and a nonzero stop result.
 
 ## Ubuntu Location Services
 
-The receiver bridge below uses the Samsung 4.4 board services. On
-Linux 6.18 use the network-only `70-g955n-network-location.conf` profile
-until a native receiver path is qualified. A network fix does not
-qualify a satellite fix.
-
 The desktop integration connects GeoClue to `/run/g955n-gnss/nmea.sock`.
 The socket admits the GeoClue account and activates the Samsung GNSS engine
 on demand. The relay forwards checksum-valid receiver sentences. The vendor
 engine and the existing Broadcom location hub share their original
 `/data/vendor/gps/.pipe.gpsd_to_lhd.to_server` and `.to_client` FIFOs.
-A separate bind-mounted directory breaks this link even when the path of each
-FIFO looks identical.
+On Linux 6.18, the relay joins the mainline hub's mount namespace and clones
+it privately. Hard links preserve the original FIFO inodes in the GNSS
+session's temporary cache directory. The stock Android system and EFS remain
+read-only. An indoor test verified the NMEA feed and a coarse GeoClue network
+estimate. Satellite reception and a GNSS position fix are pending.
 
 The GeoClue drop-in uses BeaconDB for network positioning and disables
 coverage submissions. Network assistance uses recent Wi-Fi results and
@@ -50,18 +48,18 @@ configuration, uses HTTPS, and checks size, age and integrity before caching.
 The GNSS helper uses the GPS XTRA extension to pass the checked download to
 the receiver.
 
-For deployment on this image, install the reviewed client as
+For deployment, install the reviewed client as
 `/usr/local/lib/g955n-gnss/hal-probe` and its Python support files alongside
 it. Install `run-probe.py` there as `run_probe.py` for the service import.
-Place the socket, template, BSP preparation and two assistance services in
-`/etc/systemd/system`. Install `80-g955n-location.conf` through GeoClue's
-`conf.d` directory, reload systemd, and enable `g955n-gnss.socket`.
-Use GNOME's Location Services setting to grant desktop access.
+Place the socket, template and assistance units in `/etc/systemd/system`
+and install `80-g955n-location.conf` in GeoClue's `conf.d` directory. Use
+`g955n-gnss-mainline.socket` on Linux 6.18 with `g955n.bcm4773=1` on the
+kernel command line. The Samsung 4.4 setup uses `g955n-gnss.socket`, the
+BSP preparation service and the legacy LTO download unit. The Linux 6.18
+relay can read a valid existing LTO cache and currently does not refresh it.
+Use GNOME's Location Services setting to control desktop location access.
 
-
-For an offline image, pass the reviewed private ARM64 client to
-`python3 scripts/build_rootfs.py --gnss-client /path/to/hal-probe`. The builder
-installs GeoClue and time synchronization, stages the client and helpers, and
-enables the socket in the image. GNOME retains control of the Location Services
-preference. The first request prepares the board's read-only Android ABI paths
-and allows time for the location hub to create the shared GNSS FIFO.
+For an offline image, pass the reviewed private ARM64 client as
+`--gnss-client /path/to/hal-probe` to `scripts/build_rootfs.py`. Include
+`--mainline618` for the Linux 6.18 image. The builder installs the
+matching socket and GeoClue drop-in when a reviewed client is supplied.

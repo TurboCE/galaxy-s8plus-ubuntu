@@ -1,0 +1,15 @@
+[Unit]
+Description=SM-G955N GNSS NMEA stream for GeoClue on Linux 6.18
+ConditionKernelVersion=6.18.*-g955n-*
+ConditionKernelCommandLine=g955n.bcm4773=1
+
+[Socket]
+ListenStream=/run/g955n-gnss/nmea.sock
+SocketGroup=geoclue
+SocketMode=0660
+Accept=yes
+MaxConnections=1
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

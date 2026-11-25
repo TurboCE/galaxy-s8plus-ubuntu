@@ -14,6 +14,23 @@ spec.loader.exec_module(hardware)
 
 
 class MainlineRootfsTests(unittest.TestCase):
+    def test_mainline_gnss_stages_the_matching_socket_and_geoclue_profile(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / 'etc').mkdir()
+            (root / 'etc/group').write_text('geoclue:x:104:\n')
+            client = root / 'hal-probe'
+            client.write_bytes(b'/vendor/lib64/hw/gps.default.so GPS XTRA injection result --serve')
+            with patch.object(hardware, 'arm64_elf', return_value=True):
+                hardware.install_gnss(root, client, mainline=True)
+                hardware.install_gnss(root, client, mainline=True)
+            units = root / 'etc/systemd/system'
+            self.assertTrue((units / 'sockets.target.wants/g955n-gnss-mainline.socket').exists())
+            self.assertFalse((units / 'sockets.target.wants/g955n-gnss.socket').exists())
+            self.assertTrue((root / 'usr/local/lib/g955n-gnss/serve-mainline.py').is_file())
+            profile = root / 'etc/geoclue/conf.d/80-g955n-location.conf'
+            self.assertIn('nmea-socket=/run/g955n-gnss/nmea.sock', profile.read_text())
+
     def test_native_services_and_manual_suspend_are_staged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
