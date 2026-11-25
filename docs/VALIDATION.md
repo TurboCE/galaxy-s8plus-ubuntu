@@ -6193,3 +6193,24 @@ condition and switching to the mainline network profile, a second request
 returned a 25 km network fix with no new legacy GNSS service invocation.
 The bottom speaker remained the default PipeWire sink. No satellite fix
 was recorded.
+
+### BCM4773 idle SSI clock comparison on 6.18 VPN2
+
+The live SM-G955N used the verified GPH3 speaker BOOT. SPI1.0
+was present and unbound. A build against the running release
+ran one bounded, read-only SSI comparison. LDO38 moved from
+disabled to enabled, the regulator reported 1,800,000 µV, and
+it returned to disabled on exit. MCU response was already high
+and HOST_REQ stayed low. Requested SPI speeds of 1 MHz and
+26 MHz each completed a two-byte read and returned 00/00.
+The host driver did not report an effective clock rate. These
+results are compatible with an idle or undriven receive line;
+they neither qualify a hub response nor identify a bad clock.
+No diagnostic module or SPI binding remained. The bottom
+speaker was still the default Ubuntu audio sink.
+
+Compared Samsung's `bcm_gps_spi.c`, `bbd.c` and `ssp_bbd.c`.
+The vendor worker handles outbound bytes even with HOST_REQ low,
+and the ordinary SSP request is sent via the BBD userspace
+daemon before a reply is expected. The existing mainline
+probe contains only a passive receive qualification path.

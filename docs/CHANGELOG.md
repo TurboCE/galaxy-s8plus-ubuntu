@@ -2635,3 +2635,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   baseline and verified BlueZ discovery through Ubuntu.
 - Guarded the Samsung GNSS bridge with its matching legacy kernel
   condition and switched live 6.18 GeoClue to its network-only profile.
+
+## 2026-11-25 — BCM4773 transport audit
+
+- Verified reversible SSI idle reads with the hub supply enabled
+  and identified the missing outbound BBD path required to query
+  the sensor hub from 6.18.
