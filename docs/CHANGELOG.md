@@ -2667,3 +2667,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   caller messages and qualifies only the control interface.
 - Verified transitions, malformed input rejection and SPI unbind on the
   handset. Kept the trial module out of the boot configuration.
+
+## 2026-11-25 — BCM4773 queued SSI stream
+
+- Added an opt-in, root-only `ttyBCM` byte stream with bounded receive
+  and transmit queues, link ownership shared with the raw SSI node,
+  and transport byte and error reporting.
+- Verified a 315-byte queued write and SPI unbind with an open descriptor
+  on the Korean board with its revision 10 power pin configured.

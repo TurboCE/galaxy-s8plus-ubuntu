@@ -65,5 +65,26 @@ transfer flag.
 The status describes notifications supplied by the caller. It does not
 establish that the hub booted. On-device tests injected control messages
 and verified state transitions, input validation and descriptor lifetime.
-The original daemon, `ttyBCM` stream, actual patch transfer and
-`bbd_sensor` exchange still require end-to-end qualification.
+The original daemon, actual patch transfer and `bbd_sensor` exchange still
+require end-to-end qualification.
+
+## Queued legacy byte stream
+
+With `expose_legacy_stream=1`, the driver also provides root-only
+`/dev/ttyBCM`, a misc character device matching the stock endpoint's
+queued byte-stream model. The raw SSI endpoint and the queued stream
+share one exclusive link owner. The stream accepts up to 32 KiB of
+queued output and splits it into SSI transfers. A worker services input
+first and forwards received wire bytes. Empty reads return zero bytes.
+Poll for writable capacity and handle short writes.
+
+`/sys/class/misc/ttyBCM/transport_status` reports transferred and queued
+byte counts and latches the first transport error until reopen. A write
+reports bytes accepted into the queue. The transmit count advances after
+the SPI transfer completes, before any response from the hub.
+
+With the revision 10 power pin configured, an on-device, 315-byte
+write of read-only SSP chip-ID requests completed over two SSI
+transfers. The hub sent no response in that test. The stock patch
+bootstrap, power-control ABI and SSP RPC routing still need
+qualification before the original daemon can provide desktop sensors.

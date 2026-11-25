@@ -7,6 +7,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/iopoll.h>
+#include <linux/kfifo.h>
 #include <linux/kref.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -18,11 +19,14 @@
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
 #include <linux/uaccess.h>
+#include <linux/workqueue.h>
 
 #define SSI_WRITE	0x00
 #define SSI_READ	0x20
 #define SSI_HEADER	2
 #define SSI_PAYLOAD	254
+#define SSI_STREAM_SIZE	(32 * 1024)
+#define SSI_WORK_BUDGET	16
 #define BBD_PATCH_NAME	"samsung/g955n/bbd-patch.bin"
 #define BBD_CONTROL_MAX	64
 #define BBD_PATCH_SIZE	1023148
@@ -34,6 +38,10 @@ MODULE_PARM_DESC(expose_legacy_patch, "Expose the verified board patch through /
 static bool expose_legacy_control;
 module_param(expose_legacy_control, bool, 0400);
 MODULE_PARM_DESC(expose_legacy_control, "Expose the legacy firmware lifecycle control device");
+
+static bool expose_legacy_stream;
+module_param(expose_legacy_stream, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_stream, "Expose an experimental queued /dev/ttyBCM stream");
 
 enum bbd_firmware_state {
 	BBD_FIRMWARE_UNKNOWN,
@@ -49,6 +57,13 @@ struct g955n_ssi {
 	struct miscdevice misc;
 	struct miscdevice patch;
 	struct miscdevice control;
+	struct miscdevice stream;
+	struct delayed_work stream_work;
+	struct kfifo stream_tx, stream_rx;
+	u64 stream_tx_bytes, stream_rx_bytes;
+	int stream_error;
+	unsigned int empty_receives;
+	bool stream_open;
 	enum bbd_firmware_state firmware_state;
 	bool patch_transfer;
 	struct spi_device *spi;
@@ -77,7 +92,10 @@ static irqreturn_t ssi_host_irq(int irq, void *data)
 {
 	struct g955n_ssi *ssi = data;
 
-	wake_up_interruptible(&ssi->wait);
+	if (READ_ONCE(ssi->stream_open))
+		queue_delayed_work(system_freezable_wq, &ssi->stream_work, 0);
+	else
+		wake_up_interruptible(&ssi->wait);
 	return IRQ_HANDLED;
 }
 
@@ -118,39 +136,40 @@ static int ssi_transfer(struct g955n_ssi *ssi, size_t len)
 	return msg.actual_length == len ? 0 : -EIO;
 }
 
-static int ssi_receive(struct g955n_ssi *ssi)
+static int ssi_receive_awake(struct g955n_ssi *ssi)
 {
 	size_t length;
 	int ret;
 
-	ret = ssi_wake(ssi);
-	if (ret)
-		return ret;
 	memset(ssi->tx, 0, SSI_HEADER + SSI_PAYLOAD);
 	ssi->tx[0] = SSI_READ;
 	ret = ssi_transfer(ssi, SSI_HEADER);
 	if (ret)
-		goto sleep;
-	if (ssi->rx[0]) {
-		ret = -EPROTO;
-		goto sleep;
-	}
+		return ret;
+	if (ssi->rx[0])
+		return -EPROTO;
 
 	length = min_t(size_t, ssi->rx[1] ?: SSI_PAYLOAD, SSI_PAYLOAD);
 	ret = ssi_transfer(ssi, SSI_HEADER + length);
 	if (ret)
-		goto sleep;
-	if (ssi->rx[0]) {
-		ret = -EPROTO;
-		goto sleep;
-	}
-	ssi->pending = min_t(size_t, ssi->rx[1], length);
-	if (!ssi->pending)
-		ret = -ENODATA;
+		return ret;
+	if (ssi->rx[0])
+		return -EPROTO;
+	return min_t(size_t, ssi->rx[1], length);
+}
 
-sleep:
+static int ssi_receive(struct g955n_ssi *ssi)
+{
+	int ret = ssi_wake(ssi);
+
+	if (ret)
+		return ret;
+	ret = ssi_receive_awake(ssi);
 	gpiod_set_value_cansleep(ssi->request, 0);
-	return ret;
+	if (ret <= 0)
+		return ret ?: -ENODATA;
+	ssi->pending = ret;
+	return 0;
 }
 
 static int ssi_restore_enable(struct g955n_ssi *ssi)
@@ -210,10 +229,8 @@ static int ssi_power_off(struct g955n_ssi *ssi)
 	return restore ?: ret;
 }
 
-static int ssi_open(struct inode *inode, struct file *file)
+static int ssi_open_link(struct file *file, struct g955n_ssi *ssi, bool stream)
 {
-	struct g955n_ssi *ssi = container_of(file->private_data,
-					   struct g955n_ssi, misc);
 	int ret;
 
 	mutex_lock(&ssi->lock);
@@ -236,12 +253,31 @@ static int ssi_open(struct inode *inode, struct file *file)
 	msleep(200);
 	ssi->opened = true;
 	ssi->pending = 0;
+	if (stream) {
+		kfifo_reset(&ssi->stream_tx);
+		kfifo_reset(&ssi->stream_rx);
+		ssi->stream_tx_bytes = 0;
+		ssi->stream_rx_bytes = 0;
+		ssi->stream_error = 0;
+		ssi->empty_receives = 0;
+	}
+	WRITE_ONCE(ssi->stream_open, stream);
 	kref_get(&ssi->refs);
 	file->private_data = ssi;
 	enable_irq(ssi->irq);
+	if (stream)
+		queue_delayed_work(system_freezable_wq, &ssi->stream_work, 0);
 out:
 	mutex_unlock(&ssi->lock);
 	return ret;
+}
+
+static int ssi_open(struct inode *inode, struct file *file)
+{
+	struct g955n_ssi *ssi = container_of(file->private_data,
+					   struct g955n_ssi, misc);
+
+	return ssi_open_link(file, ssi, false);
 }
 
 static int ssi_release(struct inode *inode, struct file *file)
@@ -254,6 +290,7 @@ static int ssi_release(struct inode *inode, struct file *file)
 		disable_irq(ssi->irq);
 		ret = ssi_power_off(ssi);
 	}
+	WRITE_ONCE(ssi->stream_open, false);
 	ssi->opened = false;
 	mutex_unlock(&ssi->lock);
 	kref_put(&ssi->refs, ssi_free);
@@ -372,6 +409,196 @@ static const struct file_operations ssi_ops = {
 	.poll = ssi_poll,
 	.llseek = noop_llseek,
 };
+
+/*
+ * The legacy daemon queues complete byte ranges independently of the hub's
+ * SSI handshake. Port the stream transport first; BBD RPC routing is separate.
+ */
+static void ssi_stream_worker(struct work_struct *work)
+{
+	struct g955n_ssi *ssi = container_of(to_delayed_work(work),
+					   struct g955n_ssi, stream_work);
+	unsigned long delay = 0;
+	bool awake = false;
+	int host, ret = 0, frame;
+
+	mutex_lock(&ssi->lock);
+	if (ssi->removed || !ssi->stream_open || ssi->stream_error)
+		goto out;
+
+	for (frame = 0; frame < SSI_WORK_BUDGET; frame++) {
+		unsigned int count;
+
+		host = gpiod_get_value_cansleep(ssi->host);
+		if (host < 0) {
+			ret = host;
+			break;
+		}
+		if (host && kfifo_avail(&ssi->stream_rx) < SSI_PAYLOAD)
+			break;
+		if (!host && kfifo_is_empty(&ssi->stream_tx))
+			break;
+		if (!awake) {
+			ret = ssi_wake(ssi);
+			if (ret)
+				break;
+			awake = true;
+		}
+
+		/* Leave room for the whole inbound SSI frame before clocking it. */
+		if (host) {
+			ret = ssi_receive_awake(ssi);
+			if (ret < 0)
+				break;
+			count = kfifo_in(&ssi->stream_rx, ssi->rx + SSI_HEADER, ret);
+			ssi->stream_rx_bytes += count;
+			if (!count && ++ssi->empty_receives == 4) {
+				ret = -EPROTO;
+				break;
+			}
+			if (count)
+				ssi->empty_receives = 0;
+		} else {
+			ssi->empty_receives = 0;
+		}
+
+		ssi->tx[0] = SSI_WRITE;
+		count = kfifo_out_peek(&ssi->stream_tx, ssi->tx + 1, SSI_PAYLOAD);
+		if (count) {
+			ret = ssi_transfer(ssi, count + 1);
+			if (ret)
+				break;
+			kfifo_skip_count(&ssi->stream_tx, count);
+			ssi->stream_tx_bytes += count;
+		} else if (!ret) {
+			/* HOST_REQ may stay asserted after an empty length report. */
+			delay = msecs_to_jiffies(10);
+			break;
+		}
+	}
+	if (awake)
+		gpiod_set_value_cansleep(ssi->request, 0);
+	if (ret < 0)
+		ssi->stream_error = ret;
+	if (frame == SSI_WORK_BUDGET || delay)
+		queue_delayed_work(system_freezable_wq, &ssi->stream_work, delay);
+	wake_up_interruptible(&ssi->wait);
+out:
+	mutex_unlock(&ssi->lock);
+}
+
+static int ssi_stream_open(struct inode *inode, struct file *file)
+{
+	struct g955n_ssi *ssi = container_of(file->private_data,
+					   struct g955n_ssi, stream);
+	int ret = stream_open(inode, file);
+
+	return ret ?: ssi_open_link(file, ssi, true);
+}
+
+static ssize_t ssi_stream_read(struct file *file, char __user *buffer,
+			       size_t length, loff_t *position)
+{
+	struct g955n_ssi *ssi = file->private_data;
+	unsigned int copied = 0;
+	int ret;
+
+	if (!length)
+		return 0;
+	ret = mutex_lock_interruptible(&ssi->lock);
+	if (ret)
+		return ret;
+	if (ssi->removed) {
+		ret = -ENODEV;
+	} else if (kfifo_is_empty(&ssi->stream_rx)) {
+		ret = ssi->stream_error;
+	} else {
+		ret = kfifo_to_user(&ssi->stream_rx, buffer,
+				   min_t(size_t, length, SSI_STREAM_SIZE), &copied);
+		if (copied && !ssi->stream_error)
+			queue_delayed_work(system_freezable_wq, &ssi->stream_work, 0);
+	}
+	mutex_unlock(&ssi->lock);
+	return copied ? (ssize_t)copied : ret;
+}
+
+static ssize_t ssi_stream_write(struct file *file, const char __user *buffer,
+				size_t length, loff_t *position)
+{
+	struct g955n_ssi *ssi = file->private_data;
+	unsigned int copied = 0;
+	int ret;
+
+	if (!length)
+		return 0;
+	ret = mutex_lock_interruptible(&ssi->lock);
+	if (ret)
+		return ret;
+	if (ssi->removed) {
+		ret = -ENODEV;
+	} else if (ssi->stream_error) {
+		ret = ssi->stream_error;
+	} else {
+		ret = kfifo_from_user(&ssi->stream_tx, buffer,
+				     min_t(size_t, length, SSI_STREAM_SIZE), &copied);
+		if (copied)
+			queue_delayed_work(system_freezable_wq, &ssi->stream_work, 0);
+	}
+	mutex_unlock(&ssi->lock);
+	return copied ? (ssize_t)copied : ret;
+}
+
+static __poll_t ssi_stream_poll(struct file *file, poll_table *wait)
+{
+	struct g955n_ssi *ssi = file->private_data;
+	__poll_t flags = 0;
+
+	poll_wait(file, &ssi->wait, wait);
+	mutex_lock(&ssi->lock);
+	if (ssi->removed) {
+		flags = EPOLLHUP | EPOLLERR;
+	} else {
+		if (!kfifo_is_empty(&ssi->stream_rx))
+			flags |= EPOLLIN | EPOLLRDNORM;
+		if (ssi->stream_error)
+			flags |= EPOLLERR;
+		else if (!kfifo_is_full(&ssi->stream_tx))
+			flags |= EPOLLOUT | EPOLLWRNORM;
+	}
+	mutex_unlock(&ssi->lock);
+	return flags;
+}
+
+static const struct file_operations ssi_stream_ops = {
+	.owner = THIS_MODULE,
+	.open = ssi_stream_open,
+	.release = ssi_release,
+	.read = ssi_stream_read,
+	.write = ssi_stream_write,
+	.poll = ssi_stream_poll,
+};
+
+static ssize_t transport_status_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct miscdevice *stream = dev_get_drvdata(dev);
+	struct g955n_ssi *ssi = container_of(stream, struct g955n_ssi, stream);
+	ssize_t count;
+
+	mutex_lock(&ssi->lock);
+	count = sysfs_emit(buf, "tx_bytes=%llu rx_bytes=%llu tx_pending=%u error=%d\n",
+			   ssi->stream_tx_bytes, ssi->stream_rx_bytes,
+			   kfifo_len(&ssi->stream_tx), ssi->stream_error);
+	mutex_unlock(&ssi->lock);
+	return count;
+}
+static DEVICE_ATTR_RO(transport_status);
+
+static struct attribute *ssi_stream_attrs[] = {
+	&dev_attr_transport_status.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(ssi_stream);
 
 /*
  * The verified Korean-board patch comes from the owner's Samsung boot.
@@ -572,6 +799,7 @@ static void ssi_disconnect(struct g955n_ssi *ssi)
 	if (ssi->powered && ssi_power_off(ssi))
 		dev_err(&ssi->spi->dev, "cannot restore hub power on removal\n");
 	mutex_unlock(&ssi->lock);
+	cancel_delayed_work_sync(&ssi->stream_work);
 	wake_up_interruptible(&ssi->wait);
 }
 
@@ -591,12 +819,22 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	kref_init(&ssi->refs);
 	mutex_init(&ssi->lock);
 	init_waitqueue_head(&ssi->wait);
+	INIT_DELAYED_WORK(&ssi->stream_work, ssi_stream_worker);
 	ssi->spi = spi;
 	ssi->tx = devm_kzalloc(dev, SSI_HEADER + SSI_PAYLOAD, GFP_KERNEL);
 	ssi->rx = devm_kzalloc(dev, SSI_HEADER + SSI_PAYLOAD, GFP_KERNEL);
 	ret = -ENOMEM;
 	if (!ssi->tx || !ssi->rx)
 		goto free;
+	if (expose_legacy_stream) {
+		void *tx = devm_kmalloc(dev, SSI_STREAM_SIZE, GFP_KERNEL);
+		void *rx = devm_kmalloc(dev, SSI_STREAM_SIZE, GFP_KERNEL);
+
+		if (!tx || !rx)
+			goto free;
+		kfifo_init(&ssi->stream_tx, tx, SSI_STREAM_SIZE);
+		kfifo_init(&ssi->stream_rx, rx, SSI_STREAM_SIZE);
+	}
 
 	ssi->supply = devm_regulator_get(dev, "vddio");
 	ret = PTR_ERR_OR_ZERO(ssi->supply);
@@ -665,9 +903,25 @@ static int g955n_ssi_probe(struct spi_device *spi)
 		if (ret)
 			goto deregister_patch;
 	}
+	if (expose_legacy_stream) {
+		ssi->stream = (struct miscdevice) {
+			.minor = MISC_DYNAMIC_MINOR,
+			.name = "ttyBCM",
+			.mode = 0600,
+			.parent = dev,
+			.fops = &ssi_stream_ops,
+			.groups = ssi_stream_groups,
+		};
+		ret = misc_register(&ssi->stream);
+		if (ret)
+			goto deregister_control;
+	}
 	spi_set_drvdata(spi, ssi);
 	return 0;
 
+deregister_control:
+	if (expose_legacy_control)
+		misc_deregister(&ssi->control);
 deregister_patch:
 	if (expose_legacy_patch)
 		misc_deregister(&ssi->patch);
@@ -686,6 +940,8 @@ static void g955n_ssi_remove(struct spi_device *spi)
 {
 	struct g955n_ssi *ssi = spi_get_drvdata(spi);
 
+	if (expose_legacy_stream)
+		misc_deregister(&ssi->stream);
 	if (expose_legacy_control)
 		misc_deregister(&ssi->control);
 	if (expose_legacy_patch)

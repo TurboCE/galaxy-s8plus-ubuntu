@@ -49,7 +49,10 @@ satellite status before exposing either source to the Ubuntu desktop.
 A same-device #58 startup reached `ESW:READY` and returned chip ID 0x55
 after the vendor daemon read the original patch and transferred it on
 ttyBCM. On 6.18, the opt-in patch reader and inbound control messages
-passed separate endpoint tests. The tty stream, actual firmware transfer
-and sensor messages still need to be connected to the original daemon.
+passed separate endpoint tests. The opt-in `ttyBCM` stream also transferred
+a 315-byte query across multiple SSI frames with the revision 10 power pin
+configured. The hub sent no response without the firmware bootstrap.
+The power controls, actual firmware transfer and sensor RPC routing still
+need to be connected to the original daemon.
 A daemon-reported readiness flag alone does not qualify either sensor
 data or a satellite fix.

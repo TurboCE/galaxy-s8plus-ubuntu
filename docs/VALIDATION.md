@@ -6296,3 +6296,32 @@ was written and the hub was not powered for this test.
 
 The commands were injected by the test. Actual daemon readiness, patch
 transfer, IIO measurements and a receiver fix remain unverified on 6.18.
+
+### BCM4773 queued ttyBCM transport on 6.18 VPN2
+
+ARM64 `W=1` builds passed for the canonical module and a renamed live
+variant. Opening the stream on the steady BOOT returned `EINVAL`
+because the hub enable pad was still muxed away from GPIO. Repeated the
+test on the existing pinctrl-only trial after checking its partition
+hash, model, kernel and live DT node. The canonical driver was loaded
+from temporary storage. No firmware payload was uploaded.
+
+The root-owned node had mode 0600, reported writable capacity on poll
+and returned EOF on an idle read. A single 315-byte write contained
+15 read-only, individually framed SSP chip-ID requests. The worker
+reported 315 transmitted bytes, zero queued bytes, zero transport
+errors and zero received bytes. The byte limit per SSI write was 254.
+Exclusive ownership was enforced in both directions between the raw
+and queued endpoints. Reopen reset the counters. SPI unbind with a
+descriptor open delivered hangup and error on poll, and subsequent
+reads and writes returned `ENODEV`. Both nodes disappeared, the 1.8 V
+regulator was disabled with zero users and PipeWire still selected the
+lower speaker sink.
+
+The successful write qualifies the queued transport and SPI controller
+submission. The hub has not provided a chip ID or sensor data on 6.18.
+
+After the trial, TWRP restored and verified the original full VPN2 BOOT
+image. Ubuntu restarted with GDM active and the lower speaker selected.
+The test nodes and recovery timer were absent. The restore check also
+compared all backed-up protected partitions without writing to them.
