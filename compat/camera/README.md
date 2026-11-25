@@ -146,3 +146,10 @@ the sensor is streaming until the receiver owns suspend and restart.
 On kernels without the media core, the module retains the readback
 interface. The endpoint is ready for a receiver link and a capture
 queue later. The subdevice alone provides no application capture node.
+
+For camera power failures, enable the front module's root-only
+`trace_power` parameter and run the existing `sensor_registers` check.
+The trace records the supply, clock, reset and I²C steps and the
+power-down result. With the retained console DT fragment installed,
+include informational messages in the kernel console level during the
+test so the operation preceding a hang can be recovered after reset.

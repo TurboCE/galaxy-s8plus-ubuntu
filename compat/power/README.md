@@ -18,3 +18,19 @@ charger status was 0xb in the low nibble of DTLS01, which the Samsung
 driver classifies as discharging. A detected input alone does not
 establish battery charging. Verify wired and wireless charge transitions
 and add normal battery charge-state reporting before qualifying charging.
+
+## Retained kernel console
+
+The SM-G955N board can include `g955n-persistent-console.dtsi` on the
+mainline pmsg layout. It divides the first 16 KiB of the existing RAM
+reservation into an 8 KiB compressed crash record and an 8 KiB
+console ring. The 16 KiB boot pmsg area keeps its fixed address
+at 0x92004000, as expected by the recovery reader.
+
+The kernel needs PSTORE, PSTORE_RAM, PSTORE_CONSOLE and PSTORE_PMSG,
+which the current 6.18 configuration already enables. When Ubuntu
+boots with this layout, inspect the previous console in
+`/sys/fs/pstore/console-ramoops-0` or in its systemd-pstore archive.
+The console may survive a reset even when the stopped kernel could
+not write a crash record. Its small size retains the tail of console
+output. The recovery boot trace still uses the original pmsg area.

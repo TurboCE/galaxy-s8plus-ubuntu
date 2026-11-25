@@ -3002,3 +3002,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   connected the S3NRN82 and ADPD143 to it in the board DT fragments.
 - Added consumer references across NFC open and optical probe and
   capture, so one device cannot turn off the other's I²C pull-ups.
+
+
+## 2026-11-26 — Retain the kernel console during a handset hang
+
+- Added an optional SM-G955N ramoops console buffer inside the
+  existing reserved memory while keeping the recovery pmsg address.
+- Added opt-in S5K3H1 power and chip read markers for post-reset
+  investigation.

@@ -7360,3 +7360,23 @@ phandle with 1.8 V minimum and maximum constraints and no force-on
 property. The handset did not respond over USB network or Tailscale,
 so nothing was installed. Live LDO39 state, concurrent NFC and
 optical operation, and boot and suspend regressions remain pending.
+
+
+## 2026-11-26 — Validate ramoops console and camera trace build
+
+The last available previous-boot journal ended before the camera
+test. The installed DT has an ordinary crash record and recovery
+pmsg, with zero space for the live printk console. The updated
+DT splits the 16 KiB crash area into an 8 KiB crash record and
+an 8 KiB console ring. Linux 6.18 allocates those two sections
+before pmsg. Confirmed from a decoded board DTB that the overall
+32 KiB reservation and 16 KiB pmsg location at 0x92004000 are
+unchanged. The known-good config already has PSTORE_CONSOLE and
+PSTORE_PMSG.
+
+Built the optional front sensor trace into the module in both the
+running configuration and the media-enabled build with W=1, and
+verified the parameter in each module. The trace identifies the
+rail, clock, reset, chip ID request and power-off phases. USB
+network and Tailscale remained unavailable. No BOOT change or
+warm-reset console recovery was attempted.

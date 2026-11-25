@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+/*
+ * Split the original 16 KiB crash area between dmesg and the console.
+ * Keep the 16 KiB pmsg region starting at 0x92004000 for the loader
+ * and recovery reader.
+ */
+&{/reserved-memory/ramoops@92000000} {
+	record-size = <0x2000>;
+	console-size = <0x2000>;
+};

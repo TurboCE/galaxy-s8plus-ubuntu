@@ -39,6 +39,10 @@ struct s5k3h1_reg16 {
 static const char *const supply_names[] = { "afvdd", "avdd", "iovdd", "dvdd" };
 static const unsigned int supply_uv[] = { 2800000, 2800000, 1800000, 1050000 };
 
+static bool trace_power;
+module_param(trace_power, bool, 0600);
+MODULE_PARM_DESC(trace_power, "Log front camera power transitions and chip ID requests");
+
 struct g955n_s5k3h1 {
 	struct clk *xclk;
 	struct gpio_desc *reset;
@@ -75,7 +79,11 @@ static int g955n_s5k3h1_read(struct i2c_client *client, u16 reg, u8 *data, u16 l
 	};
 	int ret;
 
+	if (READ_ONCE(trace_power) && !reg)
+		dev_info(&client->dev, "front camera: reading chip ID\n");
 	ret = i2c_transfer(client->adapter, msgs, ARRAY_SIZE(msgs));
+	if (READ_ONCE(trace_power) && !reg)
+		dev_info(&client->dev, "front camera: chip ID I2C transfer returned %d\n", ret);
 	if (ret < 0)
 		return ret;
 	return ret == ARRAY_SIZE(msgs) ? 0 : -EIO;
@@ -100,16 +108,21 @@ static int g955n_s5k3h1_drop_supplies(struct g955n_s5k3h1 *sensor, unsigned int 
 	return ret;
 }
 
-static int g955n_s5k3h1_power_off(struct g955n_s5k3h1 *sensor, unsigned int enabled,
-				 bool clock_on)
+static int g955n_s5k3h1_power_off(struct device *dev, struct g955n_s5k3h1 *sensor,
+				 unsigned int enabled, bool clock_on)
 {
 	int pins, supplies;
 
+	if (READ_ONCE(trace_power))
+		dev_info(dev, "front camera: idling sensor clock and asserting reset\n");
 	pins = pinctrl_select_state(sensor->pins, sensor->idle);
 	gpiod_set_value_cansleep(sensor->reset, 1);
 	if (clock_on)
 		clk_disable_unprepare(sensor->xclk);
 	supplies = g955n_s5k3h1_drop_supplies(sensor, enabled);
+	if (READ_ONCE(trace_power))
+		dev_info(dev, "front camera: power off returned pins=%d supplies=%d\n",
+			 pins, supplies);
 	return pins ?: supplies;
 }
 
@@ -122,15 +135,21 @@ static int g955n_s5k3h1_power_on(struct device *dev, struct g955n_s5k3h1 *sensor
 	if (clk_get_rate(sensor->xclk) != S5K3H1_MCLK_HZ)
 		return -ERANGE;
 	for (enabled = 0; enabled < ARRAY_SIZE(sensor->supplies); enabled++) {
+		if (READ_ONCE(trace_power))
+			dev_info(dev, "front camera: enabling %s\n", supply_names[enabled]);
 		ret = regulator_enable(sensor->supplies[enabled]);
 		if (ret)
 			goto power_off;
 	}
 	usleep_range(1000, 1500);
+	if (READ_ONCE(trace_power))
+		dev_info(dev, "front camera: enabling CIS clock\n");
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret)
 		goto power_off;
 	clock_on = true;
+	if (READ_ONCE(trace_power))
+		dev_info(dev, "front camera: releasing reset and selecting MCLK pin\n");
 	gpiod_set_value_cansleep(sensor->reset, 0);
 	ret = pinctrl_select_state(sensor->pins, sensor->mclk);
 	if (ret)
@@ -139,7 +158,7 @@ static int g955n_s5k3h1_power_on(struct device *dev, struct g955n_s5k3h1 *sensor
 	return 0;
 
 power_off:
-	cleanup = g955n_s5k3h1_power_off(sensor, enabled, clock_on);
+	cleanup = g955n_s5k3h1_power_off(dev, sensor, enabled, clock_on);
 	if (cleanup)
 		dev_err_ratelimited(dev, "power-up rollback failed: %d\n", cleanup);
 	return ret;
@@ -253,7 +272,7 @@ static int g955n_s5k3h1_stop(struct i2c_client *client, struct g955n_s5k3h1 *sen
 	int stop, shutdown;
 
 	stop = g955n_s5k3h1_wait_standby(client);
-	shutdown = g955n_s5k3h1_power_off(sensor, ARRAY_SIZE(sensor->supplies), true);
+	shutdown = g955n_s5k3h1_power_off(&client->dev, sensor, ARRAY_SIZE(sensor->supplies), true);
 	if (stop || shutdown)
 		dev_err_ratelimited(&client->dev, "stream cleanup: standby %d, power %d\n",
 				    stop, shutdown);
@@ -433,7 +452,7 @@ static int g955n_s5k3h1_register_media(struct i2c_client *client,
 	if (ret)
 		return ret;
 	ret = g955n_s5k3h1_read(client, 0x0000, identity, sizeof(identity));
-	cleanup = g955n_s5k3h1_power_off(sensor, ARRAY_SIZE(sensor->supplies), true);
+	cleanup = g955n_s5k3h1_power_off(&client->dev, sensor, ARRAY_SIZE(sensor->supplies), true);
 	if (ret || cleanup)
 		return ret ?: cleanup;
 	if (get_unaligned_be16(identity) != S5K3H1_CHIP_ID)
@@ -521,7 +540,7 @@ static ssize_t sensor_registers_show(struct device *dev, struct device_attribute
 	ret = g955n_s5k3h1_read(client, 0x0000, identity, sizeof(identity));
 	if (!ret)
 		ret = g955n_s5k3h1_read(client, 0x0100, &mode, 1);
-	cleanup = g955n_s5k3h1_power_off(sensor, ARRAY_SIZE(sensor->supplies), true);
+	cleanup = g955n_s5k3h1_power_off(dev, sensor, ARRAY_SIZE(sensor->supplies), true);
 	if (ret || cleanup)
 		return ret ?: cleanup;
 	if (get_unaligned_be16(identity) != S5K3H1_CHIP_ID)
