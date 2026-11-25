@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc@0/usi@10940000} {
+	samsung,mode = <4>;
+	status = "okay";
+};
+
+&{/soc@0/usi@10940000/i2c@10000} {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <400000>;
+	status = "okay";
+
+	usb-typec-controller@33 {
+		compatible = "samsung,sm-g955n-s2mm005-status";
+		reg = <0x33>;
+	};
+};

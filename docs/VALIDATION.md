@@ -7985,3 +7985,29 @@ were upgraded. The kernel logged one chanspec error before suspend and
 one scan-suppression message after wake. GDM, the BCM4773 daemon and
 the default bottom speaker remained available. The DRM panel reported
 On with GNOME still locked after wake.
+
+
+## 2026-11-26 — Live S2MM005 Type-C state on the wired-jack baseline
+
+Traced the Korean Samsung board's 400 kHz HSI2C30 bus to the
+secondary USI9 child at 0x10950000 and the controller at 0x33.
+The driver issues combined reads of function state 0x20 and low-power
+state 0x60 with the stock I²C byte order. Built it for ARM64 with W=1
+and checked it with checkpatch. The BOOT candidate changed only the
+USI9 bus, its I²C child and the Type-C status client in the decoded
+tree. The Linux Image, initramfs and outer Samsung DT matched the
+prior BOOT. The write was checked against fresh private backups.
+
+With the Mac cable attached, repeated reads gave PD state 21
+(SNK Ready), attached, sink, USB device, dry, and both VBUS short
+flags clear. DWC3 remained configured at USB high speed and USB
+Ethernet carried the SSH query. Unbound and rebound the status
+client while keeping the USB gadget configured, and recovered the
+same Type-C values. Wi-Fi, the wired-jack control and the default
+bottom speaker remained available. Removed the trial return timer
+and kept the verified image.
+
+The diagnostic establishes the cable-state input needed for role
+switching. Host operation still requires the standard Type-C role
+path, DWC3 dual-role and xHCI support, board VBUS control, and an
+actual USB peripheral test.

@@ -3116,3 +3116,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Refresh the red and green LED class devices from the standard
   power-supply status and online attributes through udev.
+
+
+## 2026-11-26 — Read the SM-G955N USB-C role from its S2MM005
+
+- Enabled the stock S2MM005 I²C path in the board trial and added a
+  read-only status driver while retaining DWC3 peripheral mode.
