@@ -2653,3 +2653,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added a bounded BBD chip-ID probe and identified the missing GPA4-6
   GPIO mux. Validated transmission with the corrected board power
   setting and recorded the missing response on the current firmware path.
+
+## 2026-11-25 — BCM4773 firmware startup baseline
+
+- Confirmed the original daemon's firmware startup and sensor response
+  on the working Samsung kernel. Added and verified the opt-in
+  read-only BBD patch endpoint on 6.18.

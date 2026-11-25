@@ -36,3 +36,20 @@ the Broadcom BBD framing. The tool accepts no arbitrary SSP commands.
 The complete 21-byte request was transferred, with no bytes received
 during the response window. The hub firmware startup and a live reply
 remain prerequisites for desktop integration.
+
+## Verified BBD patch reader
+
+The optional `expose_legacy_patch=1` module parameter provides the
+root-only, read-only `/dev/bbd_patch` device used by the original daemon.
+Install the file obtained from the owner's working Samsung kernel as
+`samsung/g955n/bbd-patch.bin` in the kernel firmware search path. The
+firmware file is kept outside this repository. The driver accepts only
+the exact size and SHA-256 verified on this Korean handset. Missing or
+mismatched inputs are reported at open. Closing an open descriptor
+releases its firmware reference.
+
+Verified on 6.18 with a byte-for-byte readback of the handset's stock
+patch stream. This endpoint supplies the file to a future legacy-daemon
+bridge. It does not send the patch to the hub. `bbd_control`,
+`bbd_sensor`, the daemon's SPI stream compatibility and runtime
+firmware transfer still need end-to-end qualification.

@@ -6249,3 +6249,28 @@ qualifies the power-gate mux and outbound transport count. The
 firmware startup and a valid SSP response remain open. Closing the
 probe released LDO38 and unbinding removed the endpoint. Restored
 and verified the original GPH3-enabled BOOT.
+
+### BCM4773 firmware startup control and patch reader
+
+Temporarily booted Samsung #58 on the same SM-G955N using a verified
+copy of the corrected 6.18 BOOT for rollback. The existing Broadcom
+location hub reached ESW:READY, the stock SSP driver read chip ID
+0x55 and firmware revision 19032700, and SensorProxy exposed
+accelerometer, ambient light and proximity on that kernel.
+
+A bounded startup trace of the owner's original daemon recorded
+endpoint names, operation counts and byte counts without retaining
+transfer payloads. The daemon opened both power controls, the
+BBD control port and ttyBCM before it opened bbd_patch and bbd_sensor.
+It read the embedded patch and wrote 513,862 bytes to ttyBCM in
+582 calls before and around readiness. The stand-alone patch stream
+was 1,023,148 bytes and declared ASIC 0x004774A1. The firmware file
+was captured privately from the handset and excluded from Git.
+
+Restored the GPH3 6.18 BOOT. Built the opt-in read-only patch endpoint
+against the running kernel and briefly bound it. Missing firmware
+returned ENOENT, a same-size modified file returned EBADMSG, and write
+open returned EACCES. The original data read back byte for byte and
+the endpoint supported seek and EOF. Removed the temporary firmware
+file and unbound the driver. The Bottom Speaker stayed the default
+output. No firmware was sent to the hub on 6.18 in this test.

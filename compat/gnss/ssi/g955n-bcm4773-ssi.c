@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* BCM4773 half-duplex SSI transport for the SM-G955N. */
+#include <crypto/sha2.h>
 #include <linux/delay.h>
+#include <linux/firmware.h>
 #include <linux/fs.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
@@ -19,12 +21,19 @@
 #define SSI_READ	0x20
 #define SSI_HEADER	2
 #define SSI_PAYLOAD	254
+#define BBD_PATCH_NAME	"samsung/g955n/bbd-patch.bin"
+#define BBD_PATCH_SIZE	1023148
+
+static bool expose_legacy_patch;
+module_param(expose_legacy_patch, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_patch, "Expose the verified board patch through /dev/bbd_patch");
 
 struct g955n_ssi {
 	struct kref refs;
 	struct mutex lock;
 	wait_queue_head_t wait;
 	struct miscdevice misc;
+	struct miscdevice patch;
 	struct spi_device *spi;
 	struct regulator *supply;
 	struct gpio_desc *request;
@@ -347,6 +356,75 @@ static const struct file_operations ssi_ops = {
 	.llseek = noop_llseek,
 };
 
+/*
+ * The verified Korean-board patch comes from the owner's Samsung boot.
+ * Do not accept a differently sized or identified image on this endpoint.
+ */
+static int ssi_patch_open(struct inode *inode, struct file *file)
+{
+	static const u8 expected[SHA256_DIGEST_SIZE] = {
+		0x66, 0x9c, 0x53, 0x69, 0x90, 0xa0, 0xd5, 0xf5,
+		0x79, 0x46, 0xd3, 0xd9, 0x44, 0x5c, 0xd6, 0xbc,
+		0x71, 0xec, 0xd4, 0x4e, 0x87, 0x15, 0xe5, 0xb5,
+		0x02, 0xdc, 0x9f, 0xe5, 0xbc, 0xab, 0xc3, 0x84,
+	};
+	struct g955n_ssi *ssi = container_of(file->private_data,
+					   struct g955n_ssi, patch);
+	const struct firmware *firmware;
+	u8 digest[SHA256_DIGEST_SIZE];
+	int ret;
+
+	if (file->f_mode & FMODE_WRITE)
+		return -EACCES;
+	mutex_lock(&ssi->lock);
+	ret = ssi->removed ? -ENODEV :
+		request_firmware_direct(&firmware, BBD_PATCH_NAME, &ssi->spi->dev);
+	mutex_unlock(&ssi->lock);
+	if (ret)
+		return ret;
+	if (firmware->size != BBD_PATCH_SIZE)
+		goto reject;
+	sha256(firmware->data, firmware->size, digest);
+	if (memcmp(digest, expected, sizeof(digest)))
+		goto reject;
+	file->private_data = (void *)firmware;
+	return 0;
+
+reject:
+	release_firmware(firmware);
+	return -EBADMSG;
+}
+
+static ssize_t ssi_patch_read(struct file *file, char __user *buffer,
+			      size_t length, loff_t *position)
+{
+	const struct firmware *firmware = file->private_data;
+
+	return simple_read_from_buffer(buffer, length, position,
+				       firmware->data, firmware->size);
+}
+
+static int ssi_patch_release(struct inode *inode, struct file *file)
+{
+	release_firmware(file->private_data);
+	return 0;
+}
+
+static loff_t ssi_patch_seek(struct file *file, loff_t offset, int whence)
+{
+	const struct firmware *firmware = file->private_data;
+
+	return fixed_size_llseek(file, offset, whence, firmware->size);
+}
+
+static const struct file_operations ssi_patch_ops = {
+	.owner = THIS_MODULE,
+	.open = ssi_patch_open,
+	.release = ssi_patch_release,
+	.read = ssi_patch_read,
+	.llseek = ssi_patch_seek,
+};
+
 static int g955n_ssi_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;
@@ -410,10 +488,26 @@ static int g955n_ssi_probe(struct spi_device *spi)
 		.fops = &ssi_ops,
 	};
 	ret = misc_register(&ssi->misc);
-	if (!ret) {
-		spi_set_drvdata(spi, ssi);
-		return 0;
+	if (ret)
+		goto free_irq;
+	if (expose_legacy_patch) {
+		ssi->patch = (struct miscdevice) {
+			.minor = MISC_DYNAMIC_MINOR,
+			.name = "bbd_patch",
+			.mode = 0400,
+			.parent = dev,
+			.fops = &ssi_patch_ops,
+		};
+		ret = misc_register(&ssi->patch);
+		if (ret) {
+			misc_deregister(&ssi->misc);
+			goto free_irq;
+		}
 	}
+	spi_set_drvdata(spi, ssi);
+	return 0;
+
+free_irq:
 	free_irq(ssi->irq, ssi);
 free:
 	kref_put(&ssi->refs, ssi_free);
@@ -424,6 +518,8 @@ static void g955n_ssi_remove(struct spi_device *spi)
 {
 	struct g955n_ssi *ssi = spi_get_drvdata(spi);
 
+	if (expose_legacy_patch)
+		misc_deregister(&ssi->patch);
 	misc_deregister(&ssi->misc);
 	mutex_lock(&ssi->lock);
 	ssi->removed = true;

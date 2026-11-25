@@ -45,3 +45,9 @@ the board power controls before it starts. The first functional test
 should exercise the ordinary SSP chip-ID request through the same
 transport. Then qualify sensor measurements independently from NMEA or
 satellite status before exposing either source to the Ubuntu desktop.
+
+A same-device #58 startup reached `ESW:READY` and returned chip ID 0x55
+after the vendor daemon read the original patch and transferred it on
+ttyBCM. The 6.18 transport has a qualified, opt-in read-only patch
+endpoint. The control and sensor channels and the actual firmware
+transfer still need to be connected to the daemon on 6.18.
