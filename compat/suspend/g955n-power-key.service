@@ -1,5 +1,5 @@
 [Unit]
-Description=Handle suspend, wake, and shutdown confirmation on the SM-G955N power key
+Description=Handle screen off, wake, and shutdown confirmation on the SM-G955N power key
 After=systemd-logind.service systemd-udev-trigger.service display-manager.service
 ConditionPathExists=|/dev/input/by-path/platform-gpio-keys-event
 ConditionPathExists=|/dev/input/by-path/platform-gpio_keys-event

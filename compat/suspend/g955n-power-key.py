@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Suspend, wake, or ask to power off from the handset power key."""
+"""Blank, wake, or ask to power off from the handset power key."""
 
 import fcntl
 from pathlib import Path
@@ -25,9 +25,6 @@ PANEL_RUNTIME = Path('/sys/class/graphics/fb0/device/power/runtime_status')
 SLEEP_MARKER = Path('/run/g955n-display-suspend')
 MUTTER = 'org.gnome.Mutter.DisplayConfig'
 MUTTER_PATH = '/org/gnome/Mutter/DisplayConfig'
-LOGIND_SUSPEND = ('/usr/bin/busctl', '--system', 'call',
-                  'org.freedesktop.login1', '/org/freedesktop/login1',
-                  'org.freedesktop.login1.Manager', 'Suspend', 'b', 'false')
 
 
 def read_command(*args, timeout=3):
@@ -86,16 +83,17 @@ def session_locked(session):
                         '-p', 'LockedHint', '--value') == 'yes'
 
 
-def lock_before_sleep(session):
+def lock_before_blank(session):
     run = session[2]
     if (read_command(*run, '/usr/bin/gsettings', 'get',
-                     'org.gnome.desktop.screensaver', 'ubuntu-lock-on-suspend') != 'true'
+                     'org.gnome.desktop.screensaver', 'lock-enabled') != 'true'
             or read_command(*run, '/usr/bin/gsettings', 'get',
                             'org.gnome.desktop.lockdown', 'disable-lock-screen') == 'true'):
         return
     # ScreenSaver.GetActive describes the shield/blanking state, not whether
     # credentials are required. In particular it may be false while locked.
-    if session_locked(session):
+    if (session_locked(session) or read_command('/usr/bin/loginctl', 'show-session',
+                                                session[0], '-p', 'Class', '--value') == 'greeter'):
         return
     read_command('/usr/bin/loginctl', 'lock-session', session[0])
     started = time.monotonic()
@@ -104,7 +102,7 @@ def lock_before_sleep(session):
     while not session_locked(session):
         now = time.monotonic()
         if now >= deadline:
-            raise RuntimeError('Screen lock did not complete; suspend was not requested')
+            raise RuntimeError('Screen lock did not complete; display was left on')
         if now >= next_request:
             # A lock signal can arrive before the new GNOME session listens
             # to logind. Repeat it while waiting for that session to confirm.
@@ -113,15 +111,12 @@ def lock_before_sleep(session):
         time.sleep(.05)
 
 
-def suspend_session(session):
+def blank_display(session):
     _, session_type, run = session
-    # Root's direct systemctl path can bypass logind's PrepareForSleep and its
-    # desktop delay inhibitors. Finish the configured lock while rendering is
-    # available, before our explicit blanking barrier.
+    # Lock while the compositor can still present the lock screen.
     try:
-        lock_before_sleep(session)
+        lock_before_blank(session)
         if session_type == 'x11':
-            # Blank before systemd freezes the graphical session.
             env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
             if not any(value.startswith('DISPLAY=') for value in env):
                 raise RuntimeError('No active display to blank before suspend')
@@ -132,14 +127,14 @@ def suspend_session(session):
         deadline = time.monotonic() + 2
         while panel_is_on():
             if time.monotonic() >= deadline:
-                raise RuntimeError('Panel did not blank; suspend was not requested')
+                raise RuntimeError('Panel did not blank')
             time.sleep(.05)
-        read_command(*LOGIND_SUSPEND, timeout=10)
+        print('Power key turned off the display', flush=True)
     except (OSError, RuntimeError, subprocess.SubprocessError):
         try:
             wake_display(session)
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-            print(f'Could not restore the display after failed suspend ({type(error).__name__})',
+            print(f'Could not restore the display after failed blanking ({type(error).__name__})',
                   flush=True)
         raise
 
@@ -184,7 +179,7 @@ def is_resume_press(pressed_at):
     return pressed_at <= float(marker) + 1.5
 
 
-def should_suspend(session, panel_was_on):
+def should_blank(session, panel_was_on):
     if not panel_was_on:
         return False
     if session[1] == 'wayland' and SLEEP_MARKER.is_file():
@@ -261,9 +256,8 @@ def watch_keys(key):
                 elif sec + usec / 1_000_000 - pressed_at >= LONG_PRESS:
                     pending_dialog = open_power_dialog(session)
                     dialog_seat = session[0]
-                elif should_suspend(session, before):
-                    print('Power key requested system suspend', flush=True)
-                    suspend_session(session)
+                elif should_blank(session, before):
+                    blank_display(session)
                 else:
                     wake_display(session)
             except RuntimeError as error:

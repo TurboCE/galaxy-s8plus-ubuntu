@@ -24,8 +24,8 @@ physical button as a wake source. Display idle and screen locking are
 separate GNOME settings.
 
 Enable `g955n-power-key.service` to connect the hardware power key to the
-active GNOME session. With the screen on, a short press requests system
-suspend. From a display-only blank, it wakes the screen. Holding the button
+active GNOME session. A short press locks and turns off a lit screen,
+or wakes the screen from display blanking. Holding the button
 for about 1.4 seconds opens a Zenity Power Off confirmation with Cancel
 selected by default. The popup has no countdown and is subject to GNOME's
 screen lock. Install Ubuntu's `zenity` package for the confirmation dialog.
@@ -49,32 +49,20 @@ that baseline, mask the two targets again and remove the installed GNOME
 profile files followed by `dconf update`. The key service can be disabled
 independently with `systemctl disable --now g955n-power-key.service`.
 
-The key handler blanks the panel before requesting system suspend, while the
-session can still process X11 requests. It verifies hardware blanking within
-two seconds and cancels the request if blanking fails. A rejected suspend
-request restores display power. Resume resets the X11 screen-saver idle counter
-before forcing DPMS on, so the old idle time cannot immediately blank it again.
-Neither action clears the GNOME screen lock or submits credentials.
-
-Before blanking, the power-key handler honors Ubuntu's lock-on-suspend and
-lockdown settings, requests the active session's normal logind lock if needed
-and waits for its actual `LockedHint`. ScreenSaver.GetActive alone can be false
-while credentials are still required. An incomplete lock cancels sleep and
-restores the display. The sleep request uses logind's Suspend method so desktop
-PrepareForSleep notifications and delay inhibitors remain part of the path.
-No password, autologin setting or authentication result is changed.
+The key handler turns off the panel and confirms hardware blanking
+within two seconds. On failure it restores display power. Before
+blanking, it honors GNOME's lock and lockdown settings and waits for
+the normal logind lock confirmation. The login screen is ready for
+blanking without a separate lock. A short press does not start system
+suspend. Manual GNOME suspend remains available.
 
 ## Linux 6.18 Wayland
 
 The mainline GPIO key device uses `platform-gpio-keys-event` in
-`/dev/input/by-path`. The power-key service reads the DECON DSI connector's
-enabled state to confirm Mutter has blanked the panel before requesting sleep.
-The service installer and syntax are shared with the Samsung kernel path.
-
-Boot the mainline trial with `g955n.desktop_suspend=1` and omit
-`systemd.mask=g955n-power-key.service` when enabling this service. The
-qualification uses an RTC alarm for each short-press suspend test. A press
-on a panel that has already resumed and lit up starts a new suspend cycle.
+`/dev/input/by-path`. The power-key service reads the DECON DSI
+connector's enabled state to confirm Mutter has blanked the panel.
+A key queued during a separately requested system suspend wakes
+the display after resume.
 
 ## Explicit USB recovery
 

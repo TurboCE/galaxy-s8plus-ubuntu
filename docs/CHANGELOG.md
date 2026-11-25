@@ -2576,3 +2576,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   initramfs and versioned modules, including the deployed board
   audio overrides. The authenticated handset now uses the
   kernel TUN interface and reconnects automatically at boot.
+
+
+## 2026-11-25 — Power key display toggle
+
+- Changed the SM-G955N short power-key action to lock and blank
+  the screen or wake it, without requesting system suspend.
+  Retained the long-press shutdown confirmation.

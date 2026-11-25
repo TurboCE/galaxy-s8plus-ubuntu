@@ -5970,3 +5970,15 @@ including conntrack mark rules, without a Tailscale health
 warning. The Mac connected directly by Tailscale ping and SSH
 to the handset. After a normal reboot the Mac reconnected over
 SSH through tailscale0, with Tailscale, GNOME and Wi-Fi active.
+
+
+### R100-vpn2 short power-key display toggle
+
+On the SM-G955N, injected three paired short presses through the
+GPIO input device used by the installed power-key service. In
+each cycle the DECON connector disabled and enabled, the GNOME
+session stayed locked on tty2, and Tailscale stayed available.
+The boot ID was unchanged. No suspend or shutdown request was
+logged. An injected long press opened the shutdown confirmation,
+which was dismissed without authorizing shutdown. Host tests
+passed for the power-key handler and native root filesystem profile.
