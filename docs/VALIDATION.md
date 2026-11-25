@@ -7911,3 +7911,30 @@ did not advance during a stationary observation. Retained the
 tested image and removed the trial return timer. Physical
 insertion, headphone acoustic output and headset mic capture
 remain to be verified.
+
+
+## 2026-11-26 — Locate microSD failure in SD identification
+
+Rechecked the current wired-jack BOOT. The removable host scanned
+from 400 kHz to 100 kHz but no MMC card device appeared. The port's
+kernel has neither tracefs nor dynamic debug, so built the DW-MMC
+module with a disabled-by-default, rate-limited probe for early SD
+command results. Only the module and a temporary modprobe option
+changed, with the original module backed up. The BOOT hash was the
+same after reboot.
+
+At 392.8 and 297.4 kHz, the controller completed CMD0, which requires
+no card reply. CMD8 and CMD55 returned -ETIMEDOUT with the response
+timeout bit (0x100). The trace captured no valid card reply. No MMC
+card or block device appeared after the full scan. This places the
+observed failure before the card's operation-condition negotiation
+and rules out a filesystem or automount issue for this observation.
+The test does not establish whether the tray contains responding
+media or whether the card signals reach the socket.
+
+Verified the mmc:block module alias, active UDisks2, GDM,
+NetworkManager, the BCM4773 daemon, the wired jack control and the
+default bottom-speaker route. No kernel error-priority messages were
+present. Removed the diagnostic modprobe option so it stays off on
+the next boot. Known-good physical media, card enumeration and
+Ubuntu read/write operation remain to be tested.

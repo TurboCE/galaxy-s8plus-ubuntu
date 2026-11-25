@@ -3104,3 +3104,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Separated the Standard and Wired Headphones UCM profiles because
   their playback PCMs share RDMA0. The profiles keep the same
   built-in microphone.
+
+
+## 2026-11-26 — Trace SD identification on the SM-G955N
+
+- Added an opt-in DW-MMC diagnostic for identification command status
+  on the 6.18 build without kernel tracing.
