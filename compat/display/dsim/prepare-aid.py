@@ -68,11 +68,36 @@ void g955n_aid_release_orders(void)
     aor = aor.replace("[S6E3HA6_TOTAL_PAC_STEPS][2]", "[][2]")
     aor = panel[:panel.index("*/") + 2] + aor + "};\n"
 
+    def table(text, name):
+        start = text.index(f" {name}[")
+        start = text.rindex("\n", 0, start) + 1
+        end = text.index("\n};", start) + len("\n};")
+        return text[start:end]
+
+    info = files["s6e3ha6/s6e3ha6_dream2_a3_sa_panel_dimming.h"]
+    irc = table(panel, "dream2_a3_sa_irc_table").split("/* HBM */", 1)[0]
+    irc = irc.replace("[S6E3HA6_TOTAL_PAC_STEPS]", "[]") + "};"
+    steps = table(info, "dream2_a3_sa_brt_to_step_tbl").split("/* HBM */", 1)[0]
+    steps = steps.replace("[S6E3HA6_TOTAL_PAC_STEPS]", "[]") + "};"
+    brightness = table(info, "dream2_a3_sa_brt_tbl").split("/* HBM */", 1)[0]
+    brightness = brightness.replace("[S6E3HA6_TOTAL_NR_LUMINANCE]", "[]") + "};"
+    packet_tables = "\n".join((
+        aor,
+        "#define BRT(value) ((value) * 100)",
+        steps,
+        brightness,
+        "#undef BRT",
+        irc,
+        table(panel, "dream2_a3_sa_elvss_table"),
+    ))
+    packet_tables = packet_tables.replace("static u8", "static const u8")
+    packet_tables = packet_tables.replace("static unsigned int", "static const unsigned int")
+
     generated = destination / "aid-source"
     (generated / "s6e3ha6").mkdir(parents=True, exist_ok=True)
     (generated / "dimming.c").write_text(calculator)
     (generated / "dimming.h").write_text(interface)
-    (generated / "s6e3ha6/dream2-a3-aor.h").write_text(aor)
+    (generated / "s6e3ha6/dream2-a3-brightness.h").write_text(packet_tables)
     (generated / "dimming_gamma.h").write_text(files["dimming_gamma.h"])
     (generated / "s6e3ha6/s6e3ha6_dimming.h").write_text(files["s6e3ha6/s6e3ha6_dimming.h"])
     (generated / "s6e3ha6/dream2-a3.h").write_text(variant)

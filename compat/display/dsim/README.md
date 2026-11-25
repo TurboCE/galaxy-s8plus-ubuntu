@@ -69,3 +69,12 @@ the stock gamma latch command, confirms the new register value,
 then restores and verifies the original value. The trial leaves
 gamma and supply compensation settings alone. Register readback
 does not measure panel luminance.
+
+The optional `test_brightness=100` parameter exercises the complete
+normal-brightness sequence. It requires `read_calibration=Y`, an active
+display and a suspend inhibitor. It snapshots all eight registers,
+builds the profile from the panel's calibration and Samsung's PAC,
+gamma, ELVSS and IRC tables, sends the brightness sequence and reads
+back its registers. The probe reapplies and verifies the live
+pre-test profile before relocking the panel. The test preserves the
+panel temperature byte, factory compensation byte and POC policy.

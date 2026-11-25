@@ -3,13 +3,11 @@
 
 #include "aid-source/dimming.h"
 #include "aid-source/s6e3ha6/dream2-a3.h"
-#include "aid-source/s6e3ha6/dream2-a3-aor.h"
+#include "aid-source/s6e3ha6/dream2-a3-brightness.h"
+
+#include "g955n-panel-profile.h"
 
 #define DREAM2_GAMMA_LEN 35
-
-int g955n_aid_verify(const u8 *mtp);
-
-int g955n_aor_trial_value(const u8 saved[2], u8 trial[2]);
 
 int g955n_aor_trial_value(const u8 saved[2], u8 trial[2])
 {
@@ -51,7 +49,7 @@ static void dream2_decode_mtp(struct tp *tp, const u8 *mtp)
 	tp[0].offset[BLUE] = mtp[pos + 1] & 0x0f;
 }
 
-int g955n_aid_verify(const u8 *mtp)
+static int g955n_generate_gamma(const u8 *mtp, unsigned int selected, u8 *output)
 {
 	struct dimming_tp_output *points;
 	struct dimming_info *dim;
@@ -94,6 +92,8 @@ int g955n_aid_verify(const u8 *mtp)
 		}
 		if (!row)
 			memcpy(first, gamma, sizeof(first));
+		if (output && row == selected)
+			memcpy(output, gamma, sizeof(gamma));
 	}
 	if (!memcmp(first, gamma, sizeof(gamma))) {
 		ret = -ENODATA;
@@ -111,4 +111,52 @@ free:
 	kfree_sensitive(dim->tp);
 	kfree_sensitive(dim);
 	return ret;
+}
+
+int g955n_aid_verify(const u8 *mtp)
+{
+	return g955n_generate_gamma(mtp, 0, NULL);
+}
+
+int g955n_build_panel_profile(const u8 *mtp, unsigned int brightness,
+			      struct g955n_panel_profile *profile)
+{
+	unsigned int row = 0, step = 0, plane = 0;
+	u8 tset = profile->elvss[0];
+	int ret;
+
+	if (brightness > 255)
+		return -ERANGE;
+
+	static_assert(ARRAY_SIZE(dream2_a3_sa_brt_tbl) == S6E3HA6_NR_LUMINANCE);
+	static_assert(ARRAY_SIZE(dream2_a3_sa_brt_to_step_tbl) ==
+		      ARRAY_SIZE(dream2_a3_sa_aor_table));
+	static_assert(ARRAY_SIZE(dream2_a3_sa_brt_to_step_tbl) ==
+		      ARRAY_SIZE(dream2_a3_sa_irc_table));
+
+	/* Samsung uses the first entry at or above the scaled brightness. */
+	while (dream2_a3_sa_brt_tbl[row] < brightness * 100)
+		row++;
+	while (dream2_a3_sa_brt_to_step_tbl[step] < brightness * 100)
+		step++;
+
+	ret = g955n_generate_gamma(mtp, row, profile->gamma);
+	if (ret)
+		return ret;
+
+	memcpy(profile->aor, dream2_a3_sa_aor_table[step], sizeof(profile->aor));
+	memcpy(profile->irc, dream2_a3_sa_irc_table[step], sizeof(profile->irc));
+	if (tset & 0x80)
+		plane = (tset & 0x7f) >= 15 ? 2 : 1;
+	else if (!tset)
+		plane = 1;
+	profile->elvss[1] = dream2_a3_sa_dimming_lut[row].luminance <= 39 ? 0xcc : 0xdc;
+	profile->elvss[2] = dream2_a3_sa_elvss_table[plane][row][0];
+	profile->vint[1] = 0x17;
+	/* Preserve boot ACL enable policy and select the OEM normal-brightness settings. */
+	profile->acl[1] = profile->acl_enable[0] ? 0x55 : 0x44;
+	profile->acl[2] = 0x7f;
+	profile->acl[6] = 0x14;
+
+	return 0;
 }

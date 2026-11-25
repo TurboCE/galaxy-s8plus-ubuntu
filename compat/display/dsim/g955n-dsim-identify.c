@@ -11,6 +11,10 @@
 #include <linux/regmap.h>
 #include <video/mipi_display.h>
 
+#ifdef G955N_WITH_AID
+#include "g955n-panel-profile.h"
+#endif
+
 #define DSIM_BASE		0x12870000
 #define DSIM_SIZE		0x100
 #define DISP_POWER_STATUS	0x4064
@@ -54,6 +58,9 @@ MODULE_PARM_DESC(read_calibration, "Validate reads of S6E3HA6 brightness calibra
 static bool test_aor;
 module_param(test_aor, bool, 0400);
 MODULE_PARM_DESC(test_aor, "Temporarily dim via AOR and verify restoration");
+static int test_brightness = -1;
+module_param(test_brightness, int, 0400);
+MODULE_PARM_DESC(test_brightness, "Apply and restore a Samsung brightness level from 0 to 255");
 #endif
 
 #define S6E3HA6_MTP		0xc8
@@ -130,6 +137,12 @@ static int g955n_dsim_read(void __iomem *dsi, u8 address, u8 *data, size_t len)
 		budget--;
 		if ((word & 0x3f) == MIPI_DSI_RX_END_OF_TRANSMISSION)
 			continue;
+		if (!received && len == 1 &&
+		    (word & 0x3f) == MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_1BYTE) {
+			data[0] = word >> 8;
+			received = true;
+			continue;
+		}
 		if (!received && len == 2 &&
 		    (word & 0x3f) == MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_2BYTE) {
 			data[0] = word >> 8;
@@ -193,9 +206,6 @@ static int g955n_dsim_short_param(void __iomem *dsi, u8 address, u8 value)
 }
 
 #ifdef G955N_WITH_AID
-int g955n_aid_verify(const u8 *mtp);
-int g955n_aor_trial_value(const u8 saved[2], u8 trial[2]);
-
 static int g955n_dsim_latch_aor(void __iomem *dsi, const u8 value[2])
 {
 	int ret = g955n_dsim_long3(dsi, 0xb1, value[0], value[1]);
@@ -243,6 +253,139 @@ static int g955n_dsim_check_aor(void __iomem *dsi)
 		pr_info("g955n-dsim: AOR original value restored: %*phN\n", 2, observed);
 	return restore ?: ret;
 }
+static const struct {
+	u8 address;
+	size_t offset;
+	size_t len;
+} g955n_panel_registers[] = {
+	{ 0xca, offsetof(struct g955n_panel_profile, gamma), sizeof_field(struct g955n_panel_profile, gamma) },
+	{ 0xb1, offsetof(struct g955n_panel_profile, aor), sizeof_field(struct g955n_panel_profile, aor) },
+	{ 0xb5, offsetof(struct g955n_panel_profile, elvss), sizeof_field(struct g955n_panel_profile, elvss) },
+	{ 0xf4, offsetof(struct g955n_panel_profile, vint), sizeof_field(struct g955n_panel_profile, vint) },
+	{ 0xb4, offsetof(struct g955n_panel_profile, acl), sizeof_field(struct g955n_panel_profile, acl) },
+	{ 0x55, offsetof(struct g955n_panel_profile, acl_enable), sizeof_field(struct g955n_panel_profile, acl_enable) },
+	{ 0xeb, offsetof(struct g955n_panel_profile, poc), sizeof_field(struct g955n_panel_profile, poc) },
+	{ 0xb8, offsetof(struct g955n_panel_profile, irc), sizeof_field(struct g955n_panel_profile, irc) },
+};
+
+static int g955n_dsim_write_register(void __iomem *dsi, u8 address,
+				     const u8 *data, size_t len)
+{
+	u32 word = address;
+	size_t i;
+	int ret;
+
+	if (len == 1)
+		return g955n_dsim_short_param(dsi, address, data[0]);
+
+	ret = g955n_dsim_wait_tx(dsi);
+	if (ret)
+		return ret;
+	for (i = 1; i <= len; i++) {
+		word |= (u32)data[i - 1] << (8 * (i % 4));
+		if (i % 4 == 3 || i == len) {
+			writel(word, dsi + DSIM_PAYLOAD);
+			word = 0;
+		}
+	}
+	writel(MIPI_DSI_DCS_LONG_WRITE | ((len + 1) << 8), dsi + DSIM_PKTHDR);
+	return g955n_dsim_wait_tx(dsi);
+}
+
+static int g955n_dsim_read_profile(void __iomem *dsi, struct g955n_panel_profile *profile)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < ARRAY_SIZE(g955n_panel_registers); i++) {
+		const typeof(*g955n_panel_registers) *reg = &g955n_panel_registers[i];
+
+		ret = g955n_dsim_read(dsi, reg->address, (u8 *)profile + reg->offset, reg->len);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
+
+static int g955n_dsim_write_profile(void __iomem *dsi, const struct g955n_panel_profile *profile)
+{
+	unsigned int i;
+	int ret;
+
+	/* Match the Dream2 A3 set-backlight command order before the latch. */
+	for (i = 0; i < ARRAY_SIZE(g955n_panel_registers); i++) {
+		const typeof(*g955n_panel_registers) *reg = &g955n_panel_registers[i];
+
+		ret = g955n_dsim_write_register(dsi, reg->address,
+					       (const u8 *)profile + reg->offset, reg->len);
+		if (ret)
+			return ret;
+	}
+	return g955n_dsim_short_param(dsi, 0xf7, 0x03);
+}
+
+static int g955n_dsim_check_profile(void __iomem *dsi,
+				    const struct g955n_panel_profile *expected)
+{
+	struct g955n_panel_profile observed;
+	unsigned int i;
+	int ret;
+
+	ret = g955n_dsim_read_profile(dsi, &observed);
+	if (ret)
+		return ret;
+	for (i = 0; i < ARRAY_SIZE(g955n_panel_registers); i++) {
+		const typeof(*g955n_panel_registers) *reg = &g955n_panel_registers[i];
+
+		if (memcmp((const u8 *)expected + reg->offset,
+			   (const u8 *)&observed + reg->offset, reg->len)) {
+			pr_info("g955n-dsim: brightness register %02x readback differs\n",
+				reg->address);
+			return -EIO;
+		}
+	}
+	return 0;
+}
+
+static int g955n_dsim_test_profile(void __iomem *dsi)
+{
+	struct g955n_panel_profile saved, trial;
+	u8 mtp[S6E3HA6_MTP_LEN];
+	int ret, restore;
+
+	ret = g955n_dsim_read_profile(dsi, &saved);
+	if (!ret)
+		ret = g955n_dsim_check_profile(dsi, &saved);
+	if (ret)
+		return ret;
+
+	trial = saved;
+	ret = g955n_dsim_read(dsi, S6E3HA6_MTP, mtp, sizeof(mtp));
+	if (!ret)
+		ret = g955n_build_panel_profile(mtp, test_brightness, &trial);
+	memzero_explicit(mtp, sizeof(mtp));
+	if (ret)
+		return ret;
+	if (!memcmp(&saved, &trial, sizeof(saved)))
+		return -EALREADY;
+
+	ret = g955n_dsim_write_profile(dsi, &trial);
+	if (!ret)
+		ret = g955n_dsim_check_profile(dsi, &trial);
+	if (!ret)
+		pr_info("g955n-dsim: brightness level %d read back after latch\n",
+			test_brightness);
+	restore = g955n_dsim_write_profile(dsi, &saved);
+	if (!restore)
+		restore = g955n_dsim_check_profile(dsi, &saved);
+	if (restore)
+		pr_err("g955n-dsim: brightness profile restoration not verified: %d\n",
+		       restore);
+	else
+		pr_info("g955n-dsim: original brightness profile restored\n");
+	return restore ?: ret;
+}
+
 #endif
 
 static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
@@ -303,6 +446,8 @@ static int g955n_dsim_check_calibration(void __iomem *dsi)
 #ifdef G955N_WITH_AID
 	if (!ret && test_aor)
 		ret = g955n_dsim_check_aor(dsi);
+	if (!ret && test_brightness >= 0)
+		ret = g955n_dsim_test_profile(dsi);
 #endif
 
 	while (opened) {
@@ -353,8 +498,10 @@ static int __init g955n_dsim_identify(void)
 	int ret;
 
 #ifdef G955N_WITH_AID
-	if (test_aor && !read_calibration)
+	if ((test_aor || test_brightness >= 0) && !read_calibration)
 		return -EINVAL;
+	if (test_brightness < -1 || test_brightness > 255)
+		return -ERANGE;
 #endif
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;

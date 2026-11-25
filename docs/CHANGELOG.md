@@ -2755,3 +2755,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added an opt-in AOR write and restore probe using Samsung's
   Dream2 A3 brightness table and latch command. Verified both
   register readbacks on the live panel.
+
+## 2026-11-25 — Exercise the full OLED brightness command sequence
+
+- Added the Samsung normal-brightness profile builder and an opt-in
+  reversible panel test. The live panel accepted all eight brightness
+  registers and returned the original profile after restoration.

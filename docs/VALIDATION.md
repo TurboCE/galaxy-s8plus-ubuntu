@@ -6588,3 +6588,16 @@ GDM, Wi-Fi, the sensor hub, the connected DSI connector, and the
 default PipeWire bottom-speaker routing were available afterward.
 The AOR register change was verified. OLED luminance, the full
 brightness packet sequence and Linux backlight binding remain open.
+
+## 2026-11-25 — Dream2 A3 normal-brightness profile readback on 6.18
+
+Built the DSIM and AID variants for ARM64 with `W=1`. The integrated
+SM-G955N accepted the complete Samsung normal-brightness sequence at
+user level 100, derived from factory MTP and the OEM PAC, gamma,
+ELVSS and IRC tables. After the latch, CA, B1, B5, F4, B4, 55, EB
+and B8 all matched the expected profile. Reapplying the original
+snapshot restored the bytes in all eight registers. The panel lock
+keys were sent and the DSIM timeout read back as `0x00ffffff`.
+GDM and the BCM4773 daemon remained active. This measured register
+state. Physical luminance and the GNU/Linux backlight client path
+remain unverified.
