@@ -3068,3 +3068,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Added read-only charge-state decoding to the wired and wireless
   source driver and linked the fuel gauge's status to its suppliers.
+
+
+## 2026-11-26 — Retain live MAX77865 charge reporting
+
+- Verified the charger status through the Linux battery class and
+  Ubuntu UPower, including a state change while USB remained online.

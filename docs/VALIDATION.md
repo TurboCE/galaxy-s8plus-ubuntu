@@ -7753,3 +7753,30 @@ all 16 status nibble cases and an I/O failure case on the host.
 The installed battery driver is built into the kernel. This turn
 did not replace it or program any charging settings. Live status
 reporting through UPower and physical charge transitions remain open.
+
+
+## 2026-11-26 — MAX77865 charge state reaches Ubuntu UPower
+
+Matched the build tree's baseline Linux Image byte-for-byte with the
+installed BOOT payload. Rebuilt the kernel with proposal 0148 and
+verified identical config, release name and sorted module export
+table. The trial kept the embedded initramfs and both DTs. Verified
+the replacement input module against its SHA-256, preserved the
+original module, backed up the exact prior BOOT in recovery and
+verified the new BOOT and protected partitions.
+
+With the USB source online and the Qi source offline, a one-shot
+charger read reported INT_OK=0xdf and DETAILS_01=0x33. The charger
+and battery devices reported Full, while UPower reported
+fully-charged at 99%. A same-boot RTC-woken s2idle returned with
+the same state. A subsequent register read returned INT_OK=0xcf
+and DETAILS_01=0x3b with USB still online. Both power supplies and
+UPower changed to discharging without restarting or rebinding
+either driver. The test changed no charge mode or current limit.
+
+USB SSH, Wi-Fi, GDM and the location hub returned after suspend.
+The DPU1 domain stayed active and full-panel PRIME imports still
+passed in both directions. The built-in bottom speaker remained
+the default output. No acoustic playback test or Qi charge trial
+was performed. Removed the trial return timer and retained the
+verified BOOT and input module.
