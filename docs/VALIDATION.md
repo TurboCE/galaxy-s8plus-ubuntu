@@ -7961,3 +7961,27 @@ the bottom speaker remained the default audio route.
 
 The fixture verifies the colour mapping and PMIC readback. Optical
 emission and physical plug or Qi transitions were not measured.
+
+
+## 2026-11-26 — Bluetooth LE advertising and Wi-Fi after s2idle
+
+Registered a temporary local GATT application and connectable LE
+advertisement through the packaged BlueZ. The Broadcom controller
+returned successful HCI status for the advertising data, parameters,
+enable and disable commands. Both advertising trials ended with zero
+active instances. The second trial ran after an RTC-woken s2idle cycle
+on the same BOOT, with the successful-suspend counter up by one and
+no increase in failures.
+
+The test Mac's CoreBluetooth authorization remained notDetermined and
+its client never started scanning. Neither trial established a peer
+connection or exchanged a GATT value. The test advertisement was
+removed and no device was paired.
+
+Authenticated SSH over the phone's Wi-Fi address succeeded after
+wake. The IPv4 default route used only Wi-Fi. A strict apt-get update
+through that session exited zero with 33 index responses. No packages
+were upgraded. The kernel logged one chanspec error before suspend and
+one scan-suppression message after wake. GDM, the BCM4773 daemon and
+the default bottom speaker remained available. The DRM panel reported
+On with GNOME still locked after wake.
