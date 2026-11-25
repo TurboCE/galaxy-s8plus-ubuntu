@@ -7566,3 +7566,40 @@ display orientation after the sequence. GNOME, Wi-Fi and the location
 hub stayed active and the bottom speaker remained the default sink.
 The udev file is installed persistently. No reboot or rotated touch
 target test was performed for this rule change.
+
+
+## 2026-11-26 — Live DECON reserve and DPU1 System MMU check
+
+With the 160 MiB display pool and GNOME still running after the
+physical rotation tests, aggregate CmaFree was approximately
+12.6 MiB. A fresh, sequential KMS allocation and PRIME import
+into Panfrost succeeded for both 16.3 MiB panel-sized geometries.
+CmaFree counts currently unused CMA pages across pools. The DT
+pool is reusable, so this value is not the largest reclaimable
+allocation or the amount of memory used by DECON. This supports
+keeping the current allocator headroom. It does not quantify a
+minimum reliable pool size.
+
+A read-only ARM64 probe on the existing boot found DPU0 status
+0x3000f, DPU1 ACLK and nonsecure PCLK both 0x00200000 and the DPU1
+Q-channel at 0x003f0003. The Samsung CAL tables describe the two
+clock locations and the Q-channel. With the same clocks available,
+an isolated one-shot read of the stock nonsecure DPU1 register
+range returned version 0x70000011 and control 0x00000004.
+Mainline CTRL_ENABLE is 0x5. No DPU1 translation or register
+changes were requested by the probes.
+
+The underlying 6.18 Exynos driver delegates reserved-region
+processing to the DMA IOMMU helper. Its DT parser supports an
+identity-mapped firmware framebuffer through a memory-region
+and matching iommu-addresses entry. The IOMMU core installs direct
+mappings before attaching the device to its DMA domain. The DECON
+handoff will also need to keep the SysMMU runtime-active while
+scanout is active before a DMA-domain test is safe. No domain
+was attached and no framebuffer was presented through DPU1.
+
+The read-only clock snapshot module stays inert until the next
+ordinary reboot because the running build has module unloading
+disabled. Its temporary file was removed. The second probe
+exited from initialization after logging its result and did not
+leave a resident module. GDM and the existing scanout stayed active.
