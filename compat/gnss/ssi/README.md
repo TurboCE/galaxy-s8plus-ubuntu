@@ -198,3 +198,19 @@ after the first read so intervals between reads do not discard step
 deltas. The IIO counter sums unsigned firmware deltas for the lifetime
 of the driver binding. A stationary reading of zero only checks the
 counter endpoint. A physical walking trial is still needed.
+
+## Native compass
+
+The motion option also exposes magnetic heading from the hub's
+17-byte rotation-vector report. The driver projects the device's
+positive Y axis onto the horizontal plane and reports the heading in
+millidegrees. It rejects malformed quaternions and orientations where
+the heading is undefined.
+
+Merge [compass.config](compass.config) into the mainline kernel
+configuration to enable the standard IIO trigger and scan buffer.
+Ubuntu's packaged SensorProxy discovers the tilted magnetic heading
+channel and uses the associated `magn_3d-devN` trigger. Consumers
+can use the standard Compass API under its existing GeoClue policy.
+Without the trigger config the raw heading remains readable through
+IIO. Physical heading and axis calibration require a rotation trial.

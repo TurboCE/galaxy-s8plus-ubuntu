@@ -8,6 +8,12 @@
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
 #include <linux/iio/iio.h>
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+#include <linux/iio/buffer.h>
+#include <linux/iio/trigger.h>
+#include <linux/iio/trigger_consumer.h>
+#include <linux/iio/triggered_buffer.h>
+#endif
 #include <linux/iopoll.h>
 #include <linux/kfifo.h>
 #include <linux/kref.h>
@@ -23,6 +29,8 @@
 #include <linux/uaccess.h>
 #include <linux/unaligned.h>
 #include <linux/workqueue.h>
+
+#include "g955n-heading.h"
 
 #define SSI_WRITE	0x00
 #define SSI_READ	0x20
@@ -81,15 +89,19 @@ enum ssi_iio_kind {
 	SSI_MAGN,
 	SSI_PRESS,
 	SSI_STEPS,
+	SSI_HEADING,
 	SSI_IIO_COUNT,
 };
 
 struct ssi_sensor_slot {
 	struct iio_dev *iio;
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+	struct iio_trigger *trigger;
+#endif
 	int sample[3];
 	s64 steps;
 	unsigned long stamp, access;
-	bool requested, running, valid;
+	bool requested, running, valid, buffered;
 };
 
 static const u8 ssi_sensor_ids[] = {
@@ -100,6 +112,7 @@ static const u8 ssi_sensor_ids[] = {
 	[SSI_MAGN] = 4,
 	[SSI_PRESS] = 5,
 	[SSI_STEPS] = 18,
+	[SSI_HEADING] = 17,
 };
 
 static const u8 ssi_sensor_lengths[] = {
@@ -110,6 +123,7 @@ static const u8 ssi_sensor_lengths[] = {
 	[SSI_MAGN] = 8,
 	[SSI_PRESS] = 6,
 	[SSI_STEPS] = 4,
+	[SSI_HEADING] = 17,
 };
 
 struct ssi_bbd_rx {
@@ -312,9 +326,25 @@ static void ssi_sensor_report(struct g955n_ssi *ssi, const u8 *data, size_t size
 			slot->steps += min_t(u64, delta, S64_MAX - slot->steps);
 			break;
 		}
+		case SSI_HEADING: {
+			s32 q[4] = {
+				get_unaligned_le32(sample),
+				get_unaligned_le32(sample + 4),
+				get_unaligned_le32(sample + 8),
+				get_unaligned_le32(sample + 12),
+			};
+
+			if (!g955n_heading_mdeg(q, &slot->sample[0]))
+				continue;
+			break;
+		}
 		}
 		WRITE_ONCE(slot->stamp, jiffies);
 		WRITE_ONCE(slot->valid, true);
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+		if (slot->buffered)
+			iio_trigger_poll_nested(slot->trigger);
+#endif
 		wake_up_interruptible(&ssi->wait);
 	}
 }
@@ -508,7 +538,7 @@ static void ssi_sensor_schedule_idle(struct g955n_ssi *ssi)
 		struct ssi_sensor_slot *slot = &ssi->slots[i];
 		unsigned long expires, delay;
 
-		if (!slot->requested || i == SSI_STEPS)
+		if (!slot->requested || slot->buffered || i == SSI_STEPS)
 			continue;
 		expires = slot->access + msecs_to_jiffies(SSP_SENSOR_IDLE_MS);
 		delay = time_after(expires, now) ? expires - now : 1;
@@ -531,7 +561,8 @@ static void ssi_sensor_idle(struct work_struct *work)
 		struct ssi_sensor_slot *slot = &ssi->slots[i];
 		unsigned long expires = slot->access + msecs_to_jiffies(SSP_SENSOR_IDLE_MS);
 
-		if (i != SSI_STEPS && slot->requested && time_after_eq(jiffies, expires)) {
+		if (i != SSI_STEPS && slot->requested && !slot->buffered &&
+		    time_after_eq(jiffies, expires)) {
 			slot->requested = false;
 			WRITE_ONCE(slot->valid, false);
 		}
@@ -565,6 +596,10 @@ static int ssi_iio_read_raw(struct iio_dev *indio, const struct iio_chan_spec *c
 
 	if (mask == IIO_CHAN_INFO_SCALE) {
 		*value = 0;
+		if (priv->kind == SSI_HEADING) {
+			*value2 = 1000;
+			return IIO_VAL_INT_PLUS_MICRO;
+		}
 		if (priv->kind == SSI_PRESS) {
 			if (chan->type == IIO_TEMP) {
 				/* Samsung's LPS22H factory interface reports centidegrees. */
@@ -699,6 +734,78 @@ static const struct iio_chan_spec ssi_steps_channels[] = {
 	},
 };
 
+static const struct iio_chan_spec ssi_heading_channels[] = {
+	{
+		.type = IIO_ROT,
+		.modified = 1,
+		.channel2 = IIO_MOD_NORTH_MAGN_TILT_COMP,
+		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) | BIT(IIO_CHAN_INFO_SCALE),
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+		.scan_index = 0,
+		.scan_type = {
+			.sign = 's',
+			.realbits = 32,
+			.storagebits = 32,
+			.endianness = IIO_LE,
+		},
+#endif
+	},
+};
+
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+static int ssi_heading_trigger_state(struct iio_trigger *trigger, bool enabled)
+{
+	struct g955n_ssi *ssi = iio_trigger_get_drvdata(trigger);
+	struct ssi_sensor_slot *slot = &ssi->slots[SSI_HEADING];
+
+	mutex_lock(&ssi->lock);
+	slot->buffered = enabled;
+	slot->requested = enabled;
+	if (!enabled)
+		WRITE_ONCE(slot->valid, false);
+	ssi_sensor_update(ssi);
+	ssi_sensor_schedule_idle(ssi);
+	mutex_unlock(&ssi->lock);
+	return 0;
+}
+
+static const struct iio_trigger_ops ssi_heading_trigger_ops = {
+	.set_trigger_state = ssi_heading_trigger_state,
+	.validate_device = iio_trigger_validate_own_device,
+};
+
+static irqreturn_t ssi_heading_push(int irq, void *data)
+{
+	struct iio_poll_func *poll = data;
+	struct ssi_iio_priv *priv = iio_priv(poll->indio_dev);
+	struct ssi_sensor_slot *slot = &priv->ssi->slots[SSI_HEADING];
+	__le32 heading = cpu_to_le32(READ_ONCE(slot->sample[0]));
+
+	iio_push_to_buffers(poll->indio_dev, &heading);
+	iio_trigger_notify_done(poll->indio_dev->trig);
+	return IRQ_HANDLED;
+}
+
+static int ssi_heading_buffer_init(struct g955n_ssi *ssi, struct iio_dev *indio)
+{
+	struct device *dev = &ssi->spi->dev;
+	struct iio_trigger *trigger;
+	int ret;
+
+	trigger = devm_iio_trigger_alloc(dev, "magn_3d-dev%d", iio_device_id(indio));
+	if (!trigger)
+		return -ENOMEM;
+	trigger->ops = &ssi_heading_trigger_ops;
+	iio_trigger_set_drvdata(trigger, ssi);
+	ret = devm_iio_triggered_buffer_setup(dev, indio, NULL, ssi_heading_push, NULL);
+	if (ret)
+		return ret;
+
+	ssi->slots[SSI_HEADING].trigger = trigger;
+	return devm_iio_trigger_register(dev, trigger);
+}
+#endif
+
 static const struct iio_info ssi_sensor_info = {
 	.read_raw = ssi_iio_read_raw,
 };
@@ -715,6 +822,7 @@ static const struct {
 	[SSI_MAGN] = { "g955n-bcm4773-magnetometer", ssi_magn_channels, ARRAY_SIZE(ssi_magn_channels) },
 	[SSI_PRESS] = { "g955n-bcm4773-pressure", ssi_pressure_channels, ARRAY_SIZE(ssi_pressure_channels) },
 	[SSI_STEPS] = { "g955n-bcm4773-steps", ssi_steps_channels, ARRAY_SIZE(ssi_steps_channels) },
+	[SSI_HEADING] = { "g955n-bcm4773-heading", ssi_heading_channels, ARRAY_SIZE(ssi_heading_channels) },
 };
 
 static int ssi_register_sensor(struct g955n_ssi *ssi, enum ssi_iio_kind kind)
@@ -734,6 +842,13 @@ static int ssi_register_sensor(struct g955n_ssi *ssi, enum ssi_iio_kind kind)
 	indio->info = &ssi_sensor_info;
 	indio->channels = ssi_iio_layout[kind].channels;
 	indio->num_channels = ssi_iio_layout[kind].count;
+#if IS_ENABLED(CONFIG_IIO_TRIGGERED_BUFFER)
+	if (kind == SSI_HEADING) {
+		ret = ssi_heading_buffer_init(ssi, indio);
+		if (ret)
+			return ret;
+	}
+#endif
 	ssi->slots[kind].iio = indio;
 	ret = iio_device_register(indio);
 	if (ret)
@@ -1914,7 +2029,7 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (expose_legacy_motion) {
 		enum ssi_iio_kind kind;
 
-		for (kind = SSI_GYRO; kind <= SSI_STEPS; kind++) {
+		for (kind = SSI_GYRO; kind <= SSI_HEADING; kind++) {
 			ret = ssi_register_sensor(ssi, kind);
 			if (ret)
 				goto deregister_sensor;

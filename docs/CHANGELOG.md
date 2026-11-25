@@ -2784,3 +2784,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   and step-count attributes to the BCM4773 driver. Verified all seven
   IIO devices after reboot and retained Ubuntu's existing SensorProxy
   inputs, backlight, Wi-Fi and audio routing.
+
+## 2026-11-25 — Expose the native compass to Ubuntu SensorProxy
+
+- Decoded the BCM4773 rotation vector into IIO magnetic heading and
+  connected the standard IIO trigger buffer. After reboot the packaged
+  SensorProxy published heading through its GeoClue Compass API.

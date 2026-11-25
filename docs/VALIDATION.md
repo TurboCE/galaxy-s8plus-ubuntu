@@ -6675,3 +6675,23 @@ System SensorProxy continued to recognize accelerometer, ambient
 light and proximity. Light resumed reporting lux, and the far
 proximity state included a live ADC reading. The OLED backlight,
 Wi-Fi and default lower-speaker routing remained available.
+
+## 2026-11-25 — Magnetic heading through stock SensorProxy
+
+The fixed-point calculation passed 11,880 synthetic heading and
+tilt cases under the host undefined-behavior sanitizer. Zero,
+out-of-range and vertical-axis inputs were rejected. Both the
+direct-read and IIO-trigger module variants built with `W=1`.
+
+Staged the exact 6.18 IIO core and trigger modules and the updated
+SSI module with the previous module backed up. The integrated
+handset rebooted without changing BOOT. It registered the standard
+magnetic-tilt heading channel and trigger. The packaged
+`/usr/libexec/iio-sensor-proxy` returned HasCompass and delivered
+a valid magnetic heading to a seven-second claim by the GeoClue
+account. A subsequent native buffer read collected 157 stationary
+samples with one distinct value. This checks delivery and range.
+Absolute heading and response to physical rotation are unverified.
+SensorProxy retained accelerometer, ambient light and proximity,
+and Wi-Fi, GDM, OLED backlight and bottom-speaker routing remained
+available.
