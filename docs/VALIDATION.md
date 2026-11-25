@@ -6804,3 +6804,18 @@ hash is unchanged. The root-only readback returned LDO2=0x28
 The pre-existing PMIC report was unchanged. GDM, backlight,
 Wi-Fi and the BCM4773 hub were active after the reboot. No supply
 voltage or enable was changed by the probe.
+
+
+## 2026-11-25 — Default-speed microSD candidate
+
+Proposal 0143 adds the Korean board slot to the existing Exynos DW-MMC
+controller. It supplies the slot from the GPIO-controlled 2.8 V load
+switch and keeps the existing S2MPS17 LDO2 selector. The new ACPM
+regulator is optional and validates that selector before exposing its
+enable bits. A voltage mismatch leaves the existing codec and hub
+supplies available. The trial uses standard SD timing and no UHS modes.
+
+Compiled the ACPM module for ARM64 with W=1. Recompiled the exact live
+DTB with the microSD delta and compared the decoded trees. Only the
+MMC node, two supplies and their new pin references changed. At this
+stage no card I/O or controller registration had been verified.

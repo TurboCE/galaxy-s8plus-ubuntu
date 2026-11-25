@@ -1,0 +1,117 @@
+Subject: [PATCH] arm64: dts: prepare the SM-G955N microSD slot at 2.8 V
+
+Use the observed S2MPS17 selector for the I/O rail and the separate
+GPIO-controlled card supply. Translate the Samsung timing cells to the
+upstream format and start with SD default speed at the fixed voltage.
+This trial leaves UHS modes out until voltage switching is qualified.
+
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -186,6 +186,39 @@
+ 	G955N_LDO("ldo33", 0x5e, 1200000),
+ 	G955N_LDO("ldo38", 0x63, 1800000),
+ };
++
++static const struct regulator_desc exynos8895_sd_io =
++	G955N_LDO("ldo2", S2MPS17_LDO2_CTRL, 2800000);
++
++static void exynos8895_register_sd_io(struct device *dev,
++				    struct exynos8895_acpm_layout *layout,
++				    struct device_node *regulators)
++{
++	struct regulator_config cfg = { .dev = dev, .driver_data = layout };
++	struct regulator_dev *rdev;
++	struct device_node *node;
++	u8 control;
++	int ret;
++
++	node = of_get_child_by_name(regulators, "ldo2");
++	if (!node)
++		return;
++	of_node_put(node);
++
++	ret = exynos8895_acpm_pmic_read(layout, 1, S2MPS17_LDO2_CTRL, &control);
++	if (ret) {
++		dev_warn(dev, "cannot read the microSD I/O selector: %d\n", ret);
++		return;
++	}
++	if (FIELD_GET(S2MPS17_LDO_SELECTOR, control) != 0x28) {
++		dev_warn(dev, "microSD I/O voltage selector differs from 2.8 V\n");
++		return;
++	}
++
++	rdev = devm_regulator_register(dev, &exynos8895_sd_io, &cfg);
++	if (IS_ERR(rdev))
++		dev_warn(dev, "cannot register the microSD I/O supply: %pe\n", rdev);
++}
+ 
+ static int exynos8895_register_ldos(struct device *dev, struct exynos8895_acpm_layout *layout)
+ {
+@@ -385,8 +418,10 @@
+ 
+ 	regulators = of_get_child_by_name(dev->of_node, "regulators");
+ 	if (regulators) {
++		ret = exynos8895_register_ldos(dev, layout);
++		if (!ret)
++			exynos8895_register_sd_io(dev, layout, regulators);
+ 		of_node_put(regulators);
+-		ret = exynos8895_register_ldos(dev, layout);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret, "S2MPS17 rail registration failed\n");
+ 		ret = exynos8895_enable_rtcbuf(dev, layout);
+diff --git a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -185,12 +185,27 @@
+ 		samsung,pmu = <&pmu_system_controller>;
+ 	};
+ 
++	g955n_sd_vmmc: regulator-sd-card {
++		compatible = "regulator-fixed";
++		regulator-name = "vdd-sd-card-2v8";
++		regulator-min-microvolt = <2800000>;
++		regulator-max-microvolt = <2800000>;
++		gpio = <&gpb1 1 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++	};
++
+ 	acpm_layout: acpm-layout@16500000 {
+ 		compatible = "samsung,exynos8895-acpm-layout";
+ 		reg = <0x16500000 0xb400>, <0x16440000 0x1000>;
+ 		#clock-cells = <0>;
+ 
+ 		regulators {
++			g955n_sd_vqmmc: ldo2 {
++				regulator-name = "vdd-sd-io-2v8";
++				regulator-min-microvolt = <2800000>;
++				regulator-max-microvolt = <2800000>;
++			};
++
+ 			g955n_codec_1v8: ldo32 {
+ 				regulator-name = "vdd-codec-1v8";
+ 				regulator-min-microvolt = <1800000>;
+@@ -615,3 +630,23 @@
+ 		host-wakeup-gpios = <&gpa2 3 GPIO_ACTIVE_HIGH>;
+ 	};
+ };
++
++&mmc {
++	pinctrl-names = "default";
++	pinctrl-0 = <&sd2_clk &sd2_cmd &sd2_bus1 &sd2_bus4>;
++	bus-width = <4>;
++	cd-gpios = <&gpa1 5 GPIO_ACTIVE_LOW>;
++	cd-debounce-delay-ms = <200>;
++	disable-wp;
++	max-frequency = <25000000>;
++	no-1-8-v;
++	no-mmc;
++	no-sdio;
++	vmmc-supply = <&g955n_sd_vmmc>;
++	vqmmc-supply = <&g955n_sd_vqmmc>;
++
++	samsung,dw-mshc-ciu-div = <3>;
++	samsung,dw-mshc-sdr-timing = <0 2>;
++	samsung,dw-mshc-ddr-timing = <1 2>;
++	status = "okay";
++};

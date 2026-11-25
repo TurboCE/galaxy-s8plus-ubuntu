@@ -1,0 +1,7 @@
+# Removable SD host for the SM-G955N default-speed trial.
+CONFIG_MMC=m
+CONFIG_MMC_BLOCK=m
+CONFIG_MMC_DW=m
+CONFIG_MMC_DW_PLTFM=m
+CONFIG_MMC_DW_EXYNOS=m
+# CONFIG_BRCMFMAC_SDIO is not set

@@ -2824,3 +2824,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   BCM4773 baseline with the corrected USI8 clock and short SPI delays.
 - Verified actual vibration, cancellation, s2idle motor shutdown,
   LED register state and the same hardware interfaces after reboot.
+
+
+## 2026-11-25 — microSD and NFC electrical prerequisites
+
+- Installed a read-only ACPM module update and verified the microSD and
+  NFC I/O supply states after reboot.
+- Prepared an opt-in, default-speed microSD kernel build using the
+  board's pinmux, card-detect line and independently controlled supplies.
