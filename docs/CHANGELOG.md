@@ -2659,3 +2659,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Confirmed the original daemon's firmware startup and sensor response
   on the working Samsung kernel. Added and verified the opt-in
   read-only BBD patch endpoint on 6.18.
+
+## 2026-11-25 — BCM4773 firmware lifecycle endpoint
+
+- Added an opt-in, root-only BBD control endpoint for daemon startup
+  notifications and SSI patch delimiters on 6.18. The status records
+  caller messages and qualifies only the control interface.
+- Verified transitions, malformed input rejection and SPI unbind on the
+  handset. Kept the trial module out of the boot configuration.

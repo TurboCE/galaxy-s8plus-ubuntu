@@ -23,8 +23,7 @@ raw Broadcom wire data that still require BBD/RPC demultiplexing.
 On 6.18 VPN2, the endpoint passed exclusive open, idle receive, release
 and driver unbind with a descriptor still open. Each release left the
 regulator disabled. No nonempty payload was sent during that test.
-The Samsung BBD control/sensor/patch devices, SSP sensor data and GNSS
-receiver output are outside the endpoint's current implementation.
+The raw endpoint does not decode SSP sensor data or GNSS receiver output.
 Do not install this as the phone's default sensor driver until those
 consumers and suspend behavior are qualified.
 
@@ -50,6 +49,21 @@ releases its firmware reference.
 
 Verified on 6.18 with a byte-for-byte readback of the handset's stock
 patch stream. This endpoint supplies the file to a future legacy-daemon
-bridge. It does not send the patch to the hub. `bbd_control`,
-`bbd_sensor`, the daemon's SPI stream compatibility and runtime
-firmware transfer still need end-to-end qualification.
+bridge. It does not send the patch to the hub.
+
+## BBD firmware lifecycle control
+
+With `expose_legacy_control=1`, the module adds root-only
+`/dev/bbd_control` and the read-only status file
+`/sys/class/misc/bbd_control/daemon_status`. It accepts the firmware
+lifecycle notifications `ESW:NOTREADY`, `ESW:READY`, `ESW:CRASHED`,
+and the SSI patch transfer delimiters. Reading an idle control stream
+returns EOF, and the endpoint signals hangup on SPI unbind. It does not
+yet issue the kernel's `BBD:RESET_REQ` or change SPI framing based on the
+transfer flag.
+
+The status describes notifications supplied by the caller. It does not
+establish that the hub booted. On-device tests injected control messages
+and verified state transitions, input validation and descriptor lifetime.
+The original daemon, `ttyBCM` stream, actual patch transfer and
+`bbd_sensor` exchange still require end-to-end qualification.

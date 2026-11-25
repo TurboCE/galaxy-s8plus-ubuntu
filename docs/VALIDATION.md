@@ -6274,3 +6274,25 @@ open returned EACCES. The original data read back byte for byte and
 the endpoint supported seek and EOF. Removed the temporary firmware
 file and unbound the driver. The Bottom Speaker stayed the default
 output. No firmware was sent to the hub on 6.18 in this test.
+
+### BCM4773 BBD control endpoint on 6.18 VPN2
+
+Built both the canonical module and a renamed live trial with ARM64
+`W=1` against the matching VPN2 sources. The trial changed only the SPI
+driver and module names so the resident, unbound test driver could stay
+loaded. The BOOT hash and Korean board model were checked over USB before
+loading.
+
+The real `/dev/bbd_control` node was root-owned with mode 0600. Synthetic
+vendor commands exercised unknown, not-ready, ready and crashed status,
+including patch transfer flag set, clear and crash reset. Idle reads
+returned EOF without readable poll events. An oversize command, embedded
+NUL data and a kernel-originated reset command were rejected without
+changing status. Unbinding SPI with a descriptor open yielded
+`POLLERR|POLLHUP` and `ENODEV` for subsequent I/O. The control and SSI nodes
+disappeared and the previously unbound SPI state was restored. PipeWire
+retained the default lower speaker sink. No BOOT, firmware or partition
+was written and the hub was not powered for this test.
+
+The commands were injected by the test. Actual daemon readiness, patch
+transfer, IIO measurements and a receiver fix remain unverified on 6.18.

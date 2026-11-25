@@ -12,6 +12,8 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/poll.h>
+#include <linux/string.h>
+#include <linux/sysfs.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
@@ -22,11 +24,23 @@
 #define SSI_HEADER	2
 #define SSI_PAYLOAD	254
 #define BBD_PATCH_NAME	"samsung/g955n/bbd-patch.bin"
+#define BBD_CONTROL_MAX	64
 #define BBD_PATCH_SIZE	1023148
 
 static bool expose_legacy_patch;
 module_param(expose_legacy_patch, bool, 0400);
 MODULE_PARM_DESC(expose_legacy_patch, "Expose the verified board patch through /dev/bbd_patch");
+
+static bool expose_legacy_control;
+module_param(expose_legacy_control, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_control, "Expose the legacy firmware lifecycle control device");
+
+enum bbd_firmware_state {
+	BBD_FIRMWARE_UNKNOWN,
+	BBD_FIRMWARE_NOT_READY,
+	BBD_FIRMWARE_READY,
+	BBD_FIRMWARE_CRASHED,
+};
 
 struct g955n_ssi {
 	struct kref refs;
@@ -34,6 +48,9 @@ struct g955n_ssi {
 	wait_queue_head_t wait;
 	struct miscdevice misc;
 	struct miscdevice patch;
+	struct miscdevice control;
+	enum bbd_firmware_state firmware_state;
+	bool patch_transfer;
 	struct spi_device *spi;
 	struct regulator *supply;
 	struct gpio_desc *request;
@@ -425,6 +442,139 @@ static const struct file_operations ssi_patch_ops = {
 	.llseek = ssi_patch_seek,
 };
 
+static int ssi_control_open(struct inode *inode, struct file *file)
+{
+	struct g955n_ssi *ssi = container_of(file->private_data,
+					   struct g955n_ssi, control);
+	int ret = stream_open(inode, file);
+
+	if (ret)
+		return ret;
+
+	kref_get(&ssi->refs);
+	file->private_data = ssi;
+	return 0;
+}
+
+static int ssi_control_release(struct inode *inode, struct file *file)
+{
+	struct g955n_ssi *ssi = file->private_data;
+
+	kref_put(&ssi->refs, ssi_free);
+	return 0;
+}
+
+static ssize_t ssi_control_read(struct file *file, char __user *buffer,
+				size_t length, loff_t *position)
+{
+	struct g955n_ssi *ssi = file->private_data;
+
+	/* No kernel-originated messages are produced yet. */
+	return READ_ONCE(ssi->removed) ? -ENODEV : 0;
+}
+
+static ssize_t ssi_control_write(struct file *file, const char __user *buffer,
+				 size_t length, loff_t *position)
+{
+	struct g955n_ssi *ssi = file->private_data;
+	char command[BBD_CONTROL_MAX + 1];
+	size_t end = length;
+	ssize_t ret = length;
+
+	if (!length)
+		return 0;
+	if (length > BBD_CONTROL_MAX)
+		return -EMSGSIZE;
+	if (copy_from_user(command, buffer, length))
+		return -EFAULT;
+	if (command[end - 1] == '\0')
+		end--;
+	if (end && command[end - 1] == '\n')
+		end--;
+	if (!end || memchr(command, '\0', end))
+		return -EINVAL;
+	command[end] = '\0';
+
+	mutex_lock(&ssi->lock);
+	if (ssi->removed) {
+		ret = -ENODEV;
+	} else if (!strcmp(command, "ESW:NOTREADY")) {
+		ssi->firmware_state = BBD_FIRMWARE_NOT_READY;
+	} else if (!strcmp(command, "ESW:READY")) {
+		ssi->firmware_state = BBD_FIRMWARE_READY;
+	} else if (!strcmp(command, "ESW:CRASHED")) {
+		ssi->firmware_state = BBD_FIRMWARE_CRASHED;
+		ssi->patch_transfer = false;
+	} else if (!strcmp(command, "SSI:PassThru=1")) {
+		ssi->patch_transfer = true;
+	} else if (!strcmp(command, "SSI:PassThru=0")) {
+		ssi->patch_transfer = false;
+	} else if (strcmp(command, "BBD:DEBUG=0") &&
+		   strcmp(command, "SSP:DEBUG=0") &&
+		   strcmp(command, "SSI:DEBUG=0")) {
+		ret = -EOPNOTSUPP;
+	}
+	mutex_unlock(&ssi->lock);
+	return ret;
+}
+
+static __poll_t ssi_control_poll(struct file *file, poll_table *wait)
+{
+	struct g955n_ssi *ssi = file->private_data;
+
+	poll_wait(file, &ssi->wait, wait);
+	return READ_ONCE(ssi->removed) ? EPOLLERR | EPOLLHUP :
+					EPOLLOUT | EPOLLWRNORM;
+}
+
+static const struct file_operations ssi_control_ops = {
+	.owner = THIS_MODULE,
+	.open = ssi_control_open,
+	.release = ssi_control_release,
+	.read = ssi_control_read,
+	.write = ssi_control_write,
+	.poll = ssi_control_poll,
+};
+
+static ssize_t daemon_status_show(struct device *dev,
+				  struct device_attribute *attr, char *buf)
+{
+	static const char * const states[] = {
+		[BBD_FIRMWARE_UNKNOWN] = "unknown",
+		[BBD_FIRMWARE_NOT_READY] = "not-ready",
+		[BBD_FIRMWARE_READY] = "ready",
+		[BBD_FIRMWARE_CRASHED] = "crashed",
+	};
+	struct miscdevice *control = dev_get_drvdata(dev);
+	struct g955n_ssi *ssi = container_of(control, struct g955n_ssi, control);
+	ssize_t count;
+
+	mutex_lock(&ssi->lock);
+	count = sysfs_emit(buf, "firmware_state=%s patch_transfer=%u\n",
+			   states[ssi->firmware_state], ssi->patch_transfer);
+	mutex_unlock(&ssi->lock);
+	return count;
+}
+static DEVICE_ATTR_RO(daemon_status);
+
+static struct attribute *ssi_control_attrs[] = {
+	&dev_attr_daemon_status.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(ssi_control);
+
+static void ssi_disconnect(struct g955n_ssi *ssi)
+{
+	mutex_lock(&ssi->lock);
+	WRITE_ONCE(ssi->removed, true);
+	if (ssi->opened)
+		disable_irq(ssi->irq);
+	if (ssi->powered && ssi_power_off(ssi))
+		dev_err(&ssi->spi->dev, "cannot restore hub power on removal\n");
+	mutex_unlock(&ssi->lock);
+	wake_up_interruptible(&ssi->wait);
+}
+
 static int g955n_ssi_probe(struct spi_device *spi)
 {
 	struct device *dev = &spi->dev;
@@ -499,14 +649,32 @@ static int g955n_ssi_probe(struct spi_device *spi)
 			.fops = &ssi_patch_ops,
 		};
 		ret = misc_register(&ssi->patch);
-		if (ret) {
-			misc_deregister(&ssi->misc);
-			goto free_irq;
-		}
+		if (ret)
+			goto deregister_misc;
+	}
+	if (expose_legacy_control) {
+		ssi->control = (struct miscdevice) {
+			.minor = MISC_DYNAMIC_MINOR,
+			.name = "bbd_control",
+			.mode = 0600,
+			.parent = dev,
+			.fops = &ssi_control_ops,
+			.groups = ssi_control_groups,
+		};
+		ret = misc_register(&ssi->control);
+		if (ret)
+			goto deregister_patch;
 	}
 	spi_set_drvdata(spi, ssi);
 	return 0;
 
+deregister_patch:
+	if (expose_legacy_patch)
+		misc_deregister(&ssi->patch);
+deregister_misc:
+	misc_deregister(&ssi->misc);
+	/* An open could have raced registration of a later endpoint. */
+	ssi_disconnect(ssi);
 free_irq:
 	free_irq(ssi->irq, ssi);
 free:
@@ -518,18 +686,13 @@ static void g955n_ssi_remove(struct spi_device *spi)
 {
 	struct g955n_ssi *ssi = spi_get_drvdata(spi);
 
+	if (expose_legacy_control)
+		misc_deregister(&ssi->control);
 	if (expose_legacy_patch)
 		misc_deregister(&ssi->patch);
 	misc_deregister(&ssi->misc);
-	mutex_lock(&ssi->lock);
-	ssi->removed = true;
-	if (ssi->opened)
-		disable_irq(ssi->irq);
-	if (ssi->powered && ssi_power_off(ssi))
-		dev_err(&spi->dev, "cannot restore hub power on removal\n");
-	mutex_unlock(&ssi->lock);
+	ssi_disconnect(ssi);
 	free_irq(ssi->irq, ssi);
-	wake_up_interruptible(&ssi->wait);
 	kref_put(&ssi->refs, ssi_free);
 }
 
