@@ -7253,3 +7253,20 @@ earlier common-register trial. No image, module or device-tree change
 was deployed in this step. Runtime registration, receiver binding,
 DMA pixel transfer, camera apps and suspend with the camera in use
 remain unverified.
+
+
+## 2026-11-26 — CSISx4 DMA clock prerequisites
+
+Samsung's Exynos8895 sensor clock setup requests both DMA and QoS
+virtual clocks. The CAL tables map their Q-channels to CAM CMU
+offsets 0x3028 and 0x3038. The CAL gate read uses bit 21 when bit 20
+selects manual control, and the inverse of bit 28 in automatic mode.
+The earlier common-block trial checked bit 21 alone and did not
+read either Q-channel. Those checks could not establish the clocks
+or explain the interrupted transport.
+
+The revised one-shot clock snapshot checks CAM power and reads the
+separate CAM CMU registers only. An ARM64 W=1 build succeeded and
+the module metadata exposes the new parameter for the installed
+kernel release. USB network and Tailscale still did not respond.
+The clock snapshot has not run on the handset.

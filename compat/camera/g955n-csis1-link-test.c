@@ -22,6 +22,15 @@
 #define CAM_CSIS1_APB_ASYNCM	0x202c
 #define CAM_CSIS1_APB_ASYNCS	0x210c
 #define CAM_GATE_ON		BIT(21)
+#define CAM_DMA_ACLK		0x2078
+#define CAM_DMA_APB_ASYNCM	0x2038
+#define CAM_DMA_APB_ASYNCS	0x2118
+#define CAM_DMA_QCH		0x3028
+#define CAM_DMA_QE_QCH		0x3038
+#define CAM_GATE_MANUAL		BIT(20)
+#define CAM_GATE_AUTO		BIT(28)
+#define CAM_QCH_ENABLE		BIT(0)
+#define CAM_QCH_REQUEST		BIT(1)
 #define CAM_SYSREG_RESET	0x12c21050
 #define CAM_CSIS1_RESET		BIT(2)
 #define CAM_CSIS3_RESET		BIT(3)
@@ -66,6 +75,10 @@
 #define CSIS_DMA_DISABLE	BIT(0)
 #define CSIS_DMA_UPDATE		BIT(1)
 
+static bool clock_status;
+module_param(clock_status, bool, 0400);
+MODULE_PARM_DESC(clock_status, "Read only the CAM CMU clocks used by CSIS1 and shared DMA");
+
 /* Claim only these registers. The CAM0 System MMU owns its separate gate. */
 static int g955n_csis1_clock_read(u32 offset, u32 *value)
 {
@@ -102,6 +115,55 @@ static int g955n_csis1_check_clocks(const u32 *offsets, size_t count)
 			return -EACCES;
 		}
 	}
+	return 0;
+}
+
+static int g955n_csis1_clock_status(void)
+{
+	static const struct {
+		u32 offset;
+		const char *name;
+	} gates[] = {
+		{ CAM_CSIS1_ACLK, "CSIS1 ACLK" },
+		{ CAM_CSIS1_APB_ASYNCM, "CSIS1 async master" },
+		{ CAM_CSIS1_APB_ASYNCS, "CSIS1 async peripheral" },
+		{ CAM_DMA_ACLK, "CSISx4 DMA ACLK" },
+		{ CAM_DMA_APB_ASYNCM, "CSISx4 DMA async master" },
+		{ CAM_DMA_APB_ASYNCS, "CSISx4 DMA async peripheral" },
+	};
+	static const struct {
+		u32 offset;
+		const char *name;
+	} qch[] = {
+		{ CAM_DMA_QCH, "CSISx4 DMA" },
+		{ CAM_DMA_QE_QCH, "CSISx4 DMA QoS" },
+	};
+	unsigned int i;
+	u32 value;
+	int ret;
+
+	pr_info(KBUILD_MODNAME ": CAM CMU snapshot begin\n");
+	ret = g955n_csis1_clock_read(CAM_BUS_USER, &value);
+	if (ret)
+		return ret;
+	pr_info(KBUILD_MODNAME ": CAM bus user=%#08x\n", value);
+	for (i = 0; i < ARRAY_SIZE(gates); i++) {
+		ret = g955n_csis1_clock_read(gates[i].offset, &value);
+		if (ret)
+			return ret;
+		pr_info(KBUILD_MODNAME ": %s=%#08x manual=%u gate=%u auto=%u\n",
+			gates[i].name, value, !!(value & CAM_GATE_MANUAL),
+			!!(value & CAM_GATE_ON), !!(value & CAM_GATE_AUTO));
+	}
+	for (i = 0; i < ARRAY_SIZE(qch); i++) {
+		ret = g955n_csis1_clock_read(qch[i].offset, &value);
+		if (ret)
+			return ret;
+		pr_info(KBUILD_MODNAME ": %s Q-channel=%#08x enable=%u request=%u\n",
+			qch[i].name, value, !!(value & CAM_QCH_ENABLE),
+			!!(value & CAM_QCH_REQUEST));
+	}
+	pr_info(KBUILD_MODNAME ": CAM CMU snapshot complete\n");
 	return 0;
 }
 
@@ -309,6 +371,10 @@ static int __init g955n_csis1_link_test(void)
 		return ret;
 	if ((state & CAM_PWR_MASK) != CAM_PWR_MASK)
 		return -EACCES;
+	if (clock_status) {
+		ret = g955n_csis1_clock_status();
+		return ret ?: -EAGAIN;
+	}
 	spec.np = of_find_node_by_path("/soc@0/clock-controller@15a80000");
 	if (!spec.np)
 		return -ENODEV;

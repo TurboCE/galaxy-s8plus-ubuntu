@@ -109,9 +109,19 @@ of 0xffffffff. The test performs no camera DMA and records no pixels.
 The 8895 CSIS receiver registers and the CSISx4 DMA common registers
 are separate blocks. Samsung's clock tables assign the common DMA
 ACLK, asynchronous master and peripheral gates to CAM CMU offsets
-0x2078, 0x2038 and 0x2118, plus the CSISx4 DMA Q-channel at 0x3028.
-The common DMA register window starts at 0x12ce0000. A gate snapshot
-alone does not establish that the common block is accessible.
+0x2078, 0x2038 and 0x2118. The Samsung sensor clock setup includes
+both the CSISx4 DMA Q-channel at 0x3028 and its QoS Q-channel at
+0x3038. The stock gate logic distinguishes the manual gate value
+from the automatic clock-gating bit. The common DMA register window
+starts at 0x12ce0000. A gate snapshot alone does not establish that
+the common block is accessible.
+
+Load the link module with `clock_status=1` to take an idle CAM CMU
+snapshot. The module reports each gate's raw, manual, gate and
+automatic fields and both Q-channel enable and request fields. This
+path validates CAM power first and touches only the clock controller.
+It performs no clock writes, receiver accesses or DMA test. The
+module returns EAGAIN after a complete snapshot so it can be repeated.
 
 For the front sensor's SBGGR10 mode, Samsung's receiver uses legacy
 2D RAW10 storage with the PACK12 flag set and the parallel DMA input.

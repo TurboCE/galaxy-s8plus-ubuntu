@@ -2964,3 +2964,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   operations to the existing S5K3H1 driver.
 - Described the two CSI-2 lanes in the board fragment. Kept support
   for the current diagnostic-only kernel configuration.
+
+
+## 2026-11-26 — CSISx4 DMA clock and Q-channel readback
+
+- Added an optional read-only CAM clock snapshot that reports the
+  manual and automatic gate fields and the DMA and QoS Q-channels.
