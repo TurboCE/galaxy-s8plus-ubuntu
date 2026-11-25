@@ -5883,3 +5883,67 @@ ASRC0 comparison setup. The matched enable timing and warm
 teardown do not account for the observed lower speaker silence.
 The cold-boot codec initialization and signal at the amplifier
 I2S input remain unverified.
+
+
+### MAX98506 first-probe writes and identical ALSA input
+
+Rebooted the same SM-G955N into R100 with the 400 kHz controller
+DT and the one-boot Calliope ASRC0 64 KiB playback path. A passive
+I2C adapter observer started before the modular MAX98506 probe and
+recorded the revision read before the first register-data write.
+For #58, rebuilt the reference kernel with logging in the I2C core
+for successful transfers to adapter 3 address 0x31. The built-in
+driver read revision 0x80 before the first write. The #58 probe uses
+the existing reference DT and built-in initramfs. The capture covers
+Linux from first probe, with no measurement of power-rail discharge
+or pre-kernel transactions. Single-byte read selectors are excluded.
+
+First #58 initialization, 23 successful writes from 1.304 to
+1.307 seconds after boot, in observed order:
+
+```text
+38:00 20:02 21:c8 27:ff 28:ff 29:ff 2c:d9 2a:f0
+2d:60 2f:02 34:12 36:03 36:13 37:00 3a:f8 1a:46
+22:20 23:20 22:22 1f:00 21:c0 2d:14 2f:00
+```
+
+R100 makes no two-byte register writes during the module revision
+read or DAI bind. Its first 13 setup writes land at 13.505–13.506
+seconds, followed by `36:03` and `36:00` during stream prepare and
+shutdown. The same 15 writes repeat once in the captured R100
+startup window. `1a:46` first appears later in the R100 session
+when enabling playback.
+
+```text
+38:00 1b:80 1f:00 20:42 21:c0 22:22 23:20 2a:f0
+2c:d9 2f:00 34:12 3a:f8 2d:67
+```
+
+The initialization itself differs, including the intermediate
+format and slot values, Hi-Z writes at 0x27–0x29, gain, block
+enable and the boost configuration at 0x37. Later #58 writes
+from desktop or audio service activity are separate from probe.
+During the matched playback, the observed #58 enable sequence was
+`36:80 36:90 38:80`; R100 wrote `1a:46 36:93 38:80`. That
+difference is specific to the software setup used here. Earlier
+R100 trials already reproduced the selected #58 enable writes
+and timing without reproducing its acoustic result.
+
+Played the same SHA-256-verified, 48 kHz stereo S16_LE WAV via
+direct ALSA `hw:0,0` on both kernels, with a 2,048-frame period
+and 16,384-frame buffer. The fixture contains tones at 523.25 and
+697 Hz plus two asymmetric left/right word patterns. Playback and
+parallel handset microphone capture both exited successfully on both
+kernels, each capturing 384,000 stereo frames. The expected ordered
+tone windows were present in the #58 recording and absent in R100.
+The R100 RDMA ring contained the exact asymmetric patterns, including
+full 16,384-frame windows of each. Read-only SoC samples fitted about
+48 kHz on both kernels, with GPH0 mux values `22222222` on #58 and
+`22222220` on R100. The GPH0-7 data readback stayed low in all nine
+windows on both kernels, including the audible #58 run. This
+readback cannot establish the serial words at the MAX98506 DIN pin.
+An external measurement of DIN, BCLK and LRCLK remains outstanding.
+
+The trial recorded the difference and made no permanent audio
+driver or settings change. Raw microphone recordings are not
+retained.
