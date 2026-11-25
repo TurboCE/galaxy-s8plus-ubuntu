@@ -30,6 +30,8 @@ struct g955n_ssi {
 	struct gpio_desc *request;
 	struct gpio_desc *response;
 	struct gpio_desc *host;
+	struct gpio_desc *enable;
+	int enable_direction, enable_value;
 	u8 *tx, *rx;
 	size_t pending;
 	int irq;
@@ -125,6 +127,63 @@ sleep:
 	return ret;
 }
 
+static int ssi_restore_enable(struct g955n_ssi *ssi)
+{
+	if (!ssi->enable)
+		return 0;
+	if (ssi->enable_direction)
+		return gpiod_direction_input(ssi->enable);
+	return gpiod_direction_output(ssi->enable, ssi->enable_value);
+}
+
+static int ssi_power_on(struct g955n_ssi *ssi)
+{
+	int ret, restore;
+
+	if (ssi->enable) {
+		ret = gpiod_get_direction(ssi->enable);
+		if (ret < 0)
+			return ret;
+		ssi->enable_direction = ret;
+		if (!ret) {
+			ret = gpiod_get_value_cansleep(ssi->enable);
+			if (ret < 0)
+				return ret;
+			ssi->enable_value = ret;
+		}
+	}
+	ret = regulator_enable(ssi->supply);
+	if (ret)
+		return ret;
+	ssi->powered = true;
+	if (!ssi->enable)
+		return 0;
+
+	ret = gpiod_direction_output(ssi->enable, 1);
+	if (!ret) {
+		restore = gpiod_get_value_cansleep(ssi->enable);
+		if (restore == 1)
+			return 0;
+		ret = restore < 0 ? restore : -EIO;
+	}
+	restore = ssi_restore_enable(ssi);
+	if (restore)
+		dev_err(&ssi->spi->dev, "cannot restore hub enable: %d\n", restore);
+	if (!regulator_disable(ssi->supply))
+		ssi->powered = false;
+	return ret;
+}
+
+static int ssi_power_off(struct g955n_ssi *ssi)
+{
+	int restore = ssi_restore_enable(ssi);
+	int ret = regulator_disable(ssi->supply);
+
+	if (!ret)
+		ssi->powered = false;
+	return restore ?: ret;
+}
+
 static int ssi_open(struct inode *inode, struct file *file)
 {
 	struct g955n_ssi *ssi = container_of(file->private_data,
@@ -144,10 +203,9 @@ static int ssi_open(struct inode *inode, struct file *file)
 		ret = -EIO;
 		goto out;
 	}
-	ret = regulator_enable(ssi->supply);
+	ret = ssi_power_on(ssi);
 	if (ret)
 		goto out;
-	ssi->powered = true;
 
 	msleep(200);
 	ssi->opened = true;
@@ -168,9 +226,7 @@ static int ssi_release(struct inode *inode, struct file *file)
 	mutex_lock(&ssi->lock);
 	if (!ssi->removed) {
 		disable_irq(ssi->irq);
-		ret = regulator_disable(ssi->supply);
-		if (!ret)
-			ssi->powered = false;
+		ret = ssi_power_off(ssi);
 	}
 	ssi->opened = false;
 	mutex_unlock(&ssi->lock);
@@ -331,6 +387,11 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (ret)
 		goto free;
 
+	ssi->enable = devm_gpiod_get_optional(dev, "rev10-enable", GPIOD_ASIS);
+	ret = PTR_ERR_OR_ZERO(ssi->enable);
+	if (ret)
+		goto free;
+
 	ssi->irq = gpiod_to_irq(ssi->host);
 	if (ssi->irq < 0) {
 		ret = ssi->irq;
@@ -368,8 +429,8 @@ static void g955n_ssi_remove(struct spi_device *spi)
 	ssi->removed = true;
 	if (ssi->opened)
 		disable_irq(ssi->irq);
-	if (ssi->powered)
-		regulator_disable(ssi->supply);
+	if (ssi->powered && ssi_power_off(ssi))
+		dev_err(&spi->dev, "cannot restore hub power on removal\n");
 	mutex_unlock(&ssi->lock);
 	free_irq(ssi->irq, ssi);
 	wake_up_interruptible(&ssi->wait);

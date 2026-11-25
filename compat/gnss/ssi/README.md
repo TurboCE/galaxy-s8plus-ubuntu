@@ -27,3 +27,12 @@ The Samsung BBD control/sensor/patch devices, SSP sensor data and GNSS
 receiver output are outside the endpoint's current implementation.
 Do not install this as the phone's default sensor driver until those
 consumers and suspend behavior are qualified.
+
+The [revision 10 pinctrl proposal](../../../patches/proposals/0139-mainline-sm-g955n-bcm4773-power-pins.patch)
+selects GPIO output for the second hub power gate. The driver verifies the
+active level and restores the old GPIO state on close. On the corrected
+trial DT, `bbd-chip-id.py` issued the documented SSP WHOAMI read using
+the Broadcom BBD framing. The tool accepts no arbitrary SSP commands.
+The complete 21-byte request was transferred, with no bytes received
+during the response window. The hub firmware startup and a live reply
+remain prerequisites for desktop integration.

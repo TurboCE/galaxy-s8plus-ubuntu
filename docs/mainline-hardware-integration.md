@@ -38,7 +38,8 @@ services pending outbound bytes independently of the high-level
 
 The [experimental Linux transport](../compat/gnss/ssi/) implements bounded
 SSI reads and writes. On-device tests covered power ownership and
-idle I/O. The first application-level reply is still unverified. The existing board
+idle I/O. The BBD WHOAMI request was transmitted with the Korean revision 10
+power gate correctly muxed, but no reply was received. The existing board
 daemon requires `ttyBCM`, `bbd_control`, `bbd_sensor`, `bbd_patch`, and
 the board power controls before it starts. The first functional test
 should exercise the ordinary SSP chip-ID request through the same

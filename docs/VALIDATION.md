@@ -6231,3 +6231,21 @@ bottom speaker remained the default audio sink.
 No nonempty SSI write or returned frame was exercised. The BBD/RPC
 consumer, sensor data and GNSS capability remain unqualified. The
 test module was not installed for startup.
+
+### BCM4773 WHOAMI exchange and rev10 power gate
+
+Built and tested a bounded BBD client for the stock, read-only SSP chip-ID
+request. Its CRC and framing matched the Samsung FW4773-368 sample.
+The mainline SSI write transferred the complete 21-byte request. No
+bytes arrived during the four-second response window. Retrying with
+the revision 10 power GPIO initially failed before transmission with
+EINVAL. Read-only pinctrl sampling showed GPA4-6 in function 2.
+
+Booted a pinctrl-only trial that selects GPIO output for GPA4-6 at
+low idle, and retained the GPH3 speaker patch. The transport then
+asserted and read back the high level and transferred the same
+21-byte request. The result was again zero incoming bytes. This
+qualifies the power-gate mux and outbound transport count. The
+firmware startup and a valid SSP response remain open. Closing the
+probe released LDO38 and unbinding removed the endpoint. Restored
+and verified the original GPH3-enabled BOOT.

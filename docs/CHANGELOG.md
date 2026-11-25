@@ -2647,3 +2647,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added a bounded half-duplex SPI transport for the sensor and
   location hub. Verified device ownership, idle I/O, regulator
   cleanup and unbind on 6.18 VPN2.
+
+## 2026-11-25 — BCM4773 SSP query and power pin test
+
+- Added a bounded BBD chip-ID probe and identified the missing GPA4-6
+  GPIO mux. Validated transmission with the corrected board power
+  setting and recorded the missing response on the current firmware path.
