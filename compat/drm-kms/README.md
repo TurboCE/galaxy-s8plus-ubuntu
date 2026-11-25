@@ -189,13 +189,13 @@ The fragment declares an identity mapping for the page-aligned
 firmware framebuffer at `0xcc000000`. Before resuming the System MMU
 supplier, the handoff checks the identity translation of every
 framebuffer page. The KMS device then allocates and imports buffers
-through the DMA domain. The helper retains the old CMA path when the
-board does not opt in. The trial keeps the existing pool reservation
-size until translated scanout has been tested.
+through the DMA domain. The board fragment removes the unused DECON
+pool while leaving global CMA available. The helper retains the old
+CMA path when the board does not opt in.
 
 For system sleep, the consumer switches G0 to the firmware framebuffer
 before DPU1 disables translation. It retains the desktop framebuffer
 and restores it after the supplier resumes. On a trial boot, use the
-verified existing BOOT image as rollback. Check the inherited output,
-a noncontiguous Panfrost PRIME import and actual G0 scanout before
-testing suspend, rotation and acoustic playback.
+verified existing BOOT image as rollback. The SM-G955N trial passed
+Panfrost PRIME import, G0 scanout and RTC-woken s2idle with only the
+32 MiB global CMA pool. [Validation record](../../docs/VALIDATION.md)

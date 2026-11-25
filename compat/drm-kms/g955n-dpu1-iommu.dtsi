@@ -29,3 +29,6 @@ g955n_firmware_scanout: &{/reserved-memory/framebuffer@cc000000} {
 	reg = <0 0xcc000000 0x01043000>;
 	iommu-addresses = <&g955n_decon 0xcc000000 0x01043000>;
 };
+
+/* Translated DMA does not require the display-only physical pool. */
+/delete-node/ &{/reserved-memory/decon-dma-pool};

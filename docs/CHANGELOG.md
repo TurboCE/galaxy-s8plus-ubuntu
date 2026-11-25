@@ -3050,3 +3050,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Added opt-in DPU1 clock and board definitions and a DECON handoff
   that checks the inherited framebuffer identity map before using DMA.
+
+
+## 2026-11-26 — Release the dedicated DECON CMA reservation
+
+- Dropped the 160 MiB display-only pool when using DPU1-translated
+  scanout. The 32 MiB global CMA pool remains available.

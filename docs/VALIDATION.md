@@ -7665,3 +7665,28 @@ rule retained its verified matrix. The trial return timer was removed
 after the checks. The translated device uses the firmware framebuffer
 reservation rather than the DECON-only CMA pool. A separate comparison
 BOOT was built with the now-unreferenced pool removed.
+
+
+## 2026-11-26 — Live DPU1 scanout without the DECON CMA pool
+
+Booted the same Linux Image, initramfs and two display modules with
+the unused DECON CMA node removed. The fresh recovery backup and
+BOOT readback matched, and protected partitions were verified.
+The tracked DT fragment reproduces the trial description with
+equivalent phandle references. The handset reports CmaTotal of
+32768 KiB, down from 196608 KiB when the 160 MiB display pool was
+present. The firmware framebuffer identity reservation remains.
+
+Full-size PRIME sharing passed in both directions at 1440×2960 and
+2960×1440. Panfrost rendered into buffers imported by DECON and the
+KMS fixture verified twelve presentations and twelve scanout latches
+before and after one same-boot RTC-woken s2idle cycle. There were no
+DPU1 faults, DECON latch timeouts, SWIOTLB allocation errors or
+GNOME Mesa scanout-resource errors in the scoped journal checks.
+
+The normal Wayland virtual console was restored. GDM, the location
+hub, USB SSH and Wi-Fi were present after resume, and the built-in
+bottom speaker remained the default PipeWire sink. The test did
+not replay audio or repeat physical rotation and touch. The 32 MiB
+global CMA and the previously verified sensor rule were left in
+place. Removed the trial return timer and retained the tested BOOT.
