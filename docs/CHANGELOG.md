@@ -3157,3 +3157,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Hold the camera clock while checking the CSISx4 common registers.
   Verify and restore the stock arbitration, processing, SRAM split
   and matrix settings before starting per-channel capture work.
+
+
+## 2026-11-26 — Check front camera DMA completions against memory writes
+
+- Added the opt-in VC0 RAW10 test with a mapped buffer and checked
+  DMA shutdown. The handset signaled completion with zero changed
+  rows, so pixel capture remains unverified.

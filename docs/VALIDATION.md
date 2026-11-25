@@ -8157,3 +8157,35 @@ sensor rails, shared PHY and camera clock returned to idle.
 GDM and Wi-Fi were active and the bottom speaker stayed the
 default output route. No BOOT write was made. Pixel transfer
 into a mapped buffer and a V4L2 capture node remain unverified.
+
+
+## 2026-11-26 — Front camera VC0 DMA completion and buffer comparison
+
+Built the opt-in VC0 test against the 6.18 handset kernel with W=1.
+The test programs the stock RAW10 format, points all eight slots at
+one 4 MiB CAM0 mapping, checks its page translations, and verifies
+the expected 918 rows and the memory after the frame. It waits for
+DMA abort acknowledgement and the active bit to clear before CPU
+access or unmapping. It exports no pixels.
+
+The first trial enabled DMA before the sensor started. It reported
+a VC0 DMA frame end with an ECC and missing-frame-start indication
+from the receiver. Changed the sequence to keep VC0 DMA disabled
+until an initial CSI frame ends and to examine the subsequent DMA
+events. A coherent buffer and a streaming mapping with explicit
+CPU synchronization both retained their initial values. The final
+streaming test saw two VC0 DMA completions (source 0x111), receiver
+start and end with no errors during capture (0x01100000), and
+active DMA format 0x8. Abort was acknowledged and output went
+inactive. None of the 918 rows changed, and the tail retained its
+sentinel. The test returned EIO. No CAM0 IOMMU fault was observed
+in the scoped trial log. These results do not establish where
+the hardware write was lost.
+
+The temporary module released its resources and the camera bus
+returned to 33.3125 MHz. Re-ran the link test with DMA disabled
+and received two error-free CSI frames. The shared PHY and sensor
+rails returned to idle. GDM and Wi-Fi were available and PipeWire
+reported the bottom speaker as the default route. No BOOT write
+or persistent module installation was made. V4L2 pixel capture
+remains pending.

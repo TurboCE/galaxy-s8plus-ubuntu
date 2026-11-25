@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Bound Exynos8895 CSIS1 receiver test with pixel DMA held disabled.
+ * Bounded Exynos8895 CSIS1 receiver and opt-in VC0 DMA tests.
  * Register offsets, D-PHY settings and mode from Samsung FIMC-IS sources.
  */
 #include <dt-bindings/clock/samsung,exynos8895.h>
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
+#include <linux/dma-mapping.h>
+#include <linux/iommu.h>
 #include <linux/io.h>
+#include <linux/iopoll.h>
 #include <linux/ioport.h>
 #include <linux/mfd/syscon.h>
+#include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/regmap.h>
+#include <linux/sizes.h>
 
 #define CAM_CMU_BASE		0x12c00000
 #define CAM_STATUS		0x4024
@@ -37,7 +44,7 @@
 #define CAM_PHY_BYPASS		BIT(0)
 
 #define CSIS1_BASE		0x12cb0000
-#define CSIS1_SIZE		0x1400
+#define CSIS1_SIZE		0x1420
 #define CSIS_VERSION		0x0000
 #define CSIS_COMMON		0x0004
 #define	CSIS_INTERRUPT_MASK	0x0010
@@ -80,6 +87,28 @@
 #define CSIS_DMA_COMMON_MATRIX	0x10
 #define CSIS_DMA_IP_PROCESSING	BIT(1)
 #define CSIS_DMA_SW_RESET	BIT(0)
+#define CSIS_DMA0_FMT		0x1004
+#define CSIS_DMA0_SKIP		0x1008
+#define CSIS_DMA0_ADDR		0x1010
+#define CSIS_DMA0_ACT_FMT	0x1034
+#define CSIS_DMA0_RESOL		0x1040
+#define CSIS_DMA0_SEQ		0x1050
+#define CSIS_DMA_DATA_CTRL	0x1400
+#define CSIS_DMA_INT_MASK	0x1404
+#define CSIS_DMA_INT_SOURCE	0x1408
+#define CSIS_DMA_CTRL		0x1414
+#define CSIS_DMA_ERROR_CODE	0x1418
+#define CSIS_DMA_ABORT_DONE	BIT(16)
+#define CSIS_DMA_VC0_END	BIT(8)
+#define CSIS_DMA_ERRORS		(GENMASK(23, 20) | BIT(12))
+#define CSIS_DMA_PACK12		BIT(3)
+#define CSIS_DMA_ADDR_COUNT	8
+#define CSIS_WIDTH		1632
+#define CSIS_HEIGHT		918
+#define CSIS_DMA_STRIDE_BYTES	ALIGN(CSIS_WIDTH * 5 / 4, 16)
+#define CSIS_FRAME_BYTES	(CSIS_HEIGHT * CSIS_DMA_STRIDE_BYTES)
+#define CSIS_BUFFER_BYTES	SZ_4M
+#define CSIS_DMA_SENTINEL	0xa5
 
 static bool clock_status;
 module_param(clock_status, bool, 0400);
@@ -93,6 +122,10 @@ MODULE_PARM_DESC(dma_common_status, "Read the CSISx4 DMA common control with its
 static bool dma_common_setup;
 module_param(dma_common_setup, bool, 0400);
 MODULE_PARM_DESC(dma_common_setup, "Verify and restore the stock CSISx4 DMA common settings");
+static bool capture;
+module_param(capture, bool, 0400);
+MODULE_PARM_DESC(capture, "Check VC0 writes to a translated buffer without exporting pixels");
+static bool capture_unsafe;
 
 static int g955n_csis1_read_register(resource_size_t addr, u32 *value)
 {
@@ -187,7 +220,9 @@ static int g955n_csis1_read_selected_clock(void)
 	return 0;
 }
 
-static int g955n_csis1_dma_common(void)
+static int g955n_csis1_test(struct regmap *pmu);
+
+static int g955n_csis1_dma_common(struct regmap *pmu)
 {
 	static const u32 clocks[] = { CAM_DMA_ACLK, CAM_DMA_APB_ASYNCM, CAM_DMA_APB_ASYNCS };
 	static const u32 qchannels[] = { CAM_DMA_QCH, CAM_DMA_QE_QCH };
@@ -234,7 +269,7 @@ static int g955n_csis1_dma_common(void)
 	}
 	value = readl(regs + CSIS_DMA_COMMON_CTRL);
 	pr_notice(KBUILD_MODNAME ": CSISx4 DMA common control %#010x\n", value);
-	if (!dma_common_setup)
+	if (!dma_common_setup && !capture)
 		goto unmap;
 	if (value & (CSIS_DMA_IP_PROCESSING | CSIS_DMA_SW_RESET)) {
 		ret = -EBUSY;
@@ -253,6 +288,10 @@ static int g955n_csis1_dma_common(void)
 	}
 	if (!ret)
 		pr_info(KBUILD_MODNAME ": stock CSISx4 DMA common settings read back\n");
+	if (!ret && capture)
+		ret = g955n_csis1_test(pmu);
+	if (capture_unsafe)
+		goto unmap;
 
 	for (i = ARRAY_SIZE(stock); i-- > 0;) {
 		writel(saved[i], regs + stock[i].offset);
@@ -337,7 +376,7 @@ static int g955n_csis1_arm(void __iomem *regs, struct csis_snapshot *saved)
 				      CSIS_ISP_PARALLEL | CSIS_ISP_VC);
 	value |= FIELD_PREP(CSIS_ISP_FORMAT, CSIS_RAW10) | FIELD_PREP(CSIS_ISP_PIXEL_MODE, 1);
 	writel(value, regs + CSIS_ISP_CONFIG);
-	writel((918 << 16) | 1632, regs + CSIS_ISP_RESOLUTION);
+	writel((CSIS_HEIGHT << 16) | CSIS_WIDTH, regs + CSIS_ISP_RESOLUTION);
 	value = saved->common & ~(CSIS_CMN_LANES | CSIS_CMN_INTERLEAVE | CSIS_CMN_PHY_SELECT);
 	value |= FIELD_PREP(CSIS_CMN_LANES, 1) | FIELD_PREP(CSIS_CMN_UPDATE, 0xf);
 	writel(value | CSIS_CMN_ENABLE, regs + CSIS_COMMON);
@@ -391,6 +430,149 @@ static int g955n_csis1_observe(void __iomem *regs)
 	return i == 180 ? -ETIMEDOUT : 0;
 }
 
+static int g955n_csis1_capture(void __iomem *regs)
+{
+	static const unsigned int offsets[] = {
+		CSIS_DMA0_FMT, CSIS_DMA0_SKIP, CSIS_DMA0_RESOL, CSIS_DMA0_SEQ, CSIS_DMA_DATA_CTRL,
+	};
+	static const u32 settings[] = { CSIS_DMA_PACK12, 0, CSIS_WIDTH, 0xff, BIT(0) };
+	u32 saved[ARRAY_SIZE(offsets)], addr[CSIS_DMA_ADDR_COUNT];
+	struct platform_device *pdev;
+	struct iommu_domain *domain;
+	struct device_node *node;
+	struct device *dev;
+	struct page *pages;
+	dma_addr_t iova;
+	u8 *pixels;
+	u32 events = 0, rx_source, status;
+	unsigned int i;
+	int ret, stopped;
+
+	if (readl(regs + CSIS_DMA_INT_MASK) || readl(regs + CSIS_DMA_INT_SOURCE) ||
+	    readl(regs + CSIS_DMA_CTRL))
+		return -EBUSY;
+	node = of_find_compatible_node(NULL, NULL, "samsung,sm-g955n-csis1-buffer-test");
+	if (!node)
+		return -ENODEV;
+	pdev = of_find_device_by_node(node);
+	of_node_put(node);
+	if (!pdev)
+		return -ENODEV;
+	dev = &pdev->dev;
+	domain = iommu_get_domain_for_dev(dev);
+	ret = -ENODEV;
+	if (!domain || !iommu_is_dma_domain(domain) ||
+	    dev->coherent_dma_mask != DMA_BIT_MASK(32))
+		goto put;
+	ret = -ENOMEM;
+	pages = alloc_pages(GFP_KERNEL | __GFP_NOWARN, get_order(CSIS_BUFFER_BYTES));
+	if (!pages)
+		goto put;
+	pixels = page_address(pages);
+	memset(pixels, CSIS_DMA_SENTINEL, CSIS_BUFFER_BYTES);
+	iova = dma_map_page(dev, pages, 0, CSIS_BUFFER_BYTES, DMA_BIDIRECTIONAL);
+	ret = -EIO;
+	if (dma_mapping_error(dev, iova))
+		goto free;
+	ret = -ERANGE;
+	if (!iova || !IS_ALIGNED(iova, 16) || iova > U32_MAX - (CSIS_BUFFER_BYTES - 1))
+		goto unmap;
+	for (i = 0; i < CSIS_BUFFER_BYTES; i += PAGE_SIZE)
+		if (iommu_iova_to_phys(domain, iova + i) != page_to_phys(pages) + i)
+			goto unmap;
+
+	for (i = 0; i < ARRAY_SIZE(offsets); i++)
+		saved[i] = readl(regs + offsets[i]);
+	for (i = 0; i < CSIS_DMA_ADDR_COUNT; i++)
+		addr[i] = readl(regs + CSIS_DMA0_ADDR + i * sizeof(u32));
+
+	ret = -EIO;
+	for (i = 0; i < ARRAY_SIZE(offsets); i++) {
+		writel(settings[i], regs + offsets[i]);
+		if (readl(regs + offsets[i]) != settings[i])
+			goto restore;
+	}
+	for (i = 0; i < CSIS_DMA_ADDR_COUNT; i++) {
+		writel(lower_32_bits(iova), regs + CSIS_DMA0_ADDR + i * sizeof(u32));
+		if (readl(regs + CSIS_DMA0_ADDR + i * sizeof(u32)) != lower_32_bits(iova))
+			goto restore;
+	}
+
+	/* Keep output disabled until the sensor has delivered a complete CSI frame. */
+	pr_notice(KBUILD_MODNAME ": VC0 waiting for first CSI frame with DMA disabled\n");
+	ret = readl_poll_timeout(regs + CSIS_INTERRUPT_SOURCE, status,
+				 status & CSIS_VC0_END, 150, 2000000);
+	if (ret)
+		goto restore;
+	pr_info(KBUILD_MODNAME ": first CSI frame source=%#08x before DMA enable\n", status);
+	writel(status, regs + CSIS_INTERRUPT_SOURCE);
+	writel(CSIS_DMA_UPDATE, regs + CSIS_DMA_BASE);
+	pr_notice(KBUILD_MODNAME ": VC0 DMA armed with all eight slots mapped\n");
+	for (i = 0; i < 2; i++) {
+		ret = readl_poll_timeout(regs + CSIS_DMA_INT_SOURCE, status,
+					 status & (CSIS_DMA_VC0_END | CSIS_DMA_ERRORS), 500, 500000);
+		events |= status;
+		if (ret || (status & CSIS_DMA_ERRORS))
+			break;
+		writel(status, regs + CSIS_DMA_INT_SOURCE);
+	}
+	rx_source = readl(regs + CSIS_INTERRUPT_SOURCE);
+	pr_info(KBUILD_MODNAME ": VC0 DMA completed=%u events=%#08x rx=%#08x error=%#08x\n",
+		i, events, rx_source, readl(regs + CSIS_DMA_ERROR_CODE));
+	pr_info(KBUILD_MODNAME ": VC0 DMA active control=%#08x format=%#08x\n",
+		readl(regs + CSIS_DMA_BASE + CSIS_DMA_ACTIVE), readl(regs + CSIS_DMA0_ACT_FMT));
+
+	/* Block the next frame and wait for the DMA engine to acknowledge abort. */
+	writel(CSIS_DMA_DISABLE, regs + CSIS_DMA_BASE);
+	writel(BIT(0), regs + CSIS_DMA_CTRL);
+	stopped = readl_poll_timeout(regs + CSIS_DMA_INT_SOURCE, status,
+				     status & CSIS_DMA_ABORT_DONE, 1000, 120000);
+	stopped = stopped ?: readl_poll_timeout(regs + CSIS_DMA_BASE + CSIS_DMA_ACTIVE,
+						status, !(status & BIT(0)), 1000, 120000);
+	if (stopped) {
+		/* Keep the IOVA valid if completion of outstanding writes is unknown. */
+		capture_unsafe = true;
+		pr_err(KBUILD_MODNAME ": VC0 DMA stop not confirmed, retaining mapped buffer\n");
+		return stopped;
+	}
+	writel(0, regs + CSIS_DMA_CTRL);
+	writel(readl(regs + CSIS_DMA_INT_SOURCE), regs + CSIS_DMA_INT_SOURCE);
+	pr_info(KBUILD_MODNAME ": VC0 DMA abort acknowledged and output inactive\n");
+	if (events & CSIS_DMA_VC0_END) {
+		unsigned int lines = 0;
+		bool tail_changed;
+
+		dma_sync_single_for_cpu(dev, iova, CSIS_BUFFER_BYTES, DMA_BIDIRECTIONAL);
+		for (i = 0; i < CSIS_FRAME_BYTES; i += CSIS_DMA_STRIDE_BYTES)
+			if (memchr_inv(pixels + i, CSIS_DMA_SENTINEL, CSIS_WIDTH * 5 / 4))
+				lines++;
+		tail_changed = memchr_inv(pixels + CSIS_FRAME_BYTES, CSIS_DMA_SENTINEL,
+					 CSIS_BUFFER_BYTES - CSIS_FRAME_BYTES) != NULL;
+		if (lines != CSIS_HEIGHT || tail_changed) {
+			pr_err(KBUILD_MODNAME ": VC0 DMA extent failed: %u/%u lines, tail changed=%u\n",
+			       lines, CSIS_HEIGHT, tail_changed);
+			ret = -EIO;
+		} else {
+			pr_info(KBUILD_MODNAME ": VC0 RAW10 %u lines changed, tail intact\n", CSIS_HEIGHT);
+		}
+	}
+	if ((events & CSIS_DMA_ERRORS) || (rx_source & CSIS_RX_ERRORS))
+		ret = -EIO;
+restore:
+	for (i = 0; i < CSIS_DMA_ADDR_COUNT; i++)
+		writel(addr[i], regs + CSIS_DMA0_ADDR + i * sizeof(u32));
+	for (i = 0; i < ARRAY_SIZE(offsets); i++)
+		writel(saved[i], regs + offsets[i]);
+unmap:
+	dma_unmap_page(dev, iova, CSIS_BUFFER_BYTES, DMA_BIDIRECTIONAL);
+free:
+	memzero_explicit(pixels, CSIS_BUFFER_BYTES);
+	__free_pages(pages, get_order(CSIS_BUFFER_BYTES));
+put:
+	put_device(dev);
+	return ret;
+}
+
 static int g955n_csis1_test(struct regmap *pmu)
 {
 	static const u32 clocks[] = {
@@ -436,7 +618,12 @@ static int g955n_csis1_test(struct regmap *pmu)
 	writel(reset_state | CAM_CSIS1_RESET, reset);
 	ret = g955n_csis1_arm(regs, &saved);
 	if (!ret) {
-		ret = g955n_csis1_observe(regs);
+		ret = capture ? g955n_csis1_capture(regs) : g955n_csis1_observe(regs);
+		if (capture_unsafe) {
+			writel(readl(reset) & ~CAM_CSIS1_RESET, reset);
+			readl(reset);
+			goto unmap_test;
+		}
 		g955n_csis1_disarm(regs, &saved);
 	}
 	writel((readl(reset) & ~CAM_CSIS1_RESET) | (reset_state & CAM_CSIS1_RESET), reset);
@@ -467,7 +654,7 @@ static int __init g955n_csis1_link_test(void)
 
 	if (!of_machine_is_compatible("samsung,dream2lteks"))
 		return -ENODEV;
-	if (clock_status + dma_common_status + dma_common_setup + !!clock_register > 1 ||
+	if (clock_status + dma_common_status + dma_common_setup + capture + !!clock_register > 1 ||
 	    (clock_register && !g955n_csis1_has_clock_register(clock_register)))
 		return -EINVAL;
 	pmu = syscon_regmap_lookup_by_compatible("samsung,exynos8895-pmu");
@@ -503,10 +690,13 @@ static int __init g955n_csis1_link_test(void)
 			ret = g955n_csis1_read_selected_clock();
 		else if (clock_status)
 			ret = g955n_csis1_clock_status();
-		else if (dma_common_status || dma_common_setup)
-			ret = g955n_csis1_dma_common();
+		else if (dma_common_status || dma_common_setup || capture)
+			ret = g955n_csis1_dma_common(pmu);
 		else
 			ret = g955n_csis1_test(pmu);
+		/* A failed stop requires reboot. Do not unload or release the buffer. */
+		if (capture_unsafe)
+			return 0;
 		clk_disable_unprepare(bus);
 	}
 	clk_rate_exclusive_put(bus);

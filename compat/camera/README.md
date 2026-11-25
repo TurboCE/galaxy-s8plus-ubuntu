@@ -141,6 +141,20 @@ The single-buffer setup points all eight VC0 slots at the same mapped
 address. A capture test must confirm the actual format and write
 extent, DMA completion and quiescence before returning the buffer.
 
+`capture=1` runs a bounded VC0 test using the stock setup and the
+translated CAM0 DMA device. Start the sensor's short `stream_probe`
+after `VC0 waiting for first CSI frame with DMA disabled`. The test
+checks two DMA completion events, disables VC0 and waits for the
+abort acknowledgement before examining the buffer. It verifies that
+each of the 918 rows changed and that the memory beyond the expected
+frame remains intact. Pixel data is discarded in the kernel. If DMA
+stop cannot be confirmed, the test retains the mapping and holds
+CSIS1 in reset until reboot.
+
+On the handset the test currently reaches both completion events and
+stops the engine, with the entire checked frame still at its initial
+value. It returns EIO for that result.
+
 ## V4L2 front sensor subdevice
 
 Keep the same front sensor fragment and build the module against the
