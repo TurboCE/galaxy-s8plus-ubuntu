@@ -6365,3 +6365,37 @@ After both trials, TWRP restored and read back steady VPN2 BOOT and
 checked the protected partition hashes. The normal Ubuntu boot reached
 GDM, the lower speaker was still the PipeWire default, and no legacy
 power/TTY/patch endpoints, trial firmware or return timers remained.
+
+### BCM4773 USI8 clock correction and firmware transfer start
+
+Repeated the original daemon trace on #58 with the same device. Its
+first 13-byte sync request returned a complete 19-byte BBD frame. A
+second request returned 33 bytes before the first firmware read. The
+earlier 6.18 captures for the same request had no valid frame CRC.
+
+Instrumented the 6.18 SPI controller only at the sensor hub's platform
+address. With the Samsung divisor of two and a request for a 52 MHz source
+clock, the clock framework still reported 133.25 MHz. That trial
+reproduced the malformed sync replies. Programming the USI8 divider via
+its clock provider yielded a 48.45 MHz source with the same divisor,
+corresponding to about 24.23 MHz at SPI. Both initial BBD replies matched
+the #58 prefixes and lengths. All 24 complete frames parsed from the
+bounded syscall sample passed CRC with their original alignment. The
+daemon opened the handset's firmware patch and began transfer. Its
+progress reset after repeated retransmissions, before `ESW:READY`.
+The 83,805 TX bytes in one window include retransmissions.
+
+Larger aligned TX bursts, manual chip select, a different feedback tap,
+and a lower requested transfer rate each reached the download phase
+without completing it. None of those trial changes was included in the
+kernel proposal. Proposal 0140 propagates rate requests through the
+USI8 gate and mux and selects the divisor on the hub's board node.
+The changed C translation units compiled for ARM64 with `W=1`, and the
+edited board DT compiled. The bootable kernel with the integrated
+proposal remains untested. The live evidence came from temporary
+controller bindings and clock-provider calls.
+
+The original SPI controller binding was restored after each comparison.
+TWRP read back the original full VPN2 BOOT, and the handset reached GDM
+with the lower speaker still the default PipeWire sink. No trial
+firmware, legacy device endpoint or recovery timer remained active.

@@ -1,0 +1,89 @@
+Subject: [PATCH] clk: spi: use the Exynos8895 USI8 clock path for the hub
+
+The USI8 clock gate and user mux stopped rate requests before the
+programmable divider. Live diagnostics read a 133.25 MHz source after
+a request for 52 MHz. #58 configures this SPI engine with a source
+clock twice the SPI rate.
+
+Propagate rate requests through the USI8 clock tree and use the
+Exynos8895 divider on the SM-G955N hub controller. Retain the current
+SPI parameters on controllers that have not been qualified. With a
+live controller trial using the same source clock path and divider,
+the vendor daemon received CRC-valid sync responses and started
+reading and transferring the existing firmware. The transfer still
+retries and this proposal does not qualify sensor data or GNSS.
+
+--- a/drivers/clk/samsung/clk-exynos8895.c
++++ b/drivers/clk/samsung/clk-exynos8895.c
+@@ -2544,9 +2544,9 @@
+ 	MUX(CLK_MOUT_PERIC1_USI07_USER, "mout_peric1_usi07_user",
+ 	    mout_peric1_usi07_user_p, PLL_CON0_MUX_CLKCMU_PERIC1_USI07_USER,
+ 	    4, 1),
+-	MUX(CLK_MOUT_PERIC1_USI08_USER, "mout_peric1_usi08_user",
++	MUX_F(CLK_MOUT_PERIC1_USI08_USER, "mout_peric1_usi08_user",
+ 	    mout_peric1_usi08_user_p, PLL_CON0_MUX_CLKCMU_PERIC1_USI08_USER,
+-	    4, 1),
++	    4, 1, CLK_SET_RATE_PARENT, 0),
+ 	MUX(CLK_MOUT_PERIC1_USI09_USER, "mout_peric1_usi09_user",
+ 	    mout_peric1_usi09_user_p, PLL_CON0_MUX_CLKCMU_PERIC1_USI09_USER,
+ 	    4, 1),
+@@ -2713,7 +2713,7 @@
+ 	GATE(CLK_GOUT_PERIC1_USI08_I_SCLK_USI, "gout_peric1_usi08_i_sclk_usi",
+ 	     "mout_peric1_usi08_user",
+ 	     CLK_CON_GAT_GOUT_BLK_PERIC1_UID_USI08_IPCLKPORT_I_SCLK_USI,
+-	     21, 0, 0),
++	     21, CLK_SET_RATE_PARENT, 0),
+ 	GATE(CLK_GOUT_PERIC1_USI09_I_PCLK, "gout_peric1_usi09_i_pclk",
+ 	     "mout_peric1_bus_user",
+ 	     CLK_CON_GAT_GOUT_BLK_PERIC1_UID_USI09_IPCLKPORT_I_PCLK, 21, 0, 0),
+--- a/drivers/spi/spi-s3c64xx.c
++++ b/drivers/spi/spi-s3c64xx.c
+@@ -1574,6 +1574,18 @@
+ 	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
+ };
+ 
++static const struct s3c64xx_spi_port_config exynos8895_usi8_spi_port_config = {
++	.fifo_depth	= 64,
++	.rx_fifomask	= S3C64XX_SPI_ST_RX_FIFO_RDY_V2,
++	.tx_fifomask	= S3C64XX_SPI_ST_TX_FIFO_RDY_V2,
++	.tx_st_done	= 25,
++	.clk_div	= 2,
++	.high_speed	= true,
++	.clk_from_cmu	= true,
++	.has_loopback	= true,
++	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
++};
++
+ static const struct s3c64xx_spi_port_config exynosautov9_spi_port_config = {
+ 	/* fifo_lvl_mask is deprecated. Use {rx, tx}_fifomask instead. */
+ 	.fifo_lvl_mask	= { 0x1ff, 0x1ff, 0x7f, 0x7f, 0x7f, 0x7f, 0x1ff, 0x7f,
+@@ -1643,6 +1655,9 @@
+ 	{ .compatible = "samsung,exynos5433-spi",
+ 			.data = &exynos5433_spi_port_config,
+ 	},
++	{ .compatible = "samsung,exynos8895-usi8-spi",
++			.data = &exynos8895_usi8_spi_port_config,
++	},
+ 	{ .compatible = "samsung,exynos850-spi",
+ 			.data = &exynos850_spi_port_config,
+ 	},
+--- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
++++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
+@@ -582,6 +582,7 @@
+ };
+ 
+ &spi_10 {
++	compatible = "samsung,exynos8895-usi8-spi";
+ 	cs-gpios = <&gpe2 6 GPIO_ACTIVE_LOW>;
+ 	pinctrl-0 = <&g955n_hub_spi_out &g955n_hub_spi_in &spi10_cs>;
+ 	status = "okay";
+--- a/Documentation/devicetree/bindings/spi/samsung,spi.yaml
++++ b/Documentation/devicetree/bindings/spi/samsung,spi.yaml
+@@ -23,6 +23,7 @@
+           - samsung,exynos4210-spi
+           - samsung,exynos5433-spi
+           - samsung,exynos850-spi
++          - samsung,exynos8895-usi8-spi
+           - samsung,exynosautov9-spi
+           - tesla,fsd-spi
+       - items:

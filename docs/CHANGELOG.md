@@ -2683,3 +2683,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Verified the two power controls on the Korean board. The original
   daemon exchanged bytes in both directions before reaching an
   autobaud sync timeout. Firmware transfer remains pending.
+
+## 2026-11-25 — BCM4773 USI8 source clock
+
+- Identified a fixed SPI source rate despite driver requests for a lower
+  rate. A same-board controller trial programmed the Exynos8895 USI8
+  divider, recovered valid autobaud replies, and started vendor firmware
+  transfer on 6.18.
+- Added proposal 0140 for the USI8 clock tree and hub controller profile.
+  The daemon still retries during transfer.

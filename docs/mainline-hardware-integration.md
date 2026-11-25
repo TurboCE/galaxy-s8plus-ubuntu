@@ -52,7 +52,11 @@ ttyBCM. On 6.18, the opt-in patch reader and inbound control messages
 passed separate endpoint tests. The opt-in `ttyBCM` stream also transferred
 a 315-byte query across multiple SSI frames with the revision 10 power pin
 configured. With the legacy daemon power controls connected, the original
-daemon exchanged bytes with the hub. Its autobaud sync timed out before
-the patch reader was used. Firmware startup and sensor RPC routing still
-need qualification before exposing real sensor readings or a satellite
-fix to Ubuntu.
+daemon exchanged bytes with the hub. Its initial autobaud sync timed
+out while the source clock stayed too high. A controller trial programmed
+the USI8 divider and matched the first #58 replies. The daemon began
+transferring firmware, then retried before reaching ready.
+[Proposal 0140](../patches/proposals/0140-mainline-sm-g955n-bcm4773-usi8-clock.patch)
+applies the observed clock correction to the kernel and board DT.
+Firmware completion and sensor RPC routing still need qualification
+before exposing measurements or a satellite fix to Ubuntu.
