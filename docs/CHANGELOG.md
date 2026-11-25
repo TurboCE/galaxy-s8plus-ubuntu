@@ -2628,3 +2628,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Recorded the verified 24.04.5 audio baseline, GPH3 DT patch,
   device-specific UCM settings and post-upgrade checks in the
   [upgrade handoff](ubuntu-26.04-upgrade.md).
+
+## 2026-11-25 — Mainline hardware inventory and location profile
+
+- Recorded the current Linux 6.18 SM-G955N hardware integration
+  baseline and verified BlueZ discovery through Ubuntu.
+- Guarded the Samsung GNSS bridge with its matching legacy kernel
+  condition and switched live 6.18 GeoClue to its network-only profile.

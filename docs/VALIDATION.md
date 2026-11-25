@@ -6178,3 +6178,18 @@ the temporary recovery timer was removed, and `g955n-ubuntu` stayed
 as the persistent hostname. There were no error-priority pinctrl,
 ABOX or codec messages in that boot's kernel journal. The recorded
 audio and vendor artifacts are private and excluded from Git.
+
+### 6.18 hardware inventory and network location
+
+The stock BlueZ Adapter1 service started discovery, reported eight
+advertising peers and stopped cleanly. No peer addresses were retained.
+The active Wayland GNOME process held both the DECON and Panfrost devices,
+and UPower reported the MAX77865 battery. These checks are recorded in
+the [mainline hardware inventory](mainline-hardware-integration.md).
+
+A GeoClue client initially returned one 25 km network fix but also caused
+the 4.4 GNSS preparation service to fail. After applying the legacy kernel
+condition and switching to the mainline network profile, a second request
+returned a 25 km network fix with no new legacy GNSS service invocation.
+The bottom speaker remained the default PipeWire sink. No satellite fix
+was recorded.
