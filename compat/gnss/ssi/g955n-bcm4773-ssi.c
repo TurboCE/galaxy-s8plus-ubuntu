@@ -48,6 +48,13 @@ static bool expose_legacy_power;
 module_param(expose_legacy_power, bool, 0400);
 MODULE_PARM_DESC(expose_legacy_power, "Let the legacy daemon control the hub and GNSS power");
 
+static bool probe_legacy_ssp;
+module_param(probe_legacy_ssp, bool, 0400);
+MODULE_PARM_DESC(probe_legacy_ssp, "Issue a read-only SSP chip-ID request through the legacy daemon");
+
+/* Little-endian BBD length, SSP command, response size, options and data. */
+static const u8 ssi_ssp_whoami[] = { 9, 0, 0x0f, 1, 0, 0, 0, 0, 0, 0, 0 };
+
 struct ssi_saved_gpio {
 	int direction;
 	int value;
@@ -68,6 +75,10 @@ struct g955n_ssi {
 	struct miscdevice misc;
 	struct miscdevice patch;
 	struct miscdevice control;
+	struct miscdevice sensor;
+	size_t sensor_offset;
+	bool sensor_open;
+	bool sensor_pending;
 	struct miscdevice stream;
 	struct delayed_work stream_work;
 	struct kfifo stream_tx, stream_rx;
@@ -750,6 +761,86 @@ static ssize_t ssi_control_read(struct file *file, char __user *buffer,
 	return READ_ONCE(ssi->removed) ? -ENODEV : 0;
 }
 
+static int ssi_sensor_open(struct inode *inode, struct file *file)
+{
+	struct g955n_ssi *ssi = container_of(file->private_data,
+					   struct g955n_ssi, sensor);
+	int ret = stream_open(inode, file);
+
+	if (ret)
+		return ret;
+	mutex_lock(&ssi->lock);
+	if (ssi->removed) {
+		ret = -ENODEV;
+	} else if (ssi->sensor_open) {
+		ret = -EBUSY;
+	} else {
+		ssi->sensor_open = true;
+		kref_get(&ssi->refs);
+		file->private_data = ssi;
+	}
+	mutex_unlock(&ssi->lock);
+	return ret;
+}
+
+static int ssi_sensor_release(struct inode *inode, struct file *file)
+{
+	struct g955n_ssi *ssi = file->private_data;
+
+	mutex_lock(&ssi->lock);
+	ssi->sensor_open = false;
+	ssi->sensor_pending = false;
+	mutex_unlock(&ssi->lock);
+	kref_put(&ssi->refs, ssi_free);
+	return 0;
+}
+
+static ssize_t ssi_sensor_read(struct file *file, char __user *buffer,
+			       size_t length, loff_t *position)
+{
+	struct g955n_ssi *ssi = file->private_data;
+	ssize_t ret = 0;
+
+	if (!length)
+		return 0;
+	mutex_lock(&ssi->lock);
+	if (ssi->removed) {
+		ret = -ENODEV;
+	} else if (ssi->sensor_pending) {
+		length = min(length, sizeof(ssi_ssp_whoami) - ssi->sensor_offset);
+		length -= copy_to_user(buffer, ssi_ssp_whoami + ssi->sensor_offset,
+				       length);
+		ssi->sensor_offset += length;
+		ssi->sensor_pending = ssi->sensor_offset < sizeof(ssi_ssp_whoami);
+		ret = length ? (ssize_t)length : -EFAULT;
+	}
+	mutex_unlock(&ssi->lock);
+	return ret;
+}
+
+static __poll_t ssi_sensor_poll(struct file *file, poll_table *wait)
+{
+	struct g955n_ssi *ssi = file->private_data;
+	__poll_t flags = 0;
+
+	poll_wait(file, &ssi->wait, wait);
+	mutex_lock(&ssi->lock);
+	if (ssi->removed)
+		flags = EPOLLHUP | EPOLLERR;
+	else if (ssi->sensor_pending)
+		flags = EPOLLIN | EPOLLRDNORM;
+	mutex_unlock(&ssi->lock);
+	return flags;
+}
+
+static const struct file_operations ssi_sensor_ops = {
+	.owner = THIS_MODULE,
+	.open = ssi_sensor_open,
+	.release = ssi_sensor_release,
+	.read = ssi_sensor_read,
+	.poll = ssi_sensor_poll,
+};
+
 static ssize_t ssi_control_write(struct file *file, const char __user *buffer,
 				 size_t length, loff_t *position)
 {
@@ -777,10 +868,17 @@ static ssize_t ssi_control_write(struct file *file, const char __user *buffer,
 		ret = -ENODEV;
 	} else if (!strcmp(command, "ESW:NOTREADY")) {
 		ssi->firmware_state = BBD_FIRMWARE_NOT_READY;
+		ssi->sensor_pending = false;
 	} else if (!strcmp(command, "ESW:READY")) {
+		if (probe_legacy_ssp && ssi->firmware_state != BBD_FIRMWARE_READY) {
+			ssi->sensor_offset = 0;
+			ssi->sensor_pending = true;
+			wake_up_interruptible(&ssi->wait);
+		}
 		ssi->firmware_state = BBD_FIRMWARE_READY;
 	} else if (!strcmp(command, "ESW:CRASHED")) {
 		ssi->firmware_state = BBD_FIRMWARE_CRASHED;
+		ssi->sensor_pending = false;
 		ssi->patch_transfer = false;
 	} else if (!strcmp(command, "BBD:PassThru=1") ||
 		   !strcmp(command, "SSI:PassThru=1")) {
@@ -871,6 +969,7 @@ static int ssi_manual_rail(struct g955n_ssi *ssi, bool on)
 		ssi->stream_error = 0;
 		ssi->firmware_state = BBD_FIRMWARE_UNKNOWN;
 		ssi->patch_transfer = false;
+		ssi->sensor_pending = false;
 	}
 	msleep(20);
 	if (on && ssi->stream_open)
@@ -1022,6 +1121,9 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (expose_legacy_power && !expose_legacy_stream)
 		return dev_err_probe(dev, -EINVAL, "daemon power requires the queued SSI stream\n");
 
+	if (probe_legacy_ssp && !expose_legacy_control)
+		return dev_err_probe(dev, -EINVAL, "SSP probe requires BBD control\n");
+
 	ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
 	if (!ssi)
 		return -ENOMEM;
@@ -1142,9 +1244,27 @@ static int g955n_ssi_probe(struct spi_device *spi)
 		if (ret)
 			goto deregister_stream;
 	}
+	if (probe_legacy_ssp) {
+		ssi->sensor = (struct miscdevice) {
+			.minor = MISC_DYNAMIC_MINOR,
+			.name = "bbd_sensor",
+			.mode = 0600,
+			.parent = dev,
+			.fops = &ssi_sensor_ops,
+		};
+		ret = misc_register(&ssi->sensor);
+		if (ret)
+			goto deregister_power;
+	}
 	spi_set_drvdata(spi, ssi);
 	return 0;
 
+deregister_power:
+	if (expose_legacy_power) {
+		device_unregister(ssi->gnss_device);
+		device_unregister(ssi->power_device);
+		class_destroy(ssi->sec_class);
+	}
 deregister_stream:
 	misc_deregister(&ssi->stream);
 deregister_control:
@@ -1168,6 +1288,8 @@ static void g955n_ssi_remove(struct spi_device *spi)
 {
 	struct g955n_ssi *ssi = spi_get_drvdata(spi);
 
+	if (probe_legacy_ssp)
+		misc_deregister(&ssi->sensor);
 	if (expose_legacy_power) {
 		device_unregister(ssi->gnss_device);
 		device_unregister(ssi->power_device);

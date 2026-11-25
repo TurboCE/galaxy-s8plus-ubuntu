@@ -2692,3 +2692,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   transfer on 6.18.
 - Added proposal 0140 for the USI8 clock tree and hub controller profile.
   The daemon still retries during transfer.
+
+## 2026-11-25 — BCM4773 firmware completion and SSP identity
+
+- Added proposal 0141 to keep short hub SPI delays at microsecond scale
+  on the 250 Hz kernel. This resolved the firmware ACK stalls.
+- Added an opt-in BBD sensor endpoint that queues one read-only SSP
+  chip-ID query after the original daemon reports ready.
+- Confirmed firmware completion, 549 acknowledged reliable frames with
+  zero NACKs, and physical SSP ID 0x55 on 6.18.

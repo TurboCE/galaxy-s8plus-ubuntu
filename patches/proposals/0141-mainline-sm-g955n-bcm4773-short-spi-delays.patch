@@ -1,0 +1,48 @@
+Subject: [PATCH] spi: s3c64xx: bound short USI8 PIO settling delays
+
+With high-resolution timers disabled, usleep_range delays for short
+hub PIO transfers rounded to the 4 ms tick on this 250 Hz kernel.
+The hub generated ACKs tens of milliseconds after each data write.
+The original daemon had already started retransmitting by then.
+
+Use the bounded microsecond delay on short PIO transfers for the
+USI8 controller profile in proposal 0140. On the handset, an isolated
+trial restored sub-2 ms ACK spacing and all 548 reliable download
+frames were acknowledged without a NACK.
+
+--- a/drivers/spi/spi-s3c64xx.c
++++ b/drivers/spi/spi-s3c64xx.c
+@@ -22,6 +22,7 @@
+ 
+ #define MAX_SPI_PORTS		12
+ #define S3C64XX_SPI_QUIRK_CS_AUTO	(1 << 1)
++#define S3C64XX_SPI_QUIRK_SHORT_PIO_DELAY	(1 << 2)
+ #define AUTOSUSPEND_TIMEOUT	2000
+ 
+ /* Registers and bit-fields */
+@@ -632,8 +633,13 @@
+ 
+ 	/* sleep during signal transfer time */
+ 	status = readl(regs + S3C64XX_SPI_STATUS);
+-	if (RX_FIFO_LVL(status, sdd) < xfer->len)
+-		usleep_range(time_us / 2, time_us);
++	if (RX_FIFO_LVL(status, sdd) < xfer->len) {
++		if ((sdd->port_conf->quirks & S3C64XX_SPI_QUIRK_SHORT_PIO_DELAY) &&
++		    time_us <= 50)
++			udelay(time_us);
++		else
++			usleep_range(time_us / 2, time_us);
++	}
+ 
+ 	if (use_irq) {
+ 		val = msecs_to_jiffies(ms);
+@@ -1583,7 +1589,8 @@
+ 	.high_speed	= true,
+ 	.clk_from_cmu	= true,
+ 	.has_loopback	= true,
+-	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO,
++	.quirks		= S3C64XX_SPI_QUIRK_CS_AUTO |
++			  S3C64XX_SPI_QUIRK_SHORT_PIO_DELAY,
+ };
+ 
+ static const struct s3c64xx_spi_port_config exynosautov9_spi_port_config = {

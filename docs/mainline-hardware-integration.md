@@ -54,9 +54,11 @@ a 315-byte query across multiple SSI frames with the revision 10 power pin
 configured. With the legacy daemon power controls connected, the original
 daemon exchanged bytes with the hub. Its initial autobaud sync timed
 out while the source clock stayed too high. A controller trial programmed
-the USI8 divider and matched the first #58 replies. The daemon began
-transferring firmware, then retried before reaching ready.
+the USI8 divider and matched the first #58 replies.
 [Proposal 0140](../patches/proposals/0140-mainline-sm-g955n-bcm4773-usi8-clock.patch)
-applies the observed clock correction to the kernel and board DT.
-Firmware completion and sensor RPC routing still need qualification
-before exposing measurements or a satellite fix to Ubuntu.
+applies that clock correction to the kernel and board DT.
+[Proposal 0141](../patches/proposals/0141-mainline-sm-g955n-bcm4773-short-spi-delays.patch)
+avoids tick-rounded delays during short transfers. A bounded handset trial
+with those controller changes and the BBD sensor probe finished firmware
+transfer, reached daemon ready and returned chip ID 0x55. Persistent boot
+integration, IIO measurements and a satellite fix still need verification.

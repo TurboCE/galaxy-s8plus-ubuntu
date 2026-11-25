@@ -105,8 +105,23 @@ stream I/O. The original raw SSI mode powers its link on open when
 daemon power control is disabled.
 
 A same-device #58 trace established the startup order and the
-`BBD:PassThru` notifications. On 6.18, an isolated run of the original
-daemon reproduced the power sequence and exchanged actual bytes in
-both directions. The daemon retried at the initial autobaud sync and
-did not read the firmware patch. The trial's service is not enabled
-at boot.
+`BBD:PassThru` notifications. An isolated 6.18 trial of the original
+daemon reproduced the power sequence and exchanged bytes in both
+directions. This first trial stopped at autobaud before reading the
+firmware patch. Subsequent controller trials are described below.
+The service remains opt-in.
+
+## Read-only SSP initialization probe
+
+With the legacy control, power, stream and firmware reader enabled,
+`probe_legacy_ssp=1` adds the exclusive, root-only `/dev/bbd_sensor`
+endpoint. On a new `ESW:READY` notification, it queues one
+length-prefixed SSP chip-ID request for the original daemon to send.
+The probe expects device ID 0x55. It does not enable any sensor
+stream or register an IIO device.
+
+On the exact handset, the vendor daemon finished firmware transfer and
+returned a CRC-valid SSP chip-ID response using temporary USI8 clock
+and microsecond-delay driver trials. The persistent integration still
+needs a qualified boot with proposals 0139 through 0141, followed by
+sensor RPC routing and IIO consumers.

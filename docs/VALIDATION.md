@@ -6399,3 +6399,39 @@ The original SPI controller binding was restored after each comparison.
 TWRP read back the original full VPN2 BOOT, and the handset reached GDM
 with the lower speaker still the default PipeWire sink. No trial
 firmware, legacy device endpoint or recovery timer remained active.
+
+### BCM4773 firmware completion and chip ID on 6.18
+
+The same-device #58 control run sent 549 reliable frames and received
+549 ACKs with no NACK or CRC rejection. With the corrected USI8 clock,
+6.18 sent valid frames but initially saw ACKs 0 through 9 followed by
+repeated NACK 9. A fixed clock request and periodic GPIO polling did
+not complete the firmware transfer. Polling the controller instead of
+using its FIFO IRQ, and matching the stock FIFO burst size, also did
+not complete the transfer. In one confirmed poll trial, consecutive
+physical ACK delivery was about 68–88 ms apart.
+
+The VPN2 kernel runs at 250 Hz with high-resolution timers disabled.
+Using a bounded microsecond wait for short PIO transfers reduced the
+per-frame delays. The original daemon sent 513,234 bytes and received
+ACKs for all 548 reliable frames it sent. The next system call,
+opening `/dev/bbd_sensor`, failed with `ENOENT`, and the daemon
+reported not ready. The proposed controller fix compiled with ARM64
+`W=1` and applied after proposals 0139 and 0140.
+
+A separate live test verified the exact SPI link driver binding and
+used the new opt-in probe endpoint. The original daemon opened the
+endpoint, sent `BBD:PassThru=0` and reported `ESW:READY`. It consumed
+the real 11-byte length-prefixed SSP WHOAMI request. The reply captured
+on the SPI stream had a valid CRC and contained the stock chip ID
+0x55. The complete trial returned 549 reliable ACKs with zero NACKs
+or invalid CRCs. The temporary service remained ready during the
+observation window and was stopped after collecting the result.
+
+This validates the firmware bootstrap and identity response. Continuous
+SSP sensor streams, IIO publication, a real GNSS fix and booting the
+integrated kernel image remain separate validation targets.
+
+TWRP restored and verified the original VPN2 BOOT. The handset reached
+GDM with the lower speaker still selected in PipeWire. The return timer,
+trial firmware and all four legacy nodes were absent after restart.
