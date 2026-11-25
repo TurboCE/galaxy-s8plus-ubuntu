@@ -2,8 +2,8 @@
 
 Live baseline on 2026-11-25: Ubuntu 24.04.5 LTS with
 `6.18.0-g955n-usb-r100-vpn2`, the corrected speaker DTB, and
-the integrated BCM4773 transport, and the shared MAX77865
-haptic and RGB LED drivers.
+the integrated BCM4773 transport, the shared MAX77865 haptic
+and RGB LED drivers, and native microSD host registration.
 Older Samsung 4.4 evidence is in [VALIDATION.md](VALIDATION.md);
 it does not qualify a device on the current mainline boot.
 
@@ -15,7 +15,7 @@ it does not qualify a device on the current mainline boot.
 | Audio | PCM 0 is the MAX98506 bottom speaker and remains the default PipeWire output after the GPH3 DT correction. PCM 1 is the microphone and PCM 2 the receiver. Bottom playback and microphone capture were verified acoustically. | Exercise receiver/voice and headset routes through actual playback and recording. |
 | Wi-Fi and Bluetooth | NetworkManager reports Wi-Fi connected. BlueZ sees a powered controller with Samsung firmware build 0405. A bounded Adapter1 discovery session received eight advertising peers and stopped cleanly. | Bluetooth pairing and data/audio, Wi-Fi reconnect across sleep and two-band checks on this build. |
 | Battery and charging | UPower reports MAX77865 battery voltage and capacity. A temporary standard power-supply binding showed USB online and Qi offline in UPower. | Enable the tested wiring at boot and verify actual wired and wireless charging and battery charge-state transitions. |
-| USB and storage | USB Ethernet carried authenticated device queries. The installed Ubuntu filesystem boots from internal UFS. | USB host and accessory operation. The microSD controller is disabled in the live DT. The validated rail probe reads its 2.8 V signal rail as configured and off. |
+| USB and storage | USB Ethernet carried authenticated device queries. The installed Ubuntu filesystem boots from internal UFS. | USB host and accessory operation. The microSD host registers automatically. Both 2.8 V supplies were enabled during detection. The detect line indicated insertion, but no card enumerated. Known-good media and read/write testing remain pending. |
 | Location | GeoClue returns an approximate network location. Native BCM4773 exposes no GNSS receiver source. | Qualify satellite reports and a receiver fix before enabling a native GeoClue GNSS feed. |
 | LTE | ModemManager is active and lists no modem. | Securely bring up the Exynos modem transport, then validate SIM registration and mobile data in NetworkManager. |
 | Cameras and iris sensor | No video device. Samsung's board source lists alternatives for the front and rear sensor modules, so the actual variant must be identified. | Qualify capture through the Linux media stack and a standard Ubuntu camera app. Iris functionality needs a separate userspace interface and security review. |

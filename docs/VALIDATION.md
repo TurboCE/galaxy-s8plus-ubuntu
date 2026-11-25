@@ -6836,3 +6836,29 @@ client and its polling work. No charging configuration was written.
 The battery continued to report 99 percent and roughly 4.35 V. Physical
 charging, Qi attachment, and the input notification transitions remain
 unverified.
+
+
+## 2026-11-25 — Live microSD host and power sequencing
+
+Installed the MMC candidate with protected partition backups and an
+automatic TWRP return timer. On the trial boot, both 2.8 V supplies
+registered. An input-only GPIO probe reported card detect asserted.
+Temporarily kept the MMC block driver from autoloading while exercising
+controller initialization to avoid a desktop mount during diagnosis.
+
+The 11500000.mmc controller registered mmc0, identified IP version
+0x270a, and selected internal DMA. It attempted rates from 400 to
+100 kHz. Regulator consumers enabled both supplies during scanning.
+ACPM readback showed LDO2 move from 0x28 to 0xe8 and back to 0x28 with
+its voltage selector intact. No card device appeared in the MMC bus
+after separate scans. No block device was created and there was no
+filesystem activity. Card detect alone does not establish that media
+is installed correctly or responding.
+
+The handset returned from RTC-woken s2idle in the same boot after
+approximately 21 seconds. MMC host, GDM, the panel, Wi-Fi, haptics
+and the sensor hub remained available. Removed the trial timer and
+autoload restrictions and rebooted normally. The MMC host registered
+automatically, but no card enumerated. The kernel error-priority journal
+was empty at both checks. Keep known-good media identification,
+read/write verification and high-speed mode qualification open.
