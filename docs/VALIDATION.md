@@ -6695,3 +6695,18 @@ Absolute heading and response to physical rotation are unverified.
 SensorProxy retained accelerometer, ambient light and proximity,
 and Wi-Fi, GDM, OLED backlight and bottom-speaker routing remained
 available.
+
+## 2026-11-25 — Revision 10 MAX77865 haptic identification
+
+Samsung Dream2 Korean revision 10 routes PWM channel 1 at 0x104c0000
+to gpd0-5 and uses the MAX77865 at I²C address 0x66. Older board
+variants use a different controller. The read-only probe built with
+`W=1` and returned ID 0x65, revision 0x02, enabled bias and disabled
+motor with MCONFIG 0x00, consistent with the same handset's Samsung
+kernel log. The probe made no PMIC configuration changes.
+
+The stock-PWM device-tree additions compiled and disassembled with
+the expected clock, channel and inherited I²C bus. The FF_RUMBLE
+driver compiled as an ARM64 object against the 6.18 interfaces.
+The installed kernel still has PWM disabled, so motor motion,
+force-feedback playback and suspend cancellation are unverified.

@@ -2790,3 +2790,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Decoded the BCM4773 rotation vector into IIO magnetic heading and
   connected the standard IIO trigger buffer. After reboot the packaged
   SensorProxy published heading through its GeoClue Compass API.
+
+## 2026-11-25 — Bring up the MAX77865 haptic hardware path
+
+- Confirmed the MAX77865 haptic block on the running revision 10
+  handset. Added the matching PWM wiring, kernel config and Linux
+  force-feedback driver for the candidate build.

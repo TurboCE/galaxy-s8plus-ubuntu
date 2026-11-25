@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* Board wiring from Samsung exynos8895-dream2lte_kor_10.dts. */
+
+&{/soc@0/pinctrl@104d0000} {
+	g955n_motor_pwm_pin: pwm-motor-pins {
+		samsung,pins = "gpd0-5";
+		samsung,pin-function = <2>;
+		samsung,pin-pud = <1>;
+		samsung,pin-drv = <0>;
+	};
+};
+
+&{/soc@0} {
+	g955n_motor_pwm: pwm@104c0000 {
+		compatible = "samsung,s3c6400-pwm";
+		reg = <0x104c0000 0x1000>;
+		clocks = <&{/soc@0/clock-controller@10400000} 12>;
+		clock-names = "timers";
+		samsung,pwm-outputs = <1>;
+		#pwm-cells = <3>;
+		status = "okay";
+	};
+};
+
+&{/soc@0/usi@10960000/i2c@10000} {
+	haptic@66 {
+		compatible = "samsung,sm-g955n-max77865-haptic";
+		reg = <0x66>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&g955n_motor_pwm_pin>;
+		pwms = <&g955n_motor_pwm 1 48828 0>;
+	};
+};
