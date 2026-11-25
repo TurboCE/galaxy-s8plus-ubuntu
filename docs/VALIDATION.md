@@ -7096,3 +7096,34 @@ NetworkManager rescan succeeded without another kernel error, with the
 link connected. Removed the BOOT trial timer and kept the tested image.
 The observations verify the GPIO and current programming. Visible
 emission and the camera flash strobe require separate tests.
+
+
+## 2026-11-26 — Camera ROM modules and the two 1.8 V supplies
+
+The Samsung Korean board source allows two alternatives at each camera
+position. The stock driver classifies front EEPROM data on HSI2C28 at
+0x51, offset 0x30, and rear SPI ROM data on camera SPI0, offset 0x40.
+S2MPB02 LDO6 and LDO17 read 0x30 with both supplies off, matching
+the 1.8 V selectors in the Samsung regulator description.
+
+The 6.18 ROM driver uses a bounded five-byte read on each bus. Rear
+SPI uses the Samsung read opcode, a 24-bit address and an active-low
+chip select. The device attribute exposes a model name and requires
+root. Each successful and unsuccessful transaction has a matching
+regulator-disable path. No camera image, calibration dump, or module
+serial is recorded. The torch and its existing GPIO path share the
+same S2MPB02 I²C client as the two new regulators.
+
+The handset returned S5K3H1 for the front and S5K2L2 for the rear on
+three reads apiece. Both 1.8 V supplies returned to off. The normal
+reboot preserved the results and showed mode 0400 for the two model
+attributes. RTC-woken s2idle preserved the boot ID and both model
+reads passed again. The verified DT fragment rebuild matched the
+DTB used in the trial byte for byte. Both modules built with W=1.
+
+The same boot passed NFC initialization, RF discovery and shutdown,
+and returned 48 optical FIFO frames with both supplies disabled at
+the end. USB and Wi-Fi responded, GDM remained active, and PipeWire
+still listed the bottom speaker as its default. One existing temporary
+brcmfmac scan suppression occurred after resume. Camera sensor clocks,
+CSI streaming, V4L2 capture and iris support have yet to be verified.

@@ -32,3 +32,22 @@ Boot, shutdown and standby use the kernel LED class. An off request
 drops the physical enable and restores the original torch current
 selector. Suspend powers the output down and resume restores the
 prior level.
+
+## Camera module identification
+
+Include `g955n-camera-rom-id.dtsi` after the torch fragment and install
+`g955n-camera-rom-id` for the same kernel. The torch driver provides the
+two camera ROM supplies through the regulator framework. It checks both
+voltage selectors before registration. The read-only model attributes
+are available to root on the I²C and SPI camera ROM devices.
+
+The front device uses USI11 HSI2C28 at address 0x51 and S2MPB02 LDO6.
+The rear device uses camera SPI0, with GPC3-1 as active-low chip select,
+and S2MPB02 LDO17. Each read enables only the ROM supply it requires,
+reads the first five bytes of the stock module header, and disables the
+supply. The attributes publish just the model name. The observed front
+module is S5K3H1 and the rear module is S5K2L2.
+
+The ROM path supplies the camera module information for this unit. The
+sensor clock, power and reset sequence for streaming, CSI receiver and
+V4L2 capture path still need their own bring-up.

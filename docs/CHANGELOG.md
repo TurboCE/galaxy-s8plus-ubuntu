@@ -2916,3 +2916,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   stock 20–60 mA ordinary torch settings.
 - Verified GPIO and current-register readback on the handset, including
   restoration after s2idle and the final output-off state.
+
+
+## 2026-11-26 — Installed camera module identification
+
+- Connected the front I²C EEPROM and rear SPI ROM to the supported
+  Linux controllers and exposed root-only model attributes.
+- Identified the installed S5K3H1 front module and S5K2L2 rear module.
+  Both returned the same model after normal reboot and RTC-woken s2idle.

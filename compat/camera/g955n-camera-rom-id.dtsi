@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/soc/samsung,exynos-usi.h>
+
+&{/soc@0/usi@10900000/i2c@0/torch@59} {
+	regulators {
+		front_cam_rom: ldo6 {
+			regulator-name = "camera-front-rom-1v8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		rear_cam_rom: ldo17 {
+			regulator-name = "camera-rear-rom-1v8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+	};
+};
+
+&{/soc@0/usi@10920000} {
+	samsung,mode = <USI_MODE_I2C1>;
+	status = "okay";
+};
+
+&{/soc@0/usi@10920000/i2c@10000} {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	eeprom@51 {
+		compatible = "samsung,sm-g955n-camera-front-rom";
+		reg = <0x51>;
+		vcc-supply = <&front_cam_rom>;
+	};
+};
+
+&{/soc@0/spi@109d0000} {
+	pinctrl-0 = <&{/soc@0/pinctrl@10980000/spi0-bus-pins}
+		     &{/soc@0/pinctrl@10980000/spi0-cs-pins}>;
+	cs-gpios = <&{/soc@0/pinctrl@10980000/gpc3-gpio-bank} 1 GPIO_ACTIVE_LOW>;
+	status = "okay";
+
+	flash@0 {
+		compatible = "samsung,sm-g955n-camera-rear-rom";
+		reg = <0>;
+		spi-max-frequency = <1000000>;
+		vcc-supply = <&rear_cam_rom>;
+	};
+};

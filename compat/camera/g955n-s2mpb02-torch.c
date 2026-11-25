@@ -9,10 +9,16 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/regmap.h>
+#include <linux/regulator/driver.h>
 
 #define S2MPB02_FLED_CTRL1	0x12
 #define S2MPB02_FLED_CUR1	0x14
 #define S2MPB02_BST_CTRL2	0x1d
+#define S2MPB02_LDO6_CTRL	0x23
+#define S2MPB02_LDO17_CTRL	0x2e
+#define S2MPB02_LDO_VSEL_MASK	GENMASK(6, 0)
+#define S2MPB02_LDO_ENABLE	BIT(7)
+#define S2MPB02_LDO_1V8		48
 #define S2MPB02_REV1_BOOST	0x90
 #define S2MPB02_GPIO_MODE_MASK	GENMASK(7, 6)
 #define S2MPB02_TORCH_CUR_MASK	GENMASK(3, 0)
@@ -30,8 +36,70 @@ struct s2mpb02_torch {
 static const struct regmap_config s2mpb02_torch_regmap = {
 	.reg_bits = 8,
 	.val_bits = 8,
-	.max_register = S2MPB02_BST_CTRL2,
+	.max_register = S2MPB02_LDO17_CTRL,
 };
+
+static const struct regulator_ops s2mpb02_camera_rom_ops = {
+	.enable = regulator_enable_regmap,
+	.disable = regulator_disable_regmap,
+	.is_enabled = regulator_is_enabled_regmap,
+};
+
+static const struct regulator_desc s2mpb02_camera_rom_rails[] = {
+	{
+		.name = "camera-front-rom-1v8",
+		.of_match = "ldo6",
+		.regulators_node = "regulators",
+		.type = REGULATOR_VOLTAGE,
+		.ops = &s2mpb02_camera_rom_ops,
+		.owner = THIS_MODULE,
+		.n_voltages = 1,
+		.fixed_uV = 1800000,
+		.enable_reg = S2MPB02_LDO6_CTRL,
+		.enable_mask = S2MPB02_LDO_ENABLE,
+		.enable_time = 180,
+	}, {
+		.name = "camera-rear-rom-1v8",
+		.of_match = "ldo17",
+		.regulators_node = "regulators",
+		.type = REGULATOR_VOLTAGE,
+		.ops = &s2mpb02_camera_rom_ops,
+		.owner = THIS_MODULE,
+		.n_voltages = 1,
+		.fixed_uV = 1800000,
+		.enable_reg = S2MPB02_LDO17_CTRL,
+		.enable_mask = S2MPB02_LDO_ENABLE,
+		.enable_time = 180,
+	},
+};
+
+static int s2mpb02_register_camera_rom_rails(struct device *dev, struct regmap *map)
+{
+	struct regulator_config config = { .dev = dev, .regmap = map };
+	struct device_node *regulators;
+	unsigned int value, i;
+	int ret;
+
+	regulators = of_get_child_by_name(dev->of_node, "regulators");
+	if (!regulators)
+		return 0;
+	of_node_put(regulators);
+
+	for (i = 0; i < ARRAY_SIZE(s2mpb02_camera_rom_rails); i++) {
+		const struct regulator_desc *rail = &s2mpb02_camera_rom_rails[i];
+		struct regulator_dev *rdev;
+
+		ret = regmap_read(map, rail->enable_reg, &value);
+		if (ret)
+			return ret;
+		if ((value & S2MPB02_LDO_VSEL_MASK) != S2MPB02_LDO_1V8)
+			return dev_err_probe(dev, -EINVAL, "unexpected %s voltage\n", rail->name);
+		rdev = devm_regulator_register(dev, rail, &config);
+		if (IS_ERR(rdev))
+			return PTR_ERR(rdev);
+	}
+	return 0;
+}
 
 static int s2mpb02_torch_set(struct led_classdev *led, enum led_brightness level)
 {
@@ -123,6 +191,9 @@ static int s2mpb02_torch_probe(struct i2c_client *client)
 	if (IS_ERR(torch->enable))
 		return dev_err_probe(dev, PTR_ERR(torch->enable), "cannot claim torch pin\n");
 
+	ret = s2mpb02_register_camera_rom_rails(dev, torch->regmap);
+	if (ret)
+		return ret;
 	mutex_init(&torch->lock);
 	torch->led.name = "white:torch";
 	torch->led.max_brightness = S2MPB02_TORCH_MAX;
