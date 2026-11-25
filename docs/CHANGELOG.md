@@ -3062,3 +3062,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Moved the CSIS1 clock snapshots into the enabled camera bus window
   and made each extra DMA clock register an explicit one-shot selection.
+
+
+## 2026-11-26 — Report MAX77865 charge state through power_supply
+
+- Added read-only charge-state decoding to the wired and wireless
+  source driver and linked the fuel gauge's status to its suppliers.

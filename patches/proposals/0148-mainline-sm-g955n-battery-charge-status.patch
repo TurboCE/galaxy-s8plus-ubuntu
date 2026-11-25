@@ -1,0 +1,30 @@
+Subject: [PATCH] power: supply: report SM-G955N battery charging status
+
+Use status from the MAX77865 input driver's supply relationships. Keep
+Unknown when the charger is unavailable and notify observers when a
+supplier detects a status change.
+
+Apply after the MAX77865 telemetry driver.
+
+diff --git a/drivers/power/supply/max77865_battery.c b/drivers/power/supply/max77865_battery.c
+--- a/drivers/power/supply/max77865_battery.c
++++ b/drivers/power/supply/max77865_battery.c
+@@ -33,8 +33,8 @@
+ 		value->intval = !(word & MAX77865_FG_BAT_ABSENT);
+ 		return 0;
+ 	case POWER_SUPPLY_PROP_STATUS:
+-		/* The separate charger tracks charging and termination. */
+-		value->intval = POWER_SUPPLY_STATUS_UNKNOWN;
++		if (power_supply_get_property_from_supplier(psy, prop, value))
++			value->intval = POWER_SUPPLY_STATUS_UNKNOWN;
+ 		return 0;
+ 	case POWER_SUPPLY_PROP_CAPACITY:
+ 		word = i2c_smbus_read_word_data(client, MAX77865_FG_REPSOC);
+@@ -60,6 +60,7 @@
+ 	.properties = max77865_battery_properties,
+ 	.num_properties = ARRAY_SIZE(max77865_battery_properties),
+ 	.get_property = max77865_battery_get_property,
++	.external_power_changed = power_supply_changed,
+ };
+ 
+ static int max77865_battery_probe(struct i2c_client *client)

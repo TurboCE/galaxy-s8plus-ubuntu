@@ -7717,3 +7717,39 @@ full-size PRIME sharing were verified again. GDM, USB SSH, the
 location hub and Wi-Fi returned. PipeWire reported the built-in
 bottom speaker as default. The diagnostic never enabled camera DMA
 or wrote BOOT, and camera pixel capture remains unverified.
+
+
+## 2026-11-26 — Fingerprint, Bluetooth and charger checks
+
+The Korean revision 10 stock DT and Samsung source identify the
+fingerprint controller as NAMSAN VFS8xxx on USI0 SPI at 0x10440000,
+with DRDY on GPA1-3, enable on GPJ1-6 and chip select on GPD1-2.
+The stock DT marks the controller secure-mode. The released kernel
+source includes a nonsecure driver path, while the matching source
+defconfig enables Trustonic and has fingerprint secure compilation
+disabled. Those sources do not establish access policy in the
+installed firmware. Current mainline leaves USI0 and its SPI child
+disabled, exposes no fingerprint device, and has no fprintd package.
+The upstream libfprint supported device list has no NAMSAN SPI entry.
+No peripheral transaction, enrollment or authentication was attempted.
+[libfprint supported devices](https://fprint.freedesktop.org/supported-devices.html)
+
+On the active translated-DECON boot, BlueZ accepted an eight-second
+LE discovery request and delivered 21 distinct live advertising
+reports. It also accepted and stopped an eight-second BR/EDR
+discovery, which produced no live peer report. The adapter remained
+powered. No peer was paired or connected during either scan.
+
+An isolated read of the registered MAX77865 charger returned
+INT_OK=0xcf and DETAILS_01=0x3b. The cable was online, while Samsung's
+charge-status mapping classifies 0xb as discharging. The installed
+fuel gauge still reported Unknown. Added the charger status mapping
+and power_supply supplier relationship. The battery driver proposal
+reads that status and propagates supplier changes to UPower.
+
+Built both drivers against the ARM64 6.18 tree with W=1 and applied
+the battery diff with zero fuzz. The actual mapping function passed
+all 16 status nibble cases and an I/O failure case on the host.
+The installed battery driver is built into the kernel. This turn
+did not replace it or program any charging settings. Live status
+reporting through UPower and physical charge transitions remain open.
