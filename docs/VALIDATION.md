@@ -6819,3 +6819,20 @@ Compiled the ACPM module for ARM64 with W=1. Recompiled the exact live
 DTB with the microSD delta and compared the decoded trees. Only the
 MMC node, two supplies and their new pin references changed. At this
 stage no card I/O or controller registration had been verified.
+
+
+## 2026-11-25 — MAX77865 wired and wireless input telemetry
+
+The running battery driver reports its charge status as Unknown. A
+read-only probe on the same I²C adapter as the fuel gauge read the
+charger at 0x69. INT_OK=0xcf showed valid wired input and no wireless
+input. DTLS00=0xe0 and DTLS01=0x3b were recorded. Samsung maps charge
+state 0xb to discharging even though the cable was detected.
+
+Built the charger-input module for ARM64 with W=1 and temporarily
+bound the address. Linux power_supply and Ubuntu UPower independently
+reported wired online and wireless offline. Removed the temporary I²C
+client and its polling work. No charging configuration was written.
+The battery continued to report 99 percent and roughly 4.35 V. Physical
+charging, Qi attachment, and the input notification transitions remain
+unverified.

@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc@0/usi@10960000/i2c@10000} {
+	charger@69 {
+		compatible = "maxim,max77865-charger-inputs";
+		reg = <0x69>;
+	};
+};

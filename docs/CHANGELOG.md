@@ -2832,3 +2832,8 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   NFC I/O supply states after reboot.
 - Prepared an opt-in, default-speed microSD kernel build using the
   board's pinmux, card-detect line and independently controlled supplies.
+
+
+## 2026-11-25 — Read-only charger input integration
+
+- Tested standard MAX77865 wired and wireless input status in UPower.
