@@ -2948,3 +2948,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   CAM0 IOMMU and its camera clock gate.
 - Verified all pages of the 4 MiB buffer and their removal at unmap
   on the handset. Camera DMA and app capture remain pending.
+
+
+## 2026-11-26 — CSIS1 link and CAM0 clock resource ownership
+
+- Limited the CSI link probe to its four camera clock registers so it
+  can coexist with CAM0's independently bound clock provider.
+- Documented the stock packed RAW10 DMA buffer layout and common clock
+  dependencies for the front sensor.

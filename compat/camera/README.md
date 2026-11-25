@@ -103,3 +103,20 @@ The CAM0 diagnostic fragment and its two modules check a translated
 against the allocated buffer and verifies that the mapping is removed
 when it finishes. The 32-bit end check permits an inclusive last byte
 of 0xffffffff. The test performs no camera DMA and records no pixels.
+
+### Stock CSIS1 DMA reference
+
+The 8895 CSIS receiver registers and the CSISx4 DMA common registers
+are separate blocks. Samsung's clock tables assign the common DMA
+ACLK, asynchronous master and peripheral gates to CAM CMU offsets
+0x2078, 0x2038 and 0x2118, plus the CSISx4 DMA Q-channel at 0x3028.
+The common DMA register window starts at 0x12ce0000. A gate snapshot
+alone does not establish that the common block is accessible.
+
+For the front sensor's SBGGR10 mode, Samsung's receiver uses legacy
+2D RAW10 storage with the PACK12 flag set and the parallel DMA input.
+The stock buffer sizing is `ALIGN(width * 5 / 4, 16) * height`, or
+2048 bytes per line and 1,880,064 bytes per frame at 1632×918.
+The single-buffer setup points all eight VC0 slots at the same mapped
+address. A capture test must confirm the actual format and write
+extent, DMA completion and quiescence before returning the buffer.

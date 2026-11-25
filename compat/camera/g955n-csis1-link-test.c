@@ -15,14 +15,13 @@
 #include <linux/regmap.h>
 
 #define CAM_CMU_BASE		0x12c00000
-#define CAM_CMU_SIZE		0x4000
 #define CAM_STATUS		0x4024
 #define CAM_PWR_MASK		GENMASK(3, 0)
 #define CAM_BUS_USER		0x0100
 #define CAM_CSIS1_ACLK		0x2060
 #define CAM_CSIS1_APB_ASYNCM	0x202c
 #define CAM_CSIS1_APB_ASYNCS	0x210c
-#define CAM_CSIS1_GATE_ON	BIT(21)
+#define CAM_GATE_ON		BIT(21)
 #define CAM_SYSREG_RESET	0x12c21050
 #define CAM_CSIS1_RESET		BIT(2)
 #define CAM_CSIS3_RESET		BIT(3)
@@ -66,6 +65,45 @@
 #define CSIS_RX_ERRORS		GENMASK(19, 0)
 #define CSIS_DMA_DISABLE	BIT(0)
 #define CSIS_DMA_UPDATE		BIT(1)
+
+/* Claim only these registers. The CAM0 System MMU owns its separate gate. */
+static int g955n_csis1_clock_read(u32 offset, u32 *value)
+{
+	resource_size_t addr = CAM_CMU_BASE + offset;
+	void __iomem *reg;
+	int ret = 0;
+
+	if (!request_mem_region(addr, sizeof(*value), KBUILD_MODNAME))
+		return -EBUSY;
+	reg = ioremap(addr, sizeof(*value));
+	if (reg) {
+		*value = readl(reg);
+		iounmap(reg);
+	} else {
+		ret = -ENOMEM;
+	}
+	release_mem_region(addr, sizeof(*value));
+	return ret;
+}
+
+static int g955n_csis1_check_clocks(const u32 *offsets, size_t count)
+{
+	unsigned int i;
+	u32 value;
+	int ret;
+
+	for (i = 0; i < count; i++) {
+		ret = g955n_csis1_clock_read(offsets[i], &value);
+		if (ret)
+			return ret;
+		if (!(value & CAM_GATE_ON)) {
+			pr_info(KBUILD_MODNAME ": camera clock gate %#x is off (%#x)\n",
+				offsets[i], value);
+			return -EACCES;
+		}
+	}
+	return 0;
+}
 
 struct csis_phy_register {
 	u32 offset;
@@ -189,28 +227,26 @@ static int g955n_csis1_observe(void __iomem *regs)
 
 static int g955n_csis1_test(struct regmap *pmu)
 {
+	static const u32 clocks[] = {
+		CAM_CSIS1_ACLK, CAM_CSIS1_APB_ASYNCM, CAM_CSIS1_APB_ASYNCS,
+	};
 	struct csis_snapshot saved;
-	void __iomem *cmu, *regs, *reset;
-	unsigned int isolation, reset_state;
+	void __iomem *regs, *reset;
+	unsigned int bus, isolation, reset_state;
 	int ret;
 
-	if (!request_mem_region(CAM_CMU_BASE, CAM_CMU_SIZE, "g955n-csis1-link-test"))
-		return -EBUSY;
-	cmu = ioremap(CAM_CMU_BASE, CAM_CMU_SIZE);
-	if (!cmu) {
-		ret = -ENOMEM;
-		goto release_cmu;
-	}
-	ret = -EACCES;
-	if (!(readl(cmu + CAM_BUS_USER) & BIT(4)) ||
-	    !(readl(cmu + CAM_CSIS1_ACLK) & CAM_CSIS1_GATE_ON) ||
-	    !(readl(cmu + CAM_CSIS1_APB_ASYNCM) & CAM_CSIS1_GATE_ON) ||
-	    !(readl(cmu + CAM_CSIS1_APB_ASYNCS) & CAM_CSIS1_GATE_ON))
-		goto unmap_cmu;
+	ret = g955n_csis1_clock_read(CAM_BUS_USER, &bus);
+	if (ret)
+		return ret;
+	if (!(bus & BIT(4)))
+		return -EACCES;
+	ret = g955n_csis1_check_clocks(clocks, ARRAY_SIZE(clocks));
+	if (ret)
+		return ret;
 
 	ret = -EBUSY;
 	if (!request_mem_region(CSIS1_BASE, CSIS1_SIZE, "g955n-csis1-link-test"))
-		goto unmap_cmu;
+		return ret;
 	if (!request_mem_region(CAM_SYSREG_RESET, 4, "g955n-csis1-link-test"))
 		goto release_csis;
 	regs = ioremap(CSIS1_BASE, CSIS1_SIZE);
@@ -251,10 +287,6 @@ unmap_test:
 	release_mem_region(CAM_SYSREG_RESET, 4);
 release_csis:
 	release_mem_region(CSIS1_BASE, CSIS1_SIZE);
-unmap_cmu:
-	iounmap(cmu);
-release_cmu:
-	release_mem_region(CAM_CMU_BASE, CAM_CMU_SIZE);
 	return ret;
 }
 

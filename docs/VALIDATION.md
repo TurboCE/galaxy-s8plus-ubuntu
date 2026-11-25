@@ -7218,3 +7218,22 @@ reconnected and accepted a new scan after one temporary scan suppression
 message, and PipeWire retained the bottom speaker as the default route.
 The trial return timer was removed after verification. This trial
 enabled no CSI DMA engine and captured no pixels.
+
+
+## 2026-11-26 — CSI link resource split and DMA common access trial
+
+The original CSIS1 link probe requested the entire 16 KiB CAM CMU
+resource, overlapping the 4-byte gate owned by the now-bound CAM0
+provider. The probe now claims the four individual registers it reads.
+The revised module built against the running ARM64 kernel with W=1.
+
+A separate, temporary read-only trial added CSISx4 common-register
+access to the link probe. Its SSH connection stopped responding before
+it returned any register values. Fresh USB-network and Tailscale
+connections failed. The Mac still enumerated the USB serial function,
+but no console response was received. No DMA enable, kernel install
+or BOOT flash was requested by this trial. The exact failing access
+and state of the device could not be recovered from the host. The
+experimental common MMIO reads were removed from the revised probe.
+A handset reboot and prior-boot log check are pending, as is the
+on-device regression for the narrowed CSI link probe.
