@@ -6862,3 +6862,23 @@ autoload restrictions and rebooted normally. The MMC host registered
 automatically, but no card enumerated. The kernel error-priority journal
 was empty at both checks. Keep known-good media identification,
 read/write verification and high-speed mode qualification open.
+
+
+## 2026-11-25 — Persistent charger inputs and NFC/heart-rate I²C bus
+
+Reused the verified microSD kernel image and compared the decoded DTs.
+The only functional changes were the MAX77865 charger input node
+and the USI10 secondary I²C adapter in I²C1 mode at 100 kHz.
+The NFC and optical sensor clients were not probed and no scan ran.
+
+The charger driver loaded from its DT alias and UPower reported USB
+online and Qi offline. The new adapter registered on both boots.
+The PMIC adapter received a different number. Its fuel gauge,
+haptics and three LED devices remained available, and no installed
+boot, udev or helper rule was found to depend on the old bus number.
+
+Removed the rollback timer and rebooted. Both devices automatically
+registered again. The MMC host, BCM4773 hub, GNOME, panel, Wi-Fi and
+default bottom speaker route were still present. The kernel journal
+had no error-priority entries at verification. NFC transactions,
+optical sensing and charging transitions are still pending.

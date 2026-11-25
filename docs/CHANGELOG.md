@@ -2844,3 +2844,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Enabled standard MMC host registration in the integrated 6.18 BOOT
   after verifying regulator sequencing, s2idle and a normal restart.
   No card enumerated during this test.
+
+
+## 2026-11-25 — Charger input autoload and USI10 adapter
+
+- Enabled the read-only charger input driver at boot and verified the
+  wired and wireless source states in UPower after reboot.
+- Enabled the USI10 I²C adapter used by the NFC and optical heart-rate
+  sensors. The individual controllers still require driver integration.
