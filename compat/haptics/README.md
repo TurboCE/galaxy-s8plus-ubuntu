@@ -38,3 +38,12 @@ For a kernel without PWM, an explicit LED-only I²C binding is
 available at the same address. The handset passed a temporary
 LED-only trial on the known-good BOOT. Each color was switched to
 level 3 and back to off through the Linux LED class.
+
+## Charging indicator
+
+The Ubuntu rootfs connects the MAX77865 battery and charger uevents to
+the red and green LED class devices. With a wired or wireless input
+online, the red LED marks Charging and the green LED marks Full. Both
+turn off for other battery states. The rules also refresh the indicator
+when the LED devices appear during boot. They use the Korean board's
+low-power current codes and leave the blue LED available for other uses.

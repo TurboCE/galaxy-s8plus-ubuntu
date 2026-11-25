@@ -7938,3 +7938,26 @@ default bottom-speaker route. No kernel error-priority messages were
 present. Removed the diagnostic modprobe option so it stays off on
 the next boot. Known-good physical media, card enumeration and
 Ubuntu read/write operation remain to be tested.
+
+
+## 2026-11-26 — Live MAX77865 charging indicator
+
+Installed and checked the model-scoped udev rule and helper on the
+running handset. The helper uses the standard Linux power-supply and
+LED class devices. It sets the selected colour after switching the
+other off, using the Korean stock low-power current codes. It skips
+writes to channels already at the requested level.
+
+In the live state the wire was online and the battery reported
+Discharging at 99 percent in UPower. A battery change event cleared
+a temporary red test level from 3 to 0 through the installed udev
+rule. Both LED add events also settled without helper failures.
+An isolated input fixture drove the same helper against the real
+LED class and read back red 9 for Charging, green 1 for Full, and
+both off for Not charging. The fixture never wrote charging settings
+and restored the actual discharging indication. The blue channel
+stayed at its prior level, the kernel error journal was empty and
+the bottom speaker remained the default audio route.
+
+The fixture verifies the colour mapping and PMIC readback. Optical
+emission and physical plug or Qi transitions were not measured.

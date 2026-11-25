@@ -1,0 +1,40 @@
+#!/usr/bin/python3
+"""Mirror the SM-G955N charging status on its Linux LED class devices."""
+import fcntl
+from pathlib import Path
+
+
+def update_indicators(sysfs):
+    supplies = sysfs / 'class/power_supply'
+    leds = sysfs / 'class/leds'
+    red = leds / 'red:indicator/brightness'
+    green = leds / 'green:indicator/brightness'
+    status = (supplies / 'max77865-battery/status').read_text().strip()
+    online = any(
+        path.is_file() and path.read_text().strip() == '1'
+        for path in (supplies / 'max77865-wired/online', supplies / 'max77865-wireless/online')
+    )
+
+    # Samsung's low-power current codes for the Korean board.
+    red_level = 9 if online and status == 'Charging' else 0
+    green_level = 1 if online and status == 'Full' else 0
+    # Turn the inactive colour off before enabling the selected one.
+    for path, level in sorted(((red, red_level), (green, green_level)), key=lambda item: item[1]):
+        if int(path.read_text()) != level:
+            path.write_text(f'{level}\n')
+
+
+def main():
+    if b'samsung,dream2lteks' not in Path('/proc/device-tree/compatible').read_bytes().split(b'\0'):
+        return
+    with Path('/run/udev/g955n-charge-led.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            update_indicators(Path('/sys'))
+        except FileNotFoundError:
+            # The subsequent LED or power-supply device add will retry.
+            pass
+
+
+if __name__ == '__main__':
+    main()

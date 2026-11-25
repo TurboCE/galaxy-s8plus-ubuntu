@@ -3110,3 +3110,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Added an opt-in DW-MMC diagnostic for identification command status
   on the 6.18 build without kernel tracing.
+
+
+## 2026-11-26 — Connect the MAX77865 charging indicator to Ubuntu
+
+- Refresh the red and green LED class devices from the standard
+  power-supply status and online attributes through udev.
