@@ -2737,3 +2737,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - The DSIM diagnostic waits for a ready clock lane and extends the
   bus-turnaround window for the ID read. It restores the timeout
   register before returning. The live panel returned ID `d11010`.
+
+## 2026-11-25 — Read live OLED brightness calibration
+
+- Added a panel-specific resource probe for MTP, ELVSS and HBM gamma
+  through DSIM0. Verified repeated live reads, offset reset, lock-key
+  transmission and DSIM timeout restoration on the SM-G955N.

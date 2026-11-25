@@ -23,6 +23,14 @@ with exclusive access to the controller. The read temporarily extends the contro
 window, then restores the loader configuration. It returned
 `d11010` on the running 6.18 handset.
 
+The optional `read_calibration=Y` mode checks the live panel ID before
+selecting the S6E3HA6 Dream2 A3 SA resource keys. It reads the factory
+MTP (35 bytes), ELVSS (24 bytes), and HBM gamma (33 bytes) twice and
+checks for matching, nonblank contents. It resets the global offset
+after the HBM reads and sends the lock keys in reverse order. The
+probe prints only resource lengths and status, and clears its
+temporary buffers. It does not apply gamma or change the brightness.
+
 Older Samsung-kernel logs from this handset contain
 `lcdtype=13701136` (hexadecimal `d11010`). Samsung's
 `exynos8895-dream2lte_common.dtsi` matches it with

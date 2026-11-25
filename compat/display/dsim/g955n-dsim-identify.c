@@ -24,6 +24,7 @@
 #define DSIM_INTSRC		0x50
 #define DSIM_INTMSK		0x54
 #define DSIM_PKTHDR		0x58
+#define DSIM_PAYLOAD		0x5c
 #define DSIM_RXFIFO		0x60
 #define DSIM_FIFOCTRL		0x68
 #define DSIM_CMD_CONFIG		0x80
@@ -44,12 +45,25 @@ static bool read_id;
 module_param(read_id, bool, 0400);
 MODULE_PARM_DESC(read_id, "Read only the display family's three-byte DCS ID");
 
-static int g955n_dsim_read_id(void __iomem *dsi)
+static bool read_calibration;
+module_param(read_calibration, bool, 0400);
+MODULE_PARM_DESC(read_calibration, "Validate reads of S6E3HA6 brightness calibration");
+
+#define S6E3HA6_MTP		0xc8
+#define S6E3HA6_MTP_LEN		35
+#define S6E3HA6_ELVSS		0xb5
+#define S6E3HA6_ELVSS_LEN	24
+#define S6E3HA6_HBM_GAMMA	0xb3
+#define S6E3HA6_HBM_OFFSET	2
+#define S6E3HA6_HBM_LEN		33
+#define S6E3HA6_GPARA		0xb0
+#define DSIM_TX_EMPTY		(DSIM_HDR_EMPTY | DSIM_PL_EMPTY)
+#define DSIM_RX_EVENTS		(DSIM_RX_DONE | DSIM_RX_FAULTS)
+#define DSIM_RX_WORD_LIMIT	64
+
+static int g955n_dsim_ready(void __iomem *dsi)
 {
-	u32 fifo, phy, status, timeout, word;
-	u8 id[G955N_PANEL_ID_LEN];
-	bool valid = false;
-	unsigned int i;
+	u32 fifo, phy, status;
 	int ret;
 
 	/* Noncontinuous clocking leaves HS briefly between scanout bursts. */
@@ -63,60 +77,193 @@ static int g955n_dsim_read_id(void __iomem *dsi)
 	fifo = readl(dsi + DSIM_FIFOCTRL);
 	status = readl(dsi + DSIM_INTSRC);
 	if ((fifo & DSIM_FIFO_IDLE) != DSIM_FIFO_IDLE ||
-	    status & (DSIM_RX_DONE | DSIM_RX_FAULTS) ||
+	    status & DSIM_RX_EVENTS ||
 	    !(readl(dsi + DSIM_LINK_STATUS3) & DSIM_LINK_LOCK)) {
-		pr_info("g955n-dsim: read skipped: fifo=%08x irq=%08x phy=%08x\n",
+		pr_info("g955n-dsim: command skipped: fifo=%08x irq=%08x phy=%08x\n",
 			fifo, status, phy);
 		return -EBUSY;
 	}
+	return 0;
+}
+
+static int g955n_dsim_wait_tx(void __iomem *dsi)
+{
+	u32 fifo;
+
+	return readl_poll_timeout(dsi + DSIM_FIFOCTRL, fifo,
+				 (fifo & DSIM_TX_EMPTY) == DSIM_TX_EMPTY, 100, 50000);
+}
+
+static int g955n_dsim_read(void __iomem *dsi, u8 address, u8 *data, size_t len)
+{
+	u32 status, word;
+	unsigned int budget = DSIM_RX_WORD_LIMIT;
+	size_t offset;
+	bool received = false, malformed = false;
+	int ret;
+
+	ret = g955n_dsim_ready(dsi);
+	if (ret)
+		return ret;
+
+	writel(MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE | (len << 8),
+	       dsi + DSIM_PKTHDR);
+	ret = g955n_dsim_wait_tx(dsi);
+	if (ret)
+		return ret;
+
+	writel(DSIM_BTA | MIPI_DSI_DCS_READ | (address << 8), dsi + DSIM_PKTHDR);
+	ret = readl_poll_timeout(dsi + DSIM_INTSRC, status,
+				 status & DSIM_RX_EVENTS, 200, 50000);
+	if (ret)
+		return ret;
+
+	while (budget && !(readl(dsi + DSIM_FIFOCTRL) & DSIM_RX_EMPTY)) {
+		word = readl(dsi + DSIM_RXFIFO);
+		budget--;
+		if ((word & 0x3f) == MIPI_DSI_RX_END_OF_TRANSMISSION)
+			continue;
+		if ((word & 0x3f) != MIPI_DSI_RX_DCS_LONG_READ_RESPONSE ||
+		    FIELD_GET(GENMASK(23, 8), word) != len || received) {
+			malformed = true;
+			break;
+		}
+
+		for (offset = 0; offset < len; offset++) {
+			if (!(offset % 4)) {
+				if (!budget || readl(dsi + DSIM_FIFOCTRL) & DSIM_RX_EMPTY)
+					break;
+				word = readl(dsi + DSIM_RXFIFO);
+				budget--;
+			}
+			data[offset] = word;
+			word >>= 8;
+		}
+		received = offset == len;
+	}
+
+	while (budget && !(readl(dsi + DSIM_FIFOCTRL) & DSIM_RX_EMPTY)) {
+		readl(dsi + DSIM_RXFIFO);
+		budget--;
+	}
+	writel(status & DSIM_RX_EVENTS, dsi + DSIM_INTSRC);
+	if (status & DSIM_RX_FAULTS || !budget || malformed || !received) {
+		pr_info("g955n-dsim: DCS %02x response rejected: irq=%08x\n",
+			address, status);
+		return -EPROTO;
+	}
+
+	return 0;
+}
+
+static int g955n_dsim_key(void __iomem *dsi, u8 address, u8 value)
+{
+	int ret = g955n_dsim_wait_tx(dsi);
+
+	if (ret)
+		return ret;
+	writel(address | (value << 8) | (value << 16), dsi + DSIM_PAYLOAD);
+	writel(MIPI_DSI_DCS_LONG_WRITE | (3 << 8), dsi + DSIM_PKTHDR);
+	return g955n_dsim_wait_tx(dsi);
+}
+
+static int g955n_dsim_set_offset(void __iomem *dsi, u8 offset)
+{
+	int ret = g955n_dsim_wait_tx(dsi);
+
+	if (ret)
+		return ret;
+	writel(MIPI_DSI_DCS_SHORT_WRITE_PARAM | (S6E3HA6_GPARA << 8) |
+	       (offset << 16), dsi + DSIM_PKTHDR);
+	return g955n_dsim_wait_tx(dsi);
+}
+
+static int g955n_dsim_check_resource(void __iomem *dsi, u8 address, u8 offset,
+				     size_t len)
+{
+	u8 first[S6E3HA6_MTP_LEN], second[S6E3HA6_MTP_LEN];
+	int ret = 0;
+
+	if (offset)
+		ret = g955n_dsim_set_offset(dsi, offset);
+	if (!ret)
+		ret = g955n_dsim_read(dsi, address, first, len);
+	if (!ret && offset)
+		ret = g955n_dsim_set_offset(dsi, offset);
+	if (!ret)
+		ret = g955n_dsim_read(dsi, address, second, len);
+	if (offset && g955n_dsim_set_offset(dsi, 0)) {
+		pr_err("g955n-dsim: failed to restore panel offset\n");
+		ret = -EIO;
+	}
+	if (!ret && (!memchr_inv(first, 0, len) || !memchr_inv(first, 0xff, len) ||
+		     memcmp(first, second, len)))
+		ret = -ENODATA;
+	if (!ret)
+		pr_info("g955n-dsim: DCS %02x calibration: %zu stable nonblank bytes\n",
+			address, len);
+	memzero_explicit(first, sizeof(first));
+	memzero_explicit(second, sizeof(second));
+	return ret;
+}
+
+static int g955n_dsim_check_calibration(void __iomem *dsi)
+{
+	static const u8 keys[] = { 0x9f, 0xf0, 0xfc };
+	static const u8 unlock[] = { 0xa5, 0x5a, 0x5a };
+	unsigned int opened = 0;
+	int ret = 0, lock_error = 0;
+
+	/* Match the S6E3HA6 Dream2 A3 resource-init key order. */
+	while (opened < ARRAY_SIZE(keys)) {
+		ret = g955n_dsim_key(dsi, keys[opened], unlock[opened]);
+		opened++;
+		if (ret)
+			break;
+	}
+	if (!ret)
+		ret = g955n_dsim_check_resource(dsi, S6E3HA6_MTP, 0, S6E3HA6_MTP_LEN);
+	if (!ret)
+		ret = g955n_dsim_check_resource(dsi, S6E3HA6_ELVSS, 0, S6E3HA6_ELVSS_LEN);
+	if (!ret)
+		ret = g955n_dsim_check_resource(dsi, S6E3HA6_HBM_GAMMA, S6E3HA6_HBM_OFFSET,
+					       S6E3HA6_HBM_LEN);
+
+	while (opened) {
+		int err;
+
+		opened--;
+		err = g955n_dsim_key(dsi, keys[opened], ~unlock[opened]);
+		if (err)
+			lock_error = err;
+	}
+	if (lock_error)
+		pr_err("g955n-dsim: failed to send panel lock keys: %d\n", lock_error);
+	else
+		pr_info("g955n-dsim: panel lock keys sent\n");
+	return lock_error ?: ret;
+}
+
+static int g955n_dsim_identify_panel(void __iomem *dsi)
+{
+	static const u8 dream2_a3_id[] = { 0xd1, 0x10, 0x10 };
+	u8 id[G955N_PANEL_ID_LEN];
+	u32 timeout;
+	int ret;
 
 	/* The loader's 0xff-cycle turnaround expires before the panel replies. */
 	timeout = readl(dsi + DSIM_TIMEOUT);
 	writel((timeout & ~DSIM_BTA_TIMEOUT) |
 	       FIELD_PREP(DSIM_BTA_TIMEOUT, G955N_BTA_WAIT), dsi + DSIM_TIMEOUT);
 
-	writel(MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE | (G955N_PANEL_ID_LEN << 8),
-	       dsi + DSIM_PKTHDR);
-	ret = readl_poll_timeout(dsi + DSIM_FIFOCTRL, fifo,
-				 fifo & DSIM_HDR_EMPTY, 200, 20000);
-	if (ret) {
-		pr_info("g955n-dsim: maximum return size timeout: fifo=%08x irq=%08x\n",
-			fifo, readl(dsi + DSIM_INTSRC));
-		goto restore_timeout;
+	ret = g955n_dsim_read(dsi, MIPI_DCS_GET_DISPLAY_ID, id, sizeof(id));
+	if (!ret) {
+		pr_info("g955n-dsim: panel family ID %*phN\n", G955N_PANEL_ID_LEN, id);
+		if (read_calibration)
+			ret = memcmp(id, dream2_a3_id, sizeof(id)) ? -ENODEV :
+				g955n_dsim_check_calibration(dsi);
 	}
 
-	writel(DSIM_BTA | MIPI_DSI_DCS_READ | (MIPI_DCS_GET_DISPLAY_ID << 8),
-	       dsi + DSIM_PKTHDR);
-	ret = readl_poll_timeout(dsi + DSIM_INTSRC, status,
-				 status & (DSIM_RX_DONE | DSIM_RX_FAULTS), 200, 50000);
-	if (ret) {
-		pr_info("g955n-dsim: DCS response timeout: fifo=%08x irq=%08x\n",
-			readl(dsi + DSIM_FIFOCTRL), status);
-		goto restore_timeout;
-	}
-
-	for (i = 0; i < 64 && !(readl(dsi + DSIM_FIFOCTRL) & DSIM_RX_EMPTY); i++) {
-		word = readl(dsi + DSIM_RXFIFO);
-		if ((word & 0x3f) == MIPI_DSI_RX_DCS_LONG_READ_RESPONSE &&
-		    FIELD_GET(GENMASK(23, 8), word) == G955N_PANEL_ID_LEN &&
-		    !(readl(dsi + DSIM_FIFOCTRL) & DSIM_RX_EMPTY)) {
-			word = readl(dsi + DSIM_RXFIFO);
-			id[0] = word;
-			id[1] = word >> 8;
-			id[2] = word >> 16;
-			valid = true;
-		}
-	}
-	writel(status & (DSIM_RX_DONE | DSIM_RX_FAULTS), dsi + DSIM_INTSRC);
-	if (status & DSIM_RX_FAULTS || i == 64 || !valid) {
-		pr_info("g955n-dsim: DCS response rejected: irq=%08x entries=%u\n",
-			status, i);
-		ret = -EPROTO;
-		goto restore_timeout;
-	}
-
-	pr_info("g955n-dsim: panel family ID %*phN\n", G955N_PANEL_ID_LEN, id);
-	restore_timeout:
 	writel(timeout, dsi + DSIM_TIMEOUT);
 	pr_info("g955n-dsim: restored timeout=%08x\n", readl(dsi + DSIM_TIMEOUT));
 	return ret;
@@ -156,8 +303,8 @@ static int __init g955n_dsim_identify(void)
 		readl(dsi + DSIM_FIFOCTRL));
 	pr_info("g955n-dsim: timeout=%08x command=%08x\n",
 		readl(dsi + DSIM_TIMEOUT), readl(dsi + DSIM_CMD_CONFIG));
-	if (read_id)
-		ret = g955n_dsim_read_id(dsi);
+	if (read_id || read_calibration)
+		ret = g955n_dsim_identify_panel(dsi);
 	iounmap(dsi);
 
 release:

@@ -6546,3 +6546,19 @@ Extending only BTA to 0xfff returned a DCS long response with ID
 `0x00ffffff`. Existing display timing and mode were retained.
 GDM and the BCM4773 daemon remained active. No calibration or
 brightness commands were sent. The native backlight is still absent.
+
+## 2026-11-25 — S6E3HA6 factory brightness resources on 6.18
+
+Built the guarded ARM64 diagnostic with `W=1` and loaded it
+temporarily on the integrated SM-G955N boot. After reading live
+ID `d11010`, it used Samsung's resource-init key order to obtain
+35 MTP bytes at C8, 24 ELVSS bytes at B5, and 33 HBM gamma bytes
+at B3 offset two. Every resource was nonblank and matched on a second
+read. The DCS global offset returned to zero, the reverse lock
+sequence was sent, and the DSIM timeout read back as `0x00ffffff`.
+
+Calibration bytes were cleared from the probe's temporary buffers and
+were not logged. No brightness or gamma settings were applied.
+Afterward GDM, Wi-Fi and the sensor hub were active, the native DSI
+connector was connected, and the PipeWire default sink still pointed
+to the bottom speaker. The Linux backlight class remained absent.
