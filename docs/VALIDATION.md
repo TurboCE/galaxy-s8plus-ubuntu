@@ -6981,3 +6981,31 @@ The NFC sequence passed again, with discovery stop and power-down in
 temporary brcmfmac scan suppression while Wi-Fi was connected.
 GDM, the display, the sensor hub and the default bottom-speaker route
 were active. Physical tag reads remain unverified.
+
+
+## 2026-11-25 — ADPD143 standard IIO and active-stream resume
+
+Built the S2DOS03 optical-only regulator and ADPD143 acquisition drivers
+with W=1 for the verified 6.18 kernel. DT readback showed the added
+USI5 power-provider lane, the two stock optical rail constraints and the
+ADPD143 node. NFC pinmux, kernel image and existing display supplies
+were preserved. The rail driver validated the programmed LDO2 and LDO4
+voltages before registering each supply.
+
+An IIO buffer test received 48 actual FIFO frames. The raw red sums
+ranged from 6929 to 6957 and infrared sums from 52351 to 52473. Both
+optical supplies were enabled during capture and disabled after the
+buffer stopped. No physiological result was generated.
+
+An RTC alarm woke the handset from s2idle about 23 seconds after entry
+with the IIO buffer still enabled. The corrected verifier used the IIO
+device's realtime timestamp clock and discarded any samples timestamped
+before its post-resume check. It read 32 frames before sleep and 32 fresh
+frames after resume. Closing the buffer disabled both supplies again.
+
+Removed the trial timer and rebooted normally. The ADPD143 registered
+automatically, and the repeated test delivered 48 frames on both
+channels, with the supplies returning to off. GDM, the panel, the sensor
+hub, NFC and the MMC host remained available. No kernel error-priority
+entries appeared at the post-reboot check. Physiological measurement
+and calibration remain unverified.

@@ -4,7 +4,8 @@ Live baseline on 2026-11-25: Ubuntu 24.04.5 LTS with
 `6.18.0-g955n-usb-r100-vpn2`, the corrected speaker DTB, and
 the integrated BCM4773 transport, the shared MAX77865 haptic
 and RGB LED drivers, native microSD host registration, and MAX77865
-input detection in UPower, and the S3NRN82 on Linux NFC.
+input detection in UPower, the S3NRN82 on Linux NFC, and ADPD143
+optical acquisition through IIO.
 Older Samsung 4.4 evidence is in [VALIDATION.md](VALIDATION.md);
 it does not qualify a device on the current mainline boot.
 
@@ -21,7 +22,7 @@ it does not qualify a device on the current mainline boot.
 | LTE | ModemManager is active and lists no modem. | Securely bring up the Exynos modem transport, then validate SIM registration and mobile data in NetworkManager. |
 | Cameras and iris sensor | No video device. Samsung's board source lists alternatives for the front and rear sensor modules, so the actual variant must be identified. | Qualify capture through the Linux media stack and a standard Ubuntu camera app. Iris functionality needs a separate userspace interface and security review. |
 | NFC | The S3NRN82 binds to the Linux NFC class at boot. Generic netlink device-up completed CORE_RESET and CORE_INIT, discovery started and stopped, and power-down succeeded. The sequence passed after s2idle and an ordinary reboot. | Identify and read a physical tag. |
-| Optical heart-rate sensor | The Korean revision 10 board uses S2DOS03 LDO2 and LDO4 for optical power. Enabling only the 1.8 V logic rail returned chip ID 0x0316, matching the Samsung ADPD143 driver. The logic rail was restored to off. | Integrate both rails and the ADPD143 with Linux IIO, then verify controlled optical sampling. |
+| Optical heart-rate sensor | The ADPD143 exposes buffered red and infrared intensity through Linux IIO. Both S2DOS03 optical supplies turn on only during acquisition. Actual FIFO samples were read on boot and with an active buffer across s2idle. | Qualify measurements on a physical target and physiological processing. |
 | Fingerprint, haptics and LEDs | No fingerprint service observed. The haptic actuator exposes force feedback through Linux input. The accelerometer detected vibration and confirmed it stopped. Haptics and the three Linux LED class devices ran alongside the BCM4773 hub before and after s2idle. | Measure LED light output, connect and test desktop notification policies if supported, and qualify fingerprint enrollment and unlock. |
 
 The legacy GNSS socket and its daemons require the Samsung 4.4 board-service

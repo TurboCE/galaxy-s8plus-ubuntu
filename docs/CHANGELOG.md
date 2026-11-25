@@ -2882,3 +2882,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Kept the NFC IRQ masked until the first successful transmit and
   switched to an active-high level trigger so pending frames stay
   serviceable during discovery shutdown.
+
+
+## 2026-11-25 — ADPD143 optical IIO acquisition on the handset
+
+- Registered the dedicated S2DOS03 optical regulators and exposed
+  both ADPD143 intensity slots through the standard buffered IIO API.
+- Verified hardware FIFO data, idle power-off, and resumption of an
+  active acquisition after s2idle.
