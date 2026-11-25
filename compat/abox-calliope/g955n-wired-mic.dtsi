@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+/* Include with g955n-wired-jack.dtsi for microphone qualification. */
+&{/soc@0/abox-speaker} {
+	samsung,wired-mic-detect;
+};

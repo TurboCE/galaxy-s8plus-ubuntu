@@ -7380,3 +7380,21 @@ verified the parameter in each module. The trace identifies the
 rail, clock, reset, chip ID request and power-off phases. USB
 network and Tailscale remained unavailable. No BOOT change or
 warm-reset console recovery was attempted.
+
+
+## 2026-11-26 — Wired headset microphone detector build
+
+The stock Korean board uses MICDET1 source 0, ground selector 1
+and MICBIAS2A. Its ADC table maps code 63 to 1257 ohms and code
+64 to 30 kilohms. The trial accepts code 64 as a microphone candidate
+and leaves over-range values unclassified. It starts detection only
+after a stable insertion, cancels after one second, and restores the
+detector, bias and clamp fields after the measurement. The headphone
+jack and microphone jack report independently.
+
+Built the receiver audio module with W=1 and confirmed its MICDET1
+handler and DAPM bias references in the linked module. Compiled and
+decoded the paired optional DT fragments and verified both properties
+on the existing audio node. USB and Tailscale remained unavailable.
+No trial was deployed, and microphone classification, GNOME capture
+routing and acoustic recording have yet to be verified.

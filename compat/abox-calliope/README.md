@@ -124,3 +124,12 @@ remains available on PCM 1.
 The stock headset microphone uses IN1BL with MICBIAS2A. Physical jack
 state, actual headphone sound and headset microphone classification
 and recording remain separate handset checks.
+
+For headset microphone qualification, include `g955n-wired-mic.dtsi`
+as well. The optional MICDET1 measurement uses the Samsung MICDET1
+input and ground settings and temporarily biases through MICBIAS2A.
+The driver exposes a separate ALSA Headset Mic Jack status when the
+measurement reaches the headset range. It restores the detector and
+bias settings after completion or timeout. Capture routing and
+classification across physical CTIA and three-pole plugs still
+require handset validation before enabling the microphone in UCM.

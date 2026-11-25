@@ -3010,3 +3010,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   existing reserved memory while keeping the recovery pmsg address.
 - Added opt-in S5K3H1 power and chip read markers for post-reset
   investigation.
+
+
+## 2026-11-26 — Wired headset microphone detection trial
+
+- Added an opt-in MICDET1 measurement and separate ALSA microphone
+  jack control to the SM-G955N wired-jack driver.
