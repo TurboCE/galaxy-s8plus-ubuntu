@@ -7237,3 +7237,19 @@ and state of the device could not be recovered from the host. The
 experimental common MMIO reads were removed from the revised probe.
 A handset reboot and prior-boot log check are pending, as is the
 on-device regression for the narrowed CSI link probe.
+
+
+## 2026-11-26 — V4L2 front sensor build and board endpoint
+
+Built the updated front sensor module with W=1 against both the
+running-kernel configuration and the separate 6.18 media build.
+Checked that the former contains no V4L2/media framework references
+and the latter uses the media entity, subdevice and fwnode interfaces.
+Recompiled and decoded the board DTB to confirm D-PHY bus type,
+clock lane zero and data lanes one and two, with CAM0 still present.
+
+The handset was unreachable over USB network and Tailscale after the
+earlier common-register trial. No image, module or device-tree change
+was deployed in this step. Runtime registration, receiver binding,
+DMA pixel transfer, camera apps and suspend with the camera in use
+remain unverified.

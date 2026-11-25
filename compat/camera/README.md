@@ -120,3 +120,18 @@ The stock buffer sizing is `ALIGN(width * 5 / 4, 16) * height`, or
 The single-buffer setup points all eight VC0 slots at the same mapped
 address. A capture test must confirm the actual format and write
 extent, DMA completion and quiescence before returning the buffer.
+
+## V4L2 front sensor subdevice
+
+Keep the same front sensor fragment and build the module against the
+kernel using `config/mainline618-camera-media.fragment`. The driver
+checks the chip ID and CSI-2 endpoint, then registers one V4L2 source
+pad for 1632×918 SBGGR10 at 30 fps. The media receiver can query the
+two D-PHY lanes and start and stop the stream with the existing sensor
+power sequence. Root-only readback shares the stream lock, so a
+diagnostic cannot reset an active stream. Suspend is rejected while
+the sensor is streaming until the receiver owns suspend and restart.
+
+On kernels without the media core, the module retains the readback
+interface. The endpoint is ready for a receiver link and a capture
+queue later. The subdevice alone provides no application capture node.

@@ -2,6 +2,7 @@
 
 #include <dt-bindings/clock/samsung,exynos8895.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/media/video-interfaces.h>
 #include <dt-bindings/soc/samsung,exynos-usi.h>
 
 &{/soc@0/usi@10900000/i2c@0/torch@59/regulators} {
@@ -67,5 +68,13 @@
 		avdd-supply = <&front_sensor_avdd>;
 		iovdd-supply = <&{/soc@0/usi@10900000/i2c@0/torch@59/regulators/ldo6}>;
 		dvdd-supply = <&front_sensor_dvdd>;
+
+		port {
+			front_sensor_out: endpoint {
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+			};
+		};
 	};
 };

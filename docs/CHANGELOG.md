@@ -2956,3 +2956,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   can coexist with CAM0's independently bound clock provider.
 - Documented the stock packed RAW10 DMA buffer layout and common clock
   dependencies for the front sensor.
+
+
+## 2026-11-26 — V4L2 front camera sensor subdevice
+
+- Added the standard V4L2 source-pad, format, interval and stream
+  operations to the existing S5K3H1 driver.
+- Described the two CSI-2 lanes in the board fragment. Kept support
+  for the current diagnostic-only kernel configuration.

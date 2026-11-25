@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Read the S5K3H1 chip directly after Samsung's standalone power sequence. */
+/* SM-G955N S5K3H1 front camera, using Samsung's sensor power sequence. */
 #include <linux/cleanup.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -9,11 +9,25 @@
 #include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/pinctrl/consumer.h>
+#include <linux/pm.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <linux/unaligned.h>
 
+#if IS_ENABLED(CONFIG_MEDIA_CONTROLLER) && IS_REACHABLE(CONFIG_VIDEO_DEV) && \
+	IS_REACHABLE(CONFIG_V4L2_FWNODE)
+#define G955N_S5K3H1_MEDIA
+#include <media/v4l2-async.h>
+#include <media/v4l2-common.h>
+#include <media/v4l2-fwnode.h>
+#include <media/v4l2-subdev.h>
+#endif
+
 #define S5K3H1_MCLK_HZ	26000000
 #define S5K3H1_CHIP_ID	0x3081
+#define S5K3H1_WIDTH	1632
+#define S5K3H1_HEIGHT	918
+#define S5K3H1_FPS	30
 
 struct s5k3h1_reg16 {
 	u16 reg;
@@ -33,7 +47,24 @@ struct g955n_s5k3h1 {
 	struct pinctrl_state *mclk;
 	struct regulator *supplies[ARRAY_SIZE(supply_names)];
 	struct mutex lock;
+	bool streaming;
+	bool suspended;
+#ifdef G955N_S5K3H1_MEDIA
+	struct v4l2_subdev sd;
+	struct media_pad pad;
+	struct v4l2_mbus_config_mipi_csi2 csi;
+	bool media_registered;
+#endif
 };
+
+static struct g955n_s5k3h1 *g955n_s5k3h1_sensor(struct i2c_client *client)
+{
+#ifdef G955N_S5K3H1_MEDIA
+	return container_of(i2c_get_clientdata(client), struct g955n_s5k3h1, sd);
+#else
+	return i2c_get_clientdata(client);
+#endif
+}
 
 static int g955n_s5k3h1_read(struct i2c_client *client, u16 reg, u8 *data, u16 length)
 {
@@ -217,28 +248,255 @@ static int g955n_s5k3h1_wait_standby(struct i2c_client *client)
 	return mode ? -EIO : 0;
 }
 
+static int g955n_s5k3h1_stop(struct i2c_client *client, struct g955n_s5k3h1 *sensor)
+{
+	int stop, shutdown;
+
+	stop = g955n_s5k3h1_wait_standby(client);
+	shutdown = g955n_s5k3h1_power_off(sensor, ARRAY_SIZE(sensor->supplies), true);
+	if (stop || shutdown)
+		dev_err_ratelimited(&client->dev, "stream cleanup: standby %d, power %d\n",
+				    stop, shutdown);
+	return stop ?: shutdown;
+}
+
+#ifdef G955N_S5K3H1_MEDIA
+static const struct v4l2_mbus_framefmt g955n_s5k3h1_format = {
+	.width = S5K3H1_WIDTH,
+	.height = S5K3H1_HEIGHT,
+	.code = MEDIA_BUS_FMT_SBGGR10_1X10,
+	.field = V4L2_FIELD_NONE,
+	.colorspace = V4L2_COLORSPACE_RAW,
+	.quantization = V4L2_QUANTIZATION_FULL_RANGE,
+	.xfer_func = V4L2_XFER_FUNC_NONE,
+};
+
+static int g955n_s5k3h1_init_state(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state)
+{
+	*v4l2_subdev_state_get_format(state, 0) = g955n_s5k3h1_format;
+	return 0;
+}
+
+static int g955n_s5k3h1_enum_code(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 struct v4l2_subdev_mbus_code_enum *code)
+{
+	if (code->pad || code->index)
+		return -EINVAL;
+	code->code = g955n_s5k3h1_format.code;
+	return 0;
+}
+
+static int g955n_s5k3h1_enum_size(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state,
+				 struct v4l2_subdev_frame_size_enum *size)
+{
+	if (size->pad || size->index || size->code != g955n_s5k3h1_format.code)
+		return -EINVAL;
+	size->min_width = size->max_width = S5K3H1_WIDTH;
+	size->min_height = size->max_height = S5K3H1_HEIGHT;
+	return 0;
+}
+
+static int g955n_s5k3h1_enum_interval(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state,
+				    struct v4l2_subdev_frame_interval_enum *fie)
+{
+	if (fie->pad || fie->index || fie->code != g955n_s5k3h1_format.code ||
+	    fie->width != S5K3H1_WIDTH || fie->height != S5K3H1_HEIGHT)
+		return -EINVAL;
+	fie->interval = (struct v4l2_fract){ 1, S5K3H1_FPS };
+	return 0;
+}
+
+static int g955n_s5k3h1_set_fmt(struct v4l2_subdev *sd,
+			       struct v4l2_subdev_state *state,
+			       struct v4l2_subdev_format *fmt)
+{
+	if (fmt->pad)
+		return -EINVAL;
+	fmt->format = g955n_s5k3h1_format;
+	return 0;
+}
+
+static int g955n_s5k3h1_get_interval(struct v4l2_subdev *sd,
+				    struct v4l2_subdev_state *state,
+				    struct v4l2_subdev_frame_interval *fi)
+{
+	if (fi->pad)
+		return -EINVAL;
+	fi->interval = (struct v4l2_fract){ 1, S5K3H1_FPS };
+	return 0;
+}
+
+static int g955n_s5k3h1_get_mbus_config(struct v4l2_subdev *sd, unsigned int pad,
+				       struct v4l2_mbus_config *config)
+{
+	struct g955n_s5k3h1 *sensor = container_of(sd, struct g955n_s5k3h1, sd);
+
+	if (pad)
+		return -EINVAL;
+	config->type = V4L2_MBUS_CSI2_DPHY;
+	config->bus.mipi_csi2 = sensor->csi;
+	return 0;
+}
+
+/* The V4L2 core takes the active state lock, shared with the readback tests. */
+static int g955n_s5k3h1_enable_streams(struct v4l2_subdev *sd,
+				     struct v4l2_subdev_state *state,
+				     u32 pad, u64 streams)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(client);
+	int ret;
+
+	if (pad || streams != BIT_ULL(0))
+		return -EINVAL;
+	if (sensor->suspended || sensor->streaming)
+		return -EBUSY;
+	ret = g955n_s5k3h1_power_on(&client->dev, sensor);
+	if (ret)
+		return ret;
+	ret = g955n_s5k3h1_start(client);
+	if (ret) {
+		g955n_s5k3h1_stop(client, sensor);
+		return ret;
+	}
+	sensor->streaming = true;
+	return 0;
+}
+
+static int g955n_s5k3h1_disable_streams(struct v4l2_subdev *sd,
+				      struct v4l2_subdev_state *state,
+				      u32 pad, u64 streams)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(client);
+
+	if (pad || streams != BIT_ULL(0))
+		return -EINVAL;
+	/* A standby I2C error still powers the stream off. */
+	g955n_s5k3h1_stop(client, sensor);
+	sensor->streaming = false;
+	return 0;
+}
+
+static const struct v4l2_subdev_video_ops g955n_s5k3h1_video_ops = {
+	.s_stream = v4l2_subdev_s_stream_helper,
+};
+
+static const struct v4l2_subdev_pad_ops g955n_s5k3h1_pad_ops = {
+	.enum_mbus_code = g955n_s5k3h1_enum_code,
+	.enum_frame_size = g955n_s5k3h1_enum_size,
+	.enum_frame_interval = g955n_s5k3h1_enum_interval,
+	.get_frame_interval = g955n_s5k3h1_get_interval,
+	.get_mbus_config = g955n_s5k3h1_get_mbus_config,
+	.get_fmt = v4l2_subdev_get_fmt,
+	.set_fmt = g955n_s5k3h1_set_fmt,
+	.enable_streams = g955n_s5k3h1_enable_streams,
+	.disable_streams = g955n_s5k3h1_disable_streams,
+};
+
+static const struct v4l2_subdev_ops g955n_s5k3h1_subdev_ops = {
+	.video = &g955n_s5k3h1_video_ops,
+	.pad = &g955n_s5k3h1_pad_ops,
+};
+
+static const struct v4l2_subdev_internal_ops g955n_s5k3h1_internal_ops = {
+	.init_state = g955n_s5k3h1_init_state,
+};
+
+static int g955n_s5k3h1_register_media(struct i2c_client *client,
+				     struct g955n_s5k3h1 *sensor)
+{
+	struct v4l2_fwnode_endpoint config = { .bus_type = V4L2_MBUS_CSI2_DPHY };
+	struct v4l2_mbus_config_mipi_csi2 *csi = &config.bus.mipi_csi2;
+	struct fwnode_handle *endpoint;
+	struct v4l2_subdev *sd = &sensor->sd;
+	u8 identity[2];
+	int ret, cleanup;
+
+	v4l2_i2c_subdev_init(sd, client, &g955n_s5k3h1_subdev_ops);
+	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(&client->dev), NULL);
+	if (!endpoint)
+		return 0;
+	ret = v4l2_fwnode_endpoint_parse(endpoint, &config);
+	fwnode_handle_put(endpoint);
+	if (ret)
+		return ret;
+	if (csi->num_data_lanes != 2 || csi->clock_lane != 0 ||
+	    csi->data_lanes[0] != 1 || csi->data_lanes[1] != 2)
+		return -EINVAL;
+	sensor->csi = *csi;
+	ret = g955n_s5k3h1_power_on(&client->dev, sensor);
+	if (ret)
+		return ret;
+	ret = g955n_s5k3h1_read(client, 0x0000, identity, sizeof(identity));
+	cleanup = g955n_s5k3h1_power_off(sensor, ARRAY_SIZE(sensor->supplies), true);
+	if (ret || cleanup)
+		return ret ?: cleanup;
+	if (get_unaligned_be16(identity) != S5K3H1_CHIP_ID)
+		return -ENODEV;
+
+	sd->internal_ops = &g955n_s5k3h1_internal_ops;
+	sd->state_lock = &sensor->lock;
+	sd->entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
+	ret = media_entity_pads_init(&sd->entity, 1, &sensor->pad);
+	if (ret)
+		return ret;
+	ret = v4l2_subdev_init_finalize(sd);
+	if (ret)
+		goto clean_entity;
+	ret = v4l2_async_register_subdev_sensor(sd);
+	if (ret)
+		goto clean_subdev;
+	sensor->media_registered = true;
+	return 0;
+
+clean_subdev:
+	v4l2_subdev_cleanup(sd);
+clean_entity:
+	media_entity_cleanup(&sd->entity);
+	return ret;
+}
+
+static void g955n_s5k3h1_remove(struct i2c_client *client)
+{
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(client);
+
+	if (!sensor->media_registered)
+		return;
+	v4l2_async_unregister_subdev(&sensor->sd);
+	v4l2_subdev_cleanup(&sensor->sd);
+	media_entity_cleanup(&sensor->sd.entity);
+	guard(mutex)(&sensor->lock);
+	if (sensor->streaming)
+		g955n_s5k3h1_stop(client, sensor);
+}
+#endif
+
 static ssize_t stream_probe_store(struct device *dev, struct device_attribute *attr,
 				  const char *buf, size_t count)
 {
 	struct i2c_client *client = to_i2c_client(dev);
-	struct g955n_s5k3h1 *sensor = i2c_get_clientdata(client);
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(client);
 	u8 first = 0xff, last = 0xff;
-	int ret, stop, shutdown;
+	int ret, stop;
 
 	if (!sysfs_streq(buf, "1"))
 		return -EINVAL;
 	guard(mutex)(&sensor->lock);
+	if (sensor->streaming || sensor->suspended)
+		return -EBUSY;
 	ret = g955n_s5k3h1_power_on(dev, sensor);
 	if (ret)
 		return ret;
 	ret = g955n_s5k3h1_frame_test(client, &first, &last);
-	stop = g955n_s5k3h1_wait_standby(client);
-	shutdown = g955n_s5k3h1_power_off(sensor, ARRAY_SIZE(sensor->supplies), true);
-	if (stop || shutdown)
-		dev_err_ratelimited(dev, "stream probe cleanup: standby %d, power %d\n",
-				    stop, shutdown);
-	if (ret || stop || shutdown)
-		return ret ?: (stop ?: shutdown);
+	stop = g955n_s5k3h1_stop(client, sensor);
+	if (ret || stop)
+		return ret ?: stop;
 	dev_info(dev, "1632x918 stream counters advanced %u to %u and returned to standby\n",
 		 first, last);
 	return count;
@@ -250,11 +508,13 @@ static ssize_t sensor_registers_show(struct device *dev, struct device_attribute
 				     char *buf)
 {
 	struct i2c_client *client = to_i2c_client(dev);
-	struct g955n_s5k3h1 *sensor = i2c_get_clientdata(client);
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(client);
 	u8 identity[3], mode;
 	int ret, cleanup;
 
 	guard(mutex)(&sensor->lock);
+	if (sensor->streaming || sensor->suspended)
+		return -EBUSY;
 	ret = g955n_s5k3h1_power_on(dev, sensor);
 	if (ret)
 		return ret;
@@ -322,9 +582,35 @@ static int g955n_s5k3h1_probe(struct i2c_client *client)
 		return dev_err_probe(dev, PTR_ERR(sensor->reset), "missing camera reset\n");
 
 	mutex_init(&sensor->lock);
+#ifdef G955N_S5K3H1_MEDIA
+	return g955n_s5k3h1_register_media(client, sensor);
+#else
 	i2c_set_clientdata(client, sensor);
 	return 0;
+#endif
 }
+
+static int g955n_s5k3h1_suspend(struct device *dev)
+{
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(to_i2c_client(dev));
+
+	guard(mutex)(&sensor->lock);
+	if (sensor->streaming)
+		return -EBUSY;
+	sensor->suspended = true;
+	return 0;
+}
+
+static int g955n_s5k3h1_resume(struct device *dev)
+{
+	struct g955n_s5k3h1 *sensor = g955n_s5k3h1_sensor(to_i2c_client(dev));
+
+	guard(mutex)(&sensor->lock);
+	sensor->suspended = false;
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(g955n_s5k3h1_pm, g955n_s5k3h1_suspend, g955n_s5k3h1_resume);
 
 static const struct of_device_id g955n_s5k3h1_ids[] = {
 	{ .compatible = "samsung,sm-g955n-s5k3h1-readback" },
@@ -337,10 +623,14 @@ static struct i2c_driver g955n_s5k3h1_driver = {
 		.name = "g955n-s5k3h1-readback",
 		.of_match_table = g955n_s5k3h1_ids,
 		.dev_groups = g955n_s5k3h1_groups,
+		.pm = pm_sleep_ptr(&g955n_s5k3h1_pm),
 	},
 	.probe = g955n_s5k3h1_probe,
+#ifdef G955N_S5K3H1_MEDIA
+	.remove = g955n_s5k3h1_remove,
+#endif
 };
 module_i2c_driver(g955n_s5k3h1_driver);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("SM-G955N S5K3H1 front camera chip identification");
+MODULE_DESCRIPTION("SM-G955N S5K3H1 front camera sensor");
