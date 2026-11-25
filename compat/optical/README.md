@@ -36,3 +36,10 @@ the sum of its four photodiode values. The board acquisition
 profile uses fixed coarse LED code 1 in both slots. It does not run
 Samsung's auto-gain, physiological estimation or calibration
 routines, so the IIO values are raw optical measurements.
+
+The Korea revision 10 I²C pull-up supply is the S2MPS17 LDO39
+shared with NFC. The current DT links both consumers to the ACPM
+provider. ADPD143 requests the shared rail before its logic rail
+for chip identification and buffered capture, and releases it
+after the logic rail on stop. Its LED rail remains under the
+existing acquisition sequence.

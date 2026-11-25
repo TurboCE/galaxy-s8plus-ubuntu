@@ -8,6 +8,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/mutex.h>
 #include <linux/regmap.h>
+#include <linux/regulator/consumer.h>
 
 #define EXYNOS8895_CLKOUT1		0xa0c
 #define EXYNOS8895_CLKOUT1_MUX		GENMASK(13, 8)
@@ -21,6 +22,7 @@ struct g955n_nfc {
 	struct gpio_desc *firmware;
 	struct gpio_desc *ready;
 	struct regmap *pmu;
+	struct regulator *vddio;
 	struct mutex lock;
 	unsigned int saved_clock;
 };
@@ -32,6 +34,12 @@ static int g955n_nfc_get_resources(struct i2c_client *client, struct g955n_nfc *
 	nfc->pmu = syscon_regmap_lookup_by_phandle(dev->of_node, "samsung,pmu");
 	if (IS_ERR(nfc->pmu))
 		return dev_err_probe(dev, PTR_ERR(nfc->pmu), "NFC clock unavailable\n");
+	nfc->vddio = devm_regulator_get_optional(dev, "vddio");
+	if (IS_ERR(nfc->vddio)) {
+		if (PTR_ERR(nfc->vddio) != -ENODEV)
+			return dev_err_probe(dev, PTR_ERR(nfc->vddio), "NFC I/O supply unavailable\n");
+		nfc->vddio = NULL;
+	}
 	nfc->enable = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
 	if (IS_ERR(nfc->enable))
 		return dev_err_probe(dev, PTR_ERR(nfc->enable), "NFC enable GPIO unavailable\n");
@@ -49,7 +57,7 @@ static int g955n_nfc_get_resources(struct i2c_client *client, struct g955n_nfc *
 
 static int g955n_nfc_power_off(struct g955n_nfc *nfc)
 {
-	int ret;
+	int ret, supply;
 
 	gpiod_set_value_cansleep(nfc->firmware, 0);
 	gpiod_set_value_cansleep(nfc->enable, 0);
@@ -57,7 +65,10 @@ static int g955n_nfc_power_off(struct g955n_nfc *nfc)
 				 nfc->saved_clock);
 	if (ret)
 		dev_err(&nfc->client->dev, "cannot restore NFC clock: %d\n", ret);
-	return ret;
+	supply = nfc->vddio ? regulator_disable(nfc->vddio) : 0;
+	if (supply)
+		dev_err(&nfc->client->dev, "cannot release NFC I/O supply: %d\n", supply);
+	return ret ?: supply;
 }
 
 static int g955n_nfc_power_on(struct g955n_nfc *nfc, bool wake)
@@ -68,6 +79,11 @@ static int g955n_nfc_power_on(struct g955n_nfc *nfc, bool wake)
 	ret = regmap_read(nfc->pmu, EXYNOS8895_CLKOUT1, &nfc->saved_clock);
 	if (ret)
 		return ret;
+	if (nfc->vddio) {
+		ret = regulator_enable(nfc->vddio);
+		if (ret)
+			return ret;
+	}
 	ret = regmap_update_bits(nfc->pmu, EXYNOS8895_CLKOUT1, NFC_CLOCK_MASK, 0);
 	if (ret)
 		goto restore;

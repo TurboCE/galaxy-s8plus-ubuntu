@@ -57,6 +57,7 @@ struct g955n_adpd {
 	struct i2c_client *client;
 	struct regmap *map;
 	struct regulator *vdd;
+	struct regulator *vddio;
 	struct regulator *vled;
 	bool streaming;
 };
@@ -120,6 +121,38 @@ failed:
 	return IRQ_HANDLED;
 }
 
+static int adpd_logic_power_off(struct g955n_adpd *adpd)
+{
+	int vdd, io;
+
+	vdd = regulator_disable(adpd->vdd);
+	io = adpd->vddio ? regulator_disable(adpd->vddio) : 0;
+	return vdd ?: io;
+}
+
+static int adpd_logic_power_on(struct g955n_adpd *adpd)
+{
+	int ret, cleanup;
+
+	if (adpd->vddio) {
+		ret = regulator_enable(adpd->vddio);
+		if (ret)
+			return ret;
+	}
+	ret = regulator_enable(adpd->vdd);
+	if (ret) {
+		if (adpd->vddio) {
+			cleanup = regulator_disable(adpd->vddio);
+			if (cleanup)
+				dev_err(&adpd->client->dev, "cannot release optical I/O supply: %d\n",
+					cleanup);
+		}
+		return ret;
+	}
+	usleep_range(3000, 4000);
+	return 0;
+}
+
 static int adpd_stop(struct iio_dev *indio)
 {
 	struct g955n_adpd *adpd = iio_priv(indio);
@@ -131,7 +164,7 @@ static int adpd_stop(struct iio_dev *indio)
 	disable_irq(adpd->client->irq);
 	standby = regmap_write(adpd->map, ADPD_MODE, ADPD_STANDBY);
 	led = regulator_disable(adpd->vled);
-	vdd = regulator_disable(adpd->vdd);
+	vdd = adpd_logic_power_off(adpd);
 	adpd->streaming = false;
 
 	return standby ? standby : led ? led : vdd;
@@ -142,11 +175,9 @@ static int adpd_start(struct iio_dev *indio)
 	struct g955n_adpd *adpd = iio_priv(indio);
 	int ret;
 
-	ret = regulator_enable(adpd->vdd);
+	ret = adpd_logic_power_on(adpd);
 	if (ret)
 		return ret;
-	usleep_range(3000, 4000);
-
 	ret = regmap_write(adpd->map, ADPD_MODE, ADPD_PROGRAM);
 	if (ret)
 		goto disable_vdd;
@@ -182,7 +213,7 @@ disable_vled:
 standby:
 	regmap_write(adpd->map, ADPD_MODE, ADPD_STANDBY);
 disable_vdd:
-	regulator_disable(adpd->vdd);
+	adpd_logic_power_off(adpd);
 	return ret;
 }
 
@@ -238,16 +269,21 @@ static int g955n_adpd_probe(struct i2c_client *client)
 	adpd->vdd = devm_regulator_get(dev, "vdd");
 	if (IS_ERR(adpd->vdd))
 		return dev_err_probe(dev, PTR_ERR(adpd->vdd), "cannot get VDD\n");
+	adpd->vddio = devm_regulator_get_optional(dev, "vddio");
+	if (IS_ERR(adpd->vddio)) {
+		if (PTR_ERR(adpd->vddio) != -ENODEV)
+			return dev_err_probe(dev, PTR_ERR(adpd->vddio), "cannot get VDDIO\n");
+		adpd->vddio = NULL;
+	}
 	adpd->vled = devm_regulator_get(dev, "vled");
 	if (IS_ERR(adpd->vled))
 		return dev_err_probe(dev, PTR_ERR(adpd->vled), "cannot get VLED\n");
 
-	ret = regulator_enable(adpd->vdd);
+	ret = adpd_logic_power_on(adpd);
 	if (ret)
 		return ret;
-	usleep_range(3000, 4000);
 	ret = regmap_read(adpd->map, ADPD_ID, &id);
-	disable = regulator_disable(adpd->vdd);
+	disable = adpd_logic_power_off(adpd);
 	if (ret || disable)
 		return dev_err_probe(dev, ret ? ret : disable, "could not verify ADPD143\n");
 	if (id != 0x0316)

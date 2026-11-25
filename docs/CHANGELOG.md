@@ -2994,3 +2994,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
   outputs are disabled, then read back each change.
 - Keep already enabled rails at their current voltage and report a
   mismatch instead of exposing them as a supported camera supply.
+
+
+## 2026-11-26 — Shared NFC and optical sensor I/O supply
+
+- Exposed the stock S2MPS17 LDO39 as a 1.8 V ACPM regulator and
+  connected the S3NRN82 and ADPD143 to it in the board DT fragments.
+- Added consumer references across NFC open and optical probe and
+  capture, so one device cannot turn off the other's I²C pull-ups.

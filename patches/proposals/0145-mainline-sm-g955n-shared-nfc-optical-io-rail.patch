@@ -1,0 +1,78 @@
+Subject: [PATCH] soc: samsung: expose SM-G955N S2MPS17 LDO39 to consumers
+
+The NFC and optical I2C endpoints on the Korean SM-G955N share the
+stock 1.8 V LDO39. Register it only when requested by the board and
+only with the verified selector. Use the existing ACPM masked enable
+and disable operations to preserve the voltage selector.
+
+Apply after the LDO2 and LDO39 readback and microSD provider patches.
+
+diff --git a/drivers/soc/samsung/exynos8895-acpm-layout.c b/drivers/soc/samsung/exynos8895-acpm-layout.c
+--- a/drivers/soc/samsung/exynos8895-acpm-layout.c
++++ b/drivers/soc/samsung/exynos8895-acpm-layout.c
+@@ -190,9 +190,14 @@
+ static const struct regulator_desc exynos8895_sd_io =
+ 	G955N_LDO("ldo2", S2MPS17_LDO2_CTRL, 2800000);
+ 
+-static void exynos8895_register_sd_io(struct device *dev,
+-				    struct exynos8895_acpm_layout *layout,
+-				    struct device_node *regulators)
++static const struct regulator_desc exynos8895_nfc_io =
++	G955N_LDO("ldo39", S2MPS17_LDO39_CTRL, 1800000);
++
++static void exynos8895_register_optional_io(struct device *dev,
++					 struct exynos8895_acpm_layout *layout,
++					 struct device_node *regulators,
++					 const struct regulator_desc *desc,
++					 u8 selector)
+ {
+ 	struct regulator_config cfg = { .dev = dev, .driver_data = layout };
+ 	struct regulator_dev *rdev;
+@@ -200,24 +205,25 @@
+ 	u8 control;
+ 	int ret;
+ 
+-	node = of_get_child_by_name(regulators, "ldo2");
++	node = of_get_child_by_name(regulators, desc->of_match);
+ 	if (!node)
+ 		return;
+ 	of_node_put(node);
+ 
+-	ret = exynos8895_acpm_pmic_read(layout, 1, S2MPS17_LDO2_CTRL, &control);
++	ret = exynos8895_acpm_pmic_read(layout, 1, desc->id, &control);
+ 	if (ret) {
+-		dev_warn(dev, "cannot read the microSD I/O selector: %d\n", ret);
++		dev_warn(dev, "cannot read %s selector: %d\n", desc->name, ret);
+ 		return;
+ 	}
+-	if (FIELD_GET(S2MPS17_LDO_SELECTOR, control) != 0x28) {
+-		dev_warn(dev, "microSD I/O voltage selector differs from 2.8 V\n");
++	if (FIELD_GET(S2MPS17_LDO_SELECTOR, control) != selector) {
++		dev_warn(dev, "%s voltage selector differs from %u uV\n",
++			 desc->name, desc->fixed_uV);
+ 		return;
+ 	}
+ 
+-	rdev = devm_regulator_register(dev, &exynos8895_sd_io, &cfg);
++	rdev = devm_regulator_register(dev, desc, &cfg);
+ 	if (IS_ERR(rdev))
+-		dev_warn(dev, "cannot register the microSD I/O supply: %pe\n", rdev);
++		dev_warn(dev, "cannot register %s: %pe\n", desc->name, rdev);
+ }
+ 
+ static int exynos8895_register_ldos(struct device *dev, struct exynos8895_acpm_layout *layout)
+@@ -419,8 +425,12 @@
+ 	regulators = of_get_child_by_name(dev->of_node, "regulators");
+ 	if (regulators) {
+ 		ret = exynos8895_register_ldos(dev, layout);
+-		if (!ret)
+-			exynos8895_register_sd_io(dev, layout, regulators);
++		if (!ret) {
++			exynos8895_register_optional_io(dev, layout, regulators,
++						       &exynos8895_sd_io, 0x28);
++			exynos8895_register_optional_io(dev, layout, regulators,
++						       &exynos8895_nfc_io, 0x2c);
++		}
+ 		of_node_put(regulators);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret, "S2MPS17 rail registration failed\n");

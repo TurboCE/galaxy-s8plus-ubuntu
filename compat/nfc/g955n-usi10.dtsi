@@ -2,6 +2,14 @@
 
 #include <dt-bindings/soc/samsung,exynos-usi.h>
 
+&{/soc@0/acpm-layout@16500000/regulators} {
+	g955n_nfc_vio: ldo39 {
+		regulator-name = "vdd-nfc-io-1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+};
+
 /* HSI2C25 is the camera power IC bus. HSI2C26 serves NFC and optical IIO. */
 &{/soc@0/usi@10900000} {
 	samsung,mode = <USI_MODE_I2C0_1>;

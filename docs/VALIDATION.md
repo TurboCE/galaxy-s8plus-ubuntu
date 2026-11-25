@@ -7341,3 +7341,22 @@ revision 10 optical node and NFC node both reference VDD_NFC_1P8,
 provided by LDO39. The current Linux optical node lacks a consumer
 reference for that rail. This is a concrete missing dependency;
 the optical transport needs to be retested after adding it.
+
+
+## 2026-11-26 — NFC and optical LDO39 integration build
+
+The previous handset startup reported LDO39=0x2c when the optical
+I²C transfer timed out. Working NFC and optical checks had shown
+0xec. The stock Korean revision 10 DTS identifies this regulator
+as VDD_NFC_1P8 for both devices. The new ACPM descriptor checks
+selector 0x2c and reuses the existing masked regulator enable
+path, preserving the voltage bits.
+
+Built the ACPM provider, NFC NCI and reset modules, and ADPD143
+against the handset release with W=1. Compiled and decoded a DTB
+from the installed board description and the three tracked
+fragments. Both vddio-supply properties resolve to the same LDO39
+phandle with 1.8 V minimum and maximum constraints and no force-on
+property. The handset did not respond over USB network or Tailscale,
+so nothing was installed. Live LDO39 state, concurrent NFC and
+optical operation, and boot and suspend regressions remain pending.

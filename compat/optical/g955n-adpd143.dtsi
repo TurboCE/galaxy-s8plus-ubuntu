@@ -39,6 +39,7 @@
 		interrupt-parent = <&{/soc@0/pinctrl@10980000/gpe6-gpio-bank}>;
 		interrupts = <6 IRQ_TYPE_EDGE_FALLING>;
 		vdd-supply = <&ppg_vdd>;
+		vddio-supply = <&g955n_nfc_vio>;
 		vled-supply = <&ppg_vled>;
 	};
 };

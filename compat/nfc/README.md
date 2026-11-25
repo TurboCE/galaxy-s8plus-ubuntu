@@ -36,3 +36,17 @@ With it, the Linux NFC generic netlink interface powered the controller
 up, started and stopped discovery, and powered it down. The same
 sequence passed after s2idle and an ordinary reboot. The physical
 tag path still needs a known tag and has yet to be qualified.
+
+## Shared NFC and optical I/O supply
+
+Include the USI10 fragment before the S3NRN82 and ADPD143 fragments
+and apply the SM-G955N LDO39 ACPM provider patch. The board describes
+both consumers of the 1.8 V rail explicitly. The NFC driver holds
+the supply while the controller is open. ADPD143 holds its own
+reference during probe and buffered capture. Removing either
+reference leaves the supply on if the other device is active.
+
+The provider verifies the stock LDO39 voltage selector before
+registration and changes only its enable-mode bits. Older DTBs
+without the VDDIO supplies still bind, using their inherited rail
+state.
