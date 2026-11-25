@@ -2767,3 +2767,13 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Added standard backlight registration and cached gamma profiles.
   Validated stock GNOME power service brightness requests through
   to the real OLED registers on the running 6.18 handset.
+
+## 2026-11-25 — Start the OLED backlight before GNOME
+
+- Installed a systemd service for the native backlight module. Verified
+  automatic registration on reboot, stepped ambient adjustment and
+  working panel brightness updates after RTC-timed s2idle.
+
+- Isolated GSettings for the administrator ChatGPT service. After a
+  second reboot the service was still active and the Ubuntu user's
+  runtime dconf file had the correct owner.

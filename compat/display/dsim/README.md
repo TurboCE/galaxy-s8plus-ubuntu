@@ -93,6 +93,15 @@ reporting an applied update. DECON continues to own display
 blanking and the backlight defers writes during system suspend.
 
 The running VPN2 kernel had the Linux 6.18 backlight core disabled.
-The live test loaded the matching upstream backlight core as a
-temporary module and left BOOT intact. The kernel config fragment
-enables the same core for a future integrated kernel build.
+The live test used the matching upstream backlight core as an
+external module in the VPN2 kernel's own module directory. The
+`backlight.config` fragment enables the same core in a rebuilt
+kernel, where the external core is unnecessary.
+
+Place `g955n-dsim-backlight.ko` in the matching kernel's module tree,
+refresh its dependencies with `depmod`, and install
+`g955n-panel-backlight.service` in `/etc/systemd/system/`. Enable
+the service for graphical boot so the backlight exists when GNOME
+starts. The device uses the normal Linux backlight ABI, including
+systemd's existing brightness save and restore path. Disable the
+service and reboot to remove this port's automatic registration.

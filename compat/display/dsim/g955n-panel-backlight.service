@@ -1,0 +1,14 @@
+[Unit]
+Description=Register the SM-G955N OLED backlight
+Documentation=file:/sys/class/backlight/g955n-panel
+After=systemd-udev-trigger.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/modprobe g955n_dsim_backlight read_calibration=Y enable_backlight=Y
+ExecStartPost=/usr/bin/test -r /sys/class/backlight/g955n-panel/actual_brightness
+
+[Install]
+WantedBy=graphical.target

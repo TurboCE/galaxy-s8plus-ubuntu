@@ -6622,3 +6622,35 @@ and ambient setting were restored. Wi-Fi, DSI, the sensor hub and
 the bottom-speaker routing remained available. Integrated boot,
 suspend/resume, automatic brightness response and optical
 luminance have not yet been validated.
+
+## 2026-11-25 — Persistent OLED backlight and timed suspend
+
+Installed the matching upstream 6.18 backlight core and Dream2 A3
+module in the VPN2 module tree. `depmod` resolved the core dependency
+and the systemd unit passed verification. No partitions or BOOT image
+were replaced. On a new boot the backlight service was active at
+8.1 seconds and GDM at 11.1 seconds. GNOME's installed ambient
+controller moved the panel through levels 70, 63, 55, 48, 40 and 35
+with ambient enabled. SensorProxy subsequently reported a stable
+4 lux. Every step was verified by panel register readback.
+
+An RTC alarm resumed that same boot after 22 seconds of s2idle.
+Mutter reported the DSI output enabled. With the ambient control
+briefly disabled, wrote level 100 and restored the prior level 42.
+Both levels read back from the panel. Restored the user's ambient
+setting afterward. NetworkManager reported Wi-Fi connected and USB
+SSH was available after resume. An SSH attempt to the previously
+recorded Wi-Fi address timed out, so Wi-Fi transport was not proven
+by that attempt. Optical output and response to a controlled
+external light change were not measured.
+
+The first reboot recreated a root-owned user dconf runtime file
+as the administrator ChatGPT process started with the desktop user's
+runtime directory. A service drop-in selects the in-memory GSettings
+backend for that root process, and the existing temporary file was
+returned to Ubuntu ownership. The second reboot kept ChatGPT and
+the OLED backlight service active and created the file with owner
+`ubuntu:ubuntu` and mode 0600. The current boot had no dconf
+permission failures from GNOME. The ambient toggle read enabled and
+GNOME reported screen brightness. A separate SSH query to the
+current Wi-Fi lease succeeded after this reboot.
