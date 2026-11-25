@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+
+&{/soc@0} {
+	g955n_dpu1_clock: clock-controller@128020ec {
+		compatible = "samsung,sm-g955n-dpu1-clock";
+		reg = <0x128020ec 4>, <0x128020f0 4>;
+		#clock-cells = <0>;
+	};
+
+	g955n_dpu1_iommu: iommu@12910000 {
+		compatible = "samsung,exynos-sysmmu";
+		reg = <0x12910000 0x3000>;
+		interrupts = <GIC_SPI 155 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&g955n_dpu1_clock>;
+		clock-names = "sysmmu";
+		#iommu-cells = <0>;
+	};
+};
+
+g955n_decon: &{/soc@0/decon-handoff@12860000} {
+	memory-region = <&g955n_firmware_scanout>;
+	iommus = <&g955n_dpu1_iommu>;
+};
+
+g955n_firmware_scanout: &{/reserved-memory/framebuffer@cc000000} {
+	/* Include the final partial framebuffer page in the identity map. */
+	reg = <0 0xcc000000 0x01043000>;
+	iommu-addresses = <&g955n_decon 0xcc000000 0x01043000>;
+};

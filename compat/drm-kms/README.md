@@ -172,3 +172,30 @@ never maps the pixels on the CPU.
 GNOME Wayland needs the DRM/logind seat ownership and Mesa GBM renderer
 integration in addition to this direct buffer test. A successful test of
 vendor gralloc or software rendering does not qualify Panfrost.
+
+
+## Mainline DPU1 System MMU trial
+
+The Exynos8895 G0 IDMA uses the DPU1 System MMU at `0x12910000`.
+The existing 6.18 handoff drives G0 with physical DMA addresses. The
+DPU1 trial uses proposal `0147-mainline-sm-g955n-decon-dpu1-iommu.patch`,
+the `g955n-dpu1-clock.c` provider and `g955n-dpu1-iommu.dtsi`.
+Build the clock provider and patched handoff for the exact installed
+kernel with Exynos IOMMU and runtime PM support. Make the clock provider
+available at early device probe and compile the DT fragment only into
+the SM-G955N trial image.
+
+The fragment declares an identity mapping for the page-aligned
+firmware framebuffer at `0xcc000000`. Before resuming the System MMU
+supplier, the handoff checks the identity translation of every
+framebuffer page. The KMS device then allocates and imports buffers
+through the DMA domain. The helper retains the old CMA path when the
+board does not opt in. The trial keeps the existing pool reservation
+size until translated scanout has been tested.
+
+For system sleep, the consumer switches G0 to the firmware framebuffer
+before DPU1 disables translation. It retains the desktop framebuffer
+and restores it after the supplier resumes. On a trial boot, use the
+verified existing BOOT image as rollback. Check the inherited output,
+a noncontiguous Panfrost PRIME import and actual G0 scanout before
+testing suspend, rotation and acoustic playback.

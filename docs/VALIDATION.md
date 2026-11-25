@@ -7603,3 +7603,31 @@ ordinary reboot because the running build has module unloading
 disabled. Its temporary file was removed. The second probe
 exited from initialization after logging its result and did not
 leave a resident module. GDM and the existing scanout stayed active.
+
+
+## 2026-11-26 — DPU1 translated scanout build
+
+The existing handset boot returned DPU1 System MMU version
+0x70000011, control 0x00000004 and CAPA0 0x20813103. Bit 11 is clear,
+so the Linux 6.18 probe should skip the optional CAPA1 register.
+The isolated read completed without enabling translation.
+
+Built the DPU1 clock provider and patched DECON handoff for the
+running ARM64 kernel with W=1. Proposal 0147 applied with zero fuzz
+to the exact DECON source used to build the module. Compiled the
+board fragment on top of the retained DT and decoded it again.
+The resulting phandles connect G0 to DPU1, DPU1 to its inherited
+display clock provider, and the page-aligned firmware framebuffer
+to its identity IOVA from 0xcc000000 through 0xcd042fff.
+
+The translated branch checks every framebuffer page before holding
+the IOMMU supplier active. The normal untranslated CMA branch is
+still selected without the opt-in fragment. Before system sleep
+the translated branch latches the firmware buffer while the DMA
+device is still usable. It keeps the original framebuffer referenced
+and restores the prior scanout after the System MMU resumes.
+
+The candidate modules and DT were not installed. Direct PRIME
+import of noncontiguous Panfrost buffers, G0 latch, restored
+scanout after suspend and the effect on CMA requirements remain
+unverified on hardware.

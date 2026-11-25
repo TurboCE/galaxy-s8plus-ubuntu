@@ -1,0 +1,155 @@
+Subject: [PATCH] drm: validate DPU1 translation before SM-G955N display handoff
+
+Keep the inherited framebuffer accessible at its physical address while
+the DPU1 System MMU is attached and before its system-sleep callback.
+A DT opt-in makes DMA allocations through the translated domain
+instead of assigning the legacy CMA pool to DECON.
+
+diff --git a/drivers/gpu/drm/tiny/g955n-decon-handoff.c b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+--- a/drivers/gpu/drm/tiny/g955n-decon-handoff.c
++++ b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+@@ -6,12 +6,14 @@
+ #include <linux/dma-resv.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
++#include <linux/iommu.h>
+ #include <linux/mfd/syscon.h>
+ #include <linux/module.h>
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/of_reserved_mem.h>
+ #include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
+ #include <linux/regmap.h>
+ #include <linux/scatterlist.h>
+ #include <linux/string.h>
+@@ -68,6 +70,7 @@
+ 	void __iomem *g0;
+ 	struct regmap *pmu;
+ 	struct mutex lock;
++	bool translated;
+ };
+ 
+ static int g955n_latch_base(void __iomem *decon, void __iomem *g0, u32 addr)
+@@ -475,6 +478,96 @@
+ 	return ret;
+ }
+ 
++static void g955n_decon_put_sysmmu(void *data)
++{
++	struct device *dev = data;
++
++	pm_runtime_put_sync(dev);
++}
++
++static int g955n_decon_pin_sysmmu(struct device *dev)
++{
++	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
++	dma_addr_t offset;
++	int ret;
++
++	if (!domain || !iommu_is_dma_domain(domain))
++		return dev_err_probe(dev, -ENODEV, "DPU1 DMA domain is unavailable\n");
++
++	for (offset = 0; offset < PAGE_ALIGN(PANEL_BYTES); offset += PAGE_SIZE) {
++		dma_addr_t addr = FIRMWARE_FB + offset;
++
++		if (iommu_iova_to_phys(domain, addr) != addr)
++			return dev_err_probe(dev, -EINVAL, "firmware framebuffer is not identity mapped\n");
++	}
++
++	/*
++	 * The Exynos driver enables the supplier through the master's
++	 * runtime PM device link. Keep it enabled for the life of KMS.
++	 */
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		return ret;
++	ret = pm_runtime_resume_and_get(dev);
++	if (ret < 0)
++		return dev_err_probe(dev, ret, "could not resume DPU1 translation\n");
++	return devm_add_action_or_reset(dev, g955n_decon_put_sysmmu, dev);
++}
++
++static int g955n_decon_switch_sleep_scanout(struct device *dev, bool suspend)
++{
++	struct g955n_decon_handoff *handoff = dev_get_drvdata(dev);
++	struct g955n_decon_kms *kms = handoff->kms;
++	dma_addr_t addr = FIRMWARE_FB;
++	unsigned int power;
++	int ret;
++
++	if (!handoff->translated || !kms)
++		return 0;
++
++	mutex_lock(&handoff->lock);
++	ret = regmap_read(handoff->pmu, DISP_POWER_STATUS, &power);
++	if (ret)
++		goto unlock;
++	if ((power & 0xf) != DISP_POWER_ON) {
++		ret = -EHOSTDOWN;
++		goto unlock;
++	}
++	if (!suspend) {
++		if (kms->fault) {
++			ret = -EIO;
++			goto unlock;
++		}
++		if (kms->active)
++			addr = g955n_frame_address(kms->active);
++		else if (kms->black_may_scanout)
++			addr = kms->black->dma_addr;
++	}
++
++	/*
++	 * The System MMU supplier disables translation on system suspend.
++	 * Latch the identity-mapped image before its callback and keep the
++	 * original KMS framebuffer referenced until translation is back.
++	 */
++	ret = g955n_latch_base(handoff->decon, handoff->g0, lower_32_bits(addr));
++unlock:
++	mutex_unlock(&handoff->lock);
++	return ret;
++}
++
++static int g955n_decon_suspend(struct device *dev)
++{
++	return g955n_decon_switch_sleep_scanout(dev, true);
++}
++
++static int g955n_decon_resume(struct device *dev)
++{
++	return g955n_decon_switch_sleep_scanout(dev, false);
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(g955n_decon_pm, g955n_decon_suspend,
++				g955n_decon_resume);
++
+ static int g955n_decon_handoff_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -515,6 +608,16 @@
+ 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+ 	if (ret)
+ 		return ret;
++	if (of_property_present(dev->of_node, "iommus")) {
++		if (!native_kms)
++			return dev_err_probe(dev, -EINVAL, "DPU1 translation requires KMS\n");
++		ret = g955n_decon_pin_sysmmu(dev);
++		if (ret)
++			return ret;
++		handoff->translated = true;
++		return g955n_register_kms(dev, handoff);
++	}
++
+ 	ret = of_reserved_mem_device_init(dev);
+ 	if (ret)
+ 		return ret;
+@@ -587,6 +690,7 @@
+ 	.driver = {
+ 		.name = "g955n-decon-handoff",
+ 		.of_match_table = g955n_decon_handoff_of_match,
++		.pm = pm_sleep_ptr(&g955n_decon_pm),
+ 		.suppress_bind_attrs = true,
+ 	},
+ };

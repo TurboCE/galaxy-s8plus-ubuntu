@@ -3044,3 +3044,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 
 - Corrected the native BCM4773 accelerometer mount matrix and
   verified the four display orientations in stock GNOME Wayland.
+
+
+## 2026-11-26 — Prepare translated DPU1 scanout for SM-G955N
+
+- Added opt-in DPU1 clock and board definitions and a DECON handoff
+  that checks the inherited framebuffer identity map before using DMA.
