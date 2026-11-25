@@ -61,5 +61,7 @@ applies that clock correction to the kernel and board DT.
 avoids tick-rounded delays during short transfers. The integrated handset
 image automatically starts the original daemon using the mainline systemd
 unit. Two boots reached ready and the SSP probe returned chip ID 0x55
-over the integrated driver. IIO measurements and a satellite fix remain
-unverified.
+over the integrated driver. Acceleration now goes through standard
+IIO axes to Ubuntu's packaged SensorProxy. Stationary readings and
+D-Bus detection passed. Physical rotation, other sensor measurements
+and a satellite fix remain unverified.

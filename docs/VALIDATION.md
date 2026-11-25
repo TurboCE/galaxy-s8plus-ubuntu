@@ -6464,3 +6464,28 @@ BOOT and enabled service after removing the temporary return timer.
 Verified recovery backups and pre-trial launcher copies are available
 for rollback. Continuous SSP measurements, GNSS positioning and hub
 behavior across system suspend remain unverified.
+
+### 6.18 BCM4773 native accelerometer and Ubuntu SensorProxy
+
+Loaded a renamed, ARM64 `W=1` module on the integrated BOOT and observed
+real signed X/Y/Z values. At idle, typical raw axes were approximately
++40, −175, and −3990 counts, giving a norm around 9.56 m/s². Reopening
+after an idle interval returned fresh sensor data. The shortened
+development restart cycle hit systemd's existing start-rate limit
+when restoring the original binding. Reset the failed state and
+restored daemon readiness before staging the persistent update.
+
+Built the final module with `W=1`, verified its installed SHA-256,
+and rebooted. The service enabled the native accelerometer with zero
+automatic restarts. Eight raw-axis triplets had a norm of 9.59–9.61
+m/s². Udev selected the stock polling backend and display mount
+matrix. The mainline generator masked the 4.4 packed-IIO drop-in,
+the active unit ran `/usr/libexec/iio-sensor-proxy`, and D-Bus
+returned `HasAccelerometer=true`. `monitor-sensor` confirmed the
+accelerometer, with orientation undefined while stationary.
+It still reported no light or proximity sensor.
+
+GDM, NetworkManager, Wi-Fi, and the default lower-speaker output were
+present after the same boot. The prior module and service were
+retained in a private pre-accelerometer backup. Physical rotation
+and other sensor measurements remain open.

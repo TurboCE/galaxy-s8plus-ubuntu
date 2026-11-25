@@ -1,0 +1,8 @@
+#!/bin/sh
+# Use Ubuntu's IIO backend on the integrated SM-G955N mainline boot.
+set -eu
+grep -aq SM-G955N /proc/device-tree/model || exit 0
+grep -Eq '(^|[[:space:]])g955n\.bcm4773=1([[:space:]]|$)' /proc/cmdline || exit 0
+directory=$2/iio-sensor-proxy.service.d
+mkdir -p "$directory"
+ln -s /dev/null "$directory/90-g955n-ssp.conf"

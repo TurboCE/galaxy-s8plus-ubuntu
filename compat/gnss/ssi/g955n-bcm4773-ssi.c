@@ -7,6 +7,7 @@
 #include <linux/fs.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
+#include <linux/iio/iio.h>
 #include <linux/iopoll.h>
 #include <linux/kfifo.h>
 #include <linux/kref.h>
@@ -20,6 +21,7 @@
 #include <linux/slab.h>
 #include <linux/spi/spi.h>
 #include <linux/uaccess.h>
+#include <linux/unaligned.h>
 #include <linux/workqueue.h>
 
 #define SSI_WRITE	0x00
@@ -31,6 +33,13 @@
 #define BBD_PATCH_NAME	"samsung/g955n/bbd-patch.bin"
 #define BBD_CONTROL_MAX	64
 #define BBD_PATCH_SIZE	1023148
+#define BBD_FRAME_MAX	(2048 + 14)
+#define SSP_SENSOR_RPC	33
+#define SSP_ADD_SENSOR	0xa1
+#define SSP_REMOVE_SENSOR 0xa2
+#define SSP_ACCEL_PERIOD_MS 100
+#define SSP_ACCEL_IDLE_MS 2000
+#define SSP_SENSOR_RECORD_MAX 128
 
 static bool expose_legacy_patch;
 module_param(expose_legacy_patch, bool, 0400);
@@ -51,6 +60,17 @@ MODULE_PARM_DESC(expose_legacy_power, "Let the legacy daemon control the hub and
 static bool probe_legacy_ssp;
 module_param(probe_legacy_ssp, bool, 0400);
 MODULE_PARM_DESC(probe_legacy_ssp, "Issue a read-only SSP chip-ID request through the legacy daemon");
+
+static bool expose_legacy_accel;
+module_param(expose_legacy_accel, bool, 0400);
+MODULE_PARM_DESC(expose_legacy_accel, "Expose the BCM4773 accelerometer through IIO");
+
+struct ssi_bbd_rx {
+	u8 frame[BBD_FRAME_MAX];
+	size_t size;
+	bool receiving;
+	bool escaped;
+};
 
 /* Little-endian BBD length, SSP command, response size, options and data. */
 static const u8 ssi_ssp_whoami[] = { 9, 0, 0x0f, 1, 0, 0, 0, 0, 0, 0, 0 };
@@ -76,9 +96,18 @@ struct g955n_ssi {
 	struct miscdevice patch;
 	struct miscdevice control;
 	struct miscdevice sensor;
-	size_t sensor_offset;
+	u8 sensor_request[12];
+	size_t sensor_size, sensor_offset;
 	bool sensor_open;
-	bool sensor_pending;
+	struct iio_dev *accel;
+	struct delayed_work accel_idle;
+	struct ssi_bbd_rx bbd;
+	u8 sensor_record[SSP_SENSOR_RECORD_MAX + 4];
+	size_t sensor_record_size, sensor_record_skip;
+	u8 accel_transfer;
+	bool accel_requested, accel_running, accel_valid;
+	unsigned long accel_stamp, accel_access;
+	s16 accel_axes[3];
 	struct miscdevice stream;
 	struct delayed_work stream_work;
 	struct kfifo stream_tx, stream_rx;
@@ -122,6 +151,342 @@ static irqreturn_t ssi_host_irq(int irq, void *data)
 	else
 		wake_up_interruptible(&ssi->wait);
 	return IRQ_HANDLED;
+}
+
+/* Each /dev/bbd_sensor request has a little-endian byte count. */
+static void ssi_sensor_queue(struct g955n_ssi *ssi, const u8 *packet, size_t size)
+{
+	memcpy(ssi->sensor_request, packet, size);
+	ssi->sensor_offset = 0;
+	ssi->sensor_size = size;
+	wake_up_interruptible(&ssi->wait);
+}
+
+static void ssi_accel_update(struct g955n_ssi *ssi)
+{
+	u8 header[] = { 9, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0 };
+
+	if (!ssi->accel || ssi->removed || !ssi->sensor_open ||
+	    ssi->firmware_state != BBD_FIRMWARE_READY ||
+	    ssi->accel_transfer || ssi->sensor_size ||
+	    ssi->accel_requested == ssi->accel_running)
+		return;
+
+	ssi->accel_transfer = ssi->accel_requested ?
+			      SSP_ADD_SENSOR : SSP_REMOVE_SENSOR;
+	header[2] = ssi->accel_transfer;
+	header[3] = ssi->accel_requested ? 10 : 5;
+	ssi_sensor_queue(ssi, header, sizeof(header));
+}
+
+static void ssi_sensor_reset(struct g955n_ssi *ssi)
+{
+	ssi->sensor_size = 0;
+	ssi->accel_transfer = 0;
+	ssi->accel_running = false;
+	WRITE_ONCE(ssi->accel_valid, false);
+	ssi->sensor_record_size = 0;
+	ssi->sensor_record_skip = 0;
+	ssi->bbd.receiving = false;
+	ssi->bbd.escaped = false;
+}
+
+static void ssi_accel_report(struct g955n_ssi *ssi, const u8 *data, size_t size)
+{
+	/* Single bypass record: instruction, sensor ID, three axes, timestamp. */
+	if (size != 16 || data[0] != 0x37 || data[1] != 0)
+		return;
+
+	ssi->accel_axes[0] = get_unaligned_le16(data + 2);
+	ssi->accel_axes[1] = get_unaligned_le16(data + 4);
+	ssi->accel_axes[2] = get_unaligned_le16(data + 6);
+	WRITE_ONCE(ssi->accel_stamp, jiffies);
+	WRITE_ONCE(ssi->accel_valid, true);
+	wake_up_interruptible(&ssi->wait);
+}
+
+static void ssi_sensor_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
+{
+	u8 *record = ssi->sensor_record;
+	size_t length, target;
+	u16 options;
+
+	while (size) {
+		if (ssi->sensor_record_skip) {
+			length = min(size, ssi->sensor_record_skip);
+			ssi->sensor_record_skip -= length;
+			size -= length;
+			data += length;
+			continue;
+		}
+		target = 4;
+		if (ssi->sensor_record_size >= target) {
+			options = get_unaligned_le16(record);
+			length = get_unaligned_le16(record + 2);
+			if ((options & 3) != 1)
+				target += length;
+		}
+		length = min(size, target - ssi->sensor_record_size);
+		memcpy(record + ssi->sensor_record_size, data, length);
+		ssi->sensor_record_size += length;
+		data += length;
+		size -= length;
+
+		if (ssi->sensor_record_size < 4)
+			continue;
+		options = get_unaligned_le16(record);
+		length = get_unaligned_le16(record + 2);
+		if ((options & 3) == 1) {
+			u8 payload[12] = { 0 };
+			unsigned int expected = ssi->accel_transfer == SSP_ADD_SENSOR ? 10 : 5;
+
+			if (options == 1 && ssi->accel_transfer && !ssi->sensor_size &&
+			    length == expected) {
+				put_unaligned_le16(expected, payload);
+				put_unaligned_le32(SSP_ACCEL_PERIOD_MS, payload + 3);
+				ssi_sensor_queue(ssi, payload, expected + 2);
+				ssi->accel_running = ssi->accel_transfer == SSP_ADD_SENSOR;
+				ssi->accel_transfer = 0;
+			}
+		} else {
+			if (length > SSP_SENSOR_RECORD_MAX) {
+				ssi->sensor_record_size = 0;
+				ssi->sensor_record_skip = length;
+				continue;
+			}
+			if (ssi->sensor_record_size < length + 4)
+				continue;
+			if ((options & 3) == 2 && ssi->accel_running)
+				ssi_accel_report(ssi, record + 4, length);
+		}
+		ssi->sensor_record_size = 0;
+	}
+}
+
+static int ssi_bbd_number(const u8 **p, const u8 *end)
+{
+	u16 value;
+
+	if (*p == end)
+		return -EINVAL;
+	value = *(*p)++;
+	if (value & 0x80) {
+		if (*p == end)
+			return -EINVAL;
+		value = ((value & 0x7f) << 8) | *(*p)++;
+	}
+	return value;
+}
+
+static void ssi_bbd_frame(struct g955n_ssi *ssi)
+{
+	const u8 *frame = ssi->bbd.frame;
+	const u8 *end;
+	const u8 *p;
+	u16 length, flags;
+	u8 crc = 0;
+	unsigned int bit;
+
+	if (ssi->bbd.size < 4)
+		return;
+	end = frame + ssi->bbd.size - 1;
+	for (p = frame + 1; p < end; p++) {
+		crc ^= *p;
+		for (bit = 0; bit < 8; bit++)
+			crc = (crc << 1) ^ (crc & 0x80 ? 0x4d : 0);
+	}
+	if ((u8)((crc << 4) | (crc >> 4)) != *end)
+		return;
+
+	length = frame[1];
+	flags = frame[2];
+	p = frame + 3;
+	for (bit = 0; bit < 10; bit++) {
+		u8 detail;
+
+		if (!(flags & BIT(bit)))
+			continue;
+		if (p == end)
+			return;
+		detail = *p++;
+		if (bit == 6)
+			length |= detail << 8;
+		else if (bit == 7)
+			flags |= detail << 8;
+	}
+	if (flags & ~GENMASK(9, 0) || flags & BIT(8) || end - p != length)
+		return;
+
+	while (p < end) {
+		int kind = ssi_bbd_number(&p, end);
+		int size = ssi_bbd_number(&p, end);
+
+		if (kind < 0 || size < 0 || end - p < size)
+			return;
+		if (kind == SSP_SENSOR_RPC && size >= 2 &&
+		    get_unaligned_le16(p) == size - 2)
+			ssi_sensor_feed(ssi, p + 2, size - 2);
+		p += size;
+	}
+}
+
+static void ssi_bbd_feed(struct g955n_ssi *ssi, const u8 *data, size_t size)
+{
+	struct ssi_bbd_rx *rx = &ssi->bbd;
+
+	while (size--) {
+		u8 byte = *data++;
+
+		if (byte == 0x11 || byte == 0x13)
+			continue;
+		if (rx->escaped) {
+			rx->escaped = false;
+			switch (byte) {
+			case 0:
+				rx->receiving = true;
+				rx->size = 0;
+				continue;
+			case 1:
+				if (rx->receiving)
+					ssi_bbd_frame(ssi);
+				rx->receiving = false;
+				continue;
+			case 3:
+				byte = 0xb0;
+				break;
+			case 4:
+				byte = 0x11;
+				break;
+			case 5:
+				byte = 0x13;
+				break;
+			default:
+				rx->receiving = false;
+				rx->escaped = byte == 0xb0;
+				continue;
+			}
+		} else if (byte == 0xb0) {
+			rx->escaped = true;
+			continue;
+		}
+
+		if (rx->receiving) {
+			if (rx->size == sizeof(rx->frame))
+				rx->receiving = false;
+			else
+				rx->frame[rx->size++] = byte;
+		}
+	}
+}
+
+static void ssi_accel_idle(struct work_struct *work)
+{
+	struct g955n_ssi *ssi = container_of(to_delayed_work(work),
+					    struct g955n_ssi, accel_idle);
+
+	unsigned long expires;
+
+	mutex_lock(&ssi->lock);
+	expires = ssi->accel_access + msecs_to_jiffies(SSP_ACCEL_IDLE_MS);
+	if (!ssi->removed && time_before(jiffies, expires)) {
+		queue_delayed_work(system_freezable_wq, &ssi->accel_idle,
+				   expires - jiffies);
+	} else {
+		ssi->accel_requested = false;
+		WRITE_ONCE(ssi->accel_valid, false);
+		ssi_accel_update(ssi);
+	}
+	mutex_unlock(&ssi->lock);
+}
+
+static int ssi_accel_read_raw(struct iio_dev *indio, const struct iio_chan_spec *chan,
+			      int *value, int *value2, long mask)
+{
+	struct g955n_ssi *ssi = *(struct g955n_ssi **)iio_priv(indio);
+	int ret;
+
+	if (mask == IIO_CHAN_INFO_SCALE) {
+		*value = 0;
+		*value2 = 2394202; /* 9.80665 m/s² divided by 4096 counts/g. */
+		return IIO_VAL_INT_PLUS_NANO;
+	}
+	if (mask != IIO_CHAN_INFO_RAW)
+		return -EINVAL;
+
+	mutex_lock(&ssi->lock);
+	if (ssi->removed || !ssi->sensor_open ||
+	    ssi->firmware_state != BBD_FIRMWARE_READY) {
+		mutex_unlock(&ssi->lock);
+		return -ENODEV;
+	}
+	ssi->accel_access = jiffies;
+	ssi->accel_requested = true;
+	ssi_accel_update(ssi);
+	mod_delayed_work(system_freezable_wq, &ssi->accel_idle,
+			 msecs_to_jiffies(SSP_ACCEL_IDLE_MS));
+	mutex_unlock(&ssi->lock);
+
+	ret = wait_event_interruptible_timeout(ssi->wait,
+			READ_ONCE(ssi->removed) ||
+			(READ_ONCE(ssi->accel_valid) &&
+			 !time_after(jiffies, READ_ONCE(ssi->accel_stamp) +
+				     msecs_to_jiffies(600))),
+			msecs_to_jiffies(1000));
+	if (ret < 0)
+		return ret;
+
+	mutex_lock(&ssi->lock);
+	if (ssi->removed)
+		ret = -ENODEV;
+	else if (!ssi->accel_valid ||
+		 time_after(jiffies, ssi->accel_stamp + msecs_to_jiffies(600)))
+		ret = -EAGAIN;
+	else {
+		*value = ssi->accel_axes[chan->address];
+		ret = IIO_VAL_INT;
+	}
+	mutex_unlock(&ssi->lock);
+	return ret;
+}
+
+#define SSI_ACCEL_AXIS(axis, index) {				\
+	.type = IIO_ACCEL,					\
+	.modified = 1,						\
+	.channel2 = IIO_MOD_##axis,				\
+	.address = index,					\
+	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),		\
+	.info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SCALE),	\
+}
+
+static const struct iio_chan_spec ssi_accel_channels[] = {
+	SSI_ACCEL_AXIS(X, 0),
+	SSI_ACCEL_AXIS(Y, 1),
+	SSI_ACCEL_AXIS(Z, 2),
+};
+
+static const struct iio_info ssi_accel_info = {
+	.read_raw = ssi_accel_read_raw,
+};
+
+static int ssi_register_accel(struct g955n_ssi *ssi)
+{
+	struct iio_dev *indio;
+	int ret;
+
+	indio = devm_iio_device_alloc(&ssi->spi->dev, sizeof(struct g955n_ssi *));
+	if (!indio)
+		return -ENOMEM;
+	*(struct g955n_ssi **)iio_priv(indio) = ssi;
+	indio->name = "g955n-bcm4773-accel";
+	indio->modes = INDIO_DIRECT_MODE;
+	indio->info = &ssi_accel_info;
+	indio->channels = ssi_accel_channels;
+	indio->num_channels = ARRAY_SIZE(ssi_accel_channels);
+	ssi->accel = indio;
+	ret = iio_device_register(indio);
+	if (ret)
+		ssi->accel = NULL;
+	return ret;
 }
 
 /* With the lock held, a file operation owns the GPIO handshake and SPI. */
@@ -511,6 +876,8 @@ static void ssi_stream_worker(struct work_struct *work)
 				break;
 			count = kfifo_in(&ssi->stream_rx, ssi->rx + SSI_HEADER, ret);
 			ssi->stream_rx_bytes += count;
+			if (ssi->accel && ssi->firmware_state == BBD_FIRMWARE_READY)
+				ssi_bbd_feed(ssi, ssi->rx + SSI_HEADER, count);
 			if (!count && ++ssi->empty_receives == 4) {
 				ret = -EPROTO;
 				break;
@@ -789,7 +1156,7 @@ static int ssi_sensor_release(struct inode *inode, struct file *file)
 
 	mutex_lock(&ssi->lock);
 	ssi->sensor_open = false;
-	ssi->sensor_pending = false;
+	ssi_sensor_reset(ssi);
 	mutex_unlock(&ssi->lock);
 	kref_put(&ssi->refs, ssi_free);
 	return 0;
@@ -806,12 +1173,15 @@ static ssize_t ssi_sensor_read(struct file *file, char __user *buffer,
 	mutex_lock(&ssi->lock);
 	if (ssi->removed) {
 		ret = -ENODEV;
-	} else if (ssi->sensor_pending) {
-		length = min(length, sizeof(ssi_ssp_whoami) - ssi->sensor_offset);
-		length -= copy_to_user(buffer, ssi_ssp_whoami + ssi->sensor_offset,
+	} else if (ssi->sensor_size) {
+		length = min(length, ssi->sensor_size - ssi->sensor_offset);
+		length -= copy_to_user(buffer, ssi->sensor_request + ssi->sensor_offset,
 				       length);
 		ssi->sensor_offset += length;
-		ssi->sensor_pending = ssi->sensor_offset < sizeof(ssi_ssp_whoami);
+		if (ssi->sensor_offset == ssi->sensor_size) {
+			ssi->sensor_size = 0;
+			ssi_accel_update(ssi);
+		}
 		ret = length ? (ssize_t)length : -EFAULT;
 	}
 	mutex_unlock(&ssi->lock);
@@ -827,7 +1197,7 @@ static __poll_t ssi_sensor_poll(struct file *file, poll_table *wait)
 	mutex_lock(&ssi->lock);
 	if (ssi->removed)
 		flags = EPOLLHUP | EPOLLERR;
-	else if (ssi->sensor_pending)
+	else if (ssi->sensor_size)
 		flags = EPOLLIN | EPOLLRDNORM;
 	mutex_unlock(&ssi->lock);
 	return flags;
@@ -868,17 +1238,16 @@ static ssize_t ssi_control_write(struct file *file, const char __user *buffer,
 		ret = -ENODEV;
 	} else if (!strcmp(command, "ESW:NOTREADY")) {
 		ssi->firmware_state = BBD_FIRMWARE_NOT_READY;
-		ssi->sensor_pending = false;
+		ssi_sensor_reset(ssi);
 	} else if (!strcmp(command, "ESW:READY")) {
 		if (probe_legacy_ssp && ssi->firmware_state != BBD_FIRMWARE_READY) {
-			ssi->sensor_offset = 0;
-			ssi->sensor_pending = true;
-			wake_up_interruptible(&ssi->wait);
+			ssi_sensor_queue(ssi, ssi_ssp_whoami, sizeof(ssi_ssp_whoami));
 		}
 		ssi->firmware_state = BBD_FIRMWARE_READY;
+		ssi_accel_update(ssi);
 	} else if (!strcmp(command, "ESW:CRASHED")) {
 		ssi->firmware_state = BBD_FIRMWARE_CRASHED;
-		ssi->sensor_pending = false;
+		ssi_sensor_reset(ssi);
 		ssi->patch_transfer = false;
 	} else if (!strcmp(command, "BBD:PassThru=1") ||
 		   !strcmp(command, "SSI:PassThru=1")) {
@@ -969,7 +1338,7 @@ static int ssi_manual_rail(struct g955n_ssi *ssi, bool on)
 		ssi->stream_error = 0;
 		ssi->firmware_state = BBD_FIRMWARE_UNKNOWN;
 		ssi->patch_transfer = false;
-		ssi->sensor_pending = false;
+		ssi_sensor_reset(ssi);
 	}
 	msleep(20);
 	if (on && ssi->stream_open)
@@ -1105,6 +1474,7 @@ static void ssi_disconnect(struct g955n_ssi *ssi)
 		dev_err(&ssi->spi->dev, "cannot restore GNSS enable on removal\n");
 	mutex_unlock(&ssi->lock);
 	cancel_delayed_work_sync(&ssi->stream_work);
+	cancel_delayed_work_sync(&ssi->accel_idle);
 	wake_up_interruptible(&ssi->wait);
 }
 
@@ -1124,6 +1494,9 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	if (probe_legacy_ssp && !expose_legacy_control)
 		return dev_err_probe(dev, -EINVAL, "SSP probe requires BBD control\n");
 
+	if (expose_legacy_accel && (!probe_legacy_ssp || !expose_legacy_stream))
+		return dev_err_probe(dev, -EINVAL, "accelerometer requires the legacy SSI bridge\n");
+
 	ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
 	if (!ssi)
 		return -ENOMEM;
@@ -1131,6 +1504,7 @@ static int g955n_ssi_probe(struct spi_device *spi)
 	mutex_init(&ssi->lock);
 	init_waitqueue_head(&ssi->wait);
 	INIT_DELAYED_WORK(&ssi->stream_work, ssi_stream_worker);
+	INIT_DELAYED_WORK(&ssi->accel_idle, ssi_accel_idle);
 	ssi->spi = spi;
 	ssi->tx = devm_kzalloc(dev, SSI_HEADER + SSI_PAYLOAD, GFP_KERNEL);
 	ssi->rx = devm_kzalloc(dev, SSI_HEADER + SSI_PAYLOAD, GFP_KERNEL);
@@ -1256,9 +1630,16 @@ static int g955n_ssi_probe(struct spi_device *spi)
 		if (ret)
 			goto deregister_power;
 	}
+	if (expose_legacy_accel) {
+		ret = ssi_register_accel(ssi);
+		if (ret)
+			goto deregister_sensor;
+	}
 	spi_set_drvdata(spi, ssi);
 	return 0;
 
+deregister_sensor:
+	misc_deregister(&ssi->sensor);
 deregister_power:
 	if (expose_legacy_power) {
 		device_unregister(ssi->gnss_device);
@@ -1303,6 +1684,8 @@ static void g955n_ssi_remove(struct spi_device *spi)
 		misc_deregister(&ssi->patch);
 	misc_deregister(&ssi->misc);
 	ssi_disconnect(ssi);
+	if (ssi->accel)
+		iio_device_unregister(ssi->accel);
 	free_irq(ssi->irq, ssi);
 	kref_put(&ssi->refs, ssi_free);
 }

@@ -2709,3 +2709,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Booted the patched clock and SPI controller on the handset twice.
   The daemon started automatically each time. An integrated service
   restart also returned the real SSP ID 0x55.
+
+## 2026-11-25 — Native BCM4773 accelerometer
+
+- Added standard IIO axis and scale attributes with an on-demand SSP
+  stream. The mainline boot selects Ubuntu's packaged SensorProxy and
+  applies the handset display mount matrix through udev.
+- Verified live acceleration values after reboot and a positive
+  SensorProxy accelerometer property on the handset.

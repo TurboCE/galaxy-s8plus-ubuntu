@@ -140,3 +140,22 @@ read-only with journal replay disabled. The service disables the GNSS
 enable and MCU rail when it stops. Check live startup by reading
 `/sys/class/misc/bbd_control/daemon_status`. The dedicated service was
 verified across two normal boots on the integrated SM-G955N image.
+
+## Native IIO accelerometer
+
+With `expose_legacy_accel=1`, the driver registers
+`g955n-bcm4773-accel` and exposes the standard IIO raw X, Y and Z
+attributes and the physical scale. Reading an axis starts the SSP
+accelerometer on demand at a 100 ms sampling interval. The driver
+requests removal after two seconds without an axis read. It validates
+the BBD transport CRC and response length before decoding a sample.
+GNSS bytes and the original daemon's input continue through the
+existing SSI stream.
+
+On the opt-in mainline boot, a systemd generator masks the older
+Samsung packed-IIO SensorProxy drop-in. Ubuntu's packaged
+`iio-sensor-proxy` uses the normal polling backend, with the
+SM-G955N display mount matrix supplied by udev. The mainline unit
+enables the accelerometer option on boot. The stationary handset
+passed the IIO and SensorProxy tests. A physical rotation trial has
+yet to qualify desktop orientation transitions.

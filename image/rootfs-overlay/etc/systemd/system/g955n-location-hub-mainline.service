@@ -8,7 +8,7 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-ExecStartPre=/usr/sbin/modprobe g955n_bcm4773_ssi expose_legacy_stream=1 expose_legacy_control=1 expose_legacy_patch=1 expose_legacy_power=1 probe_legacy_ssp=1
+ExecStartPre=/usr/sbin/modprobe g955n_bcm4773_ssi expose_legacy_stream=1 expose_legacy_control=1 expose_legacy_patch=1 expose_legacy_power=1 probe_legacy_ssp=1 expose_legacy_accel=1
 ExecStart=/usr/local/sbin/g955n-location-hub --mainline
 ExecStopPost=/usr/local/sbin/g955n-location-hub --power-off
 Restart=on-failure
