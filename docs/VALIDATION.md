@@ -7529,3 +7529,40 @@ bank as a client of DPU1 SysMMU at 0x12910000. The current DECON
 handoff binds the G0 bank, keeps the boot framebuffer available
 and has no translated DPU1 domain. A future domain handoff needs
 to preserve that framebuffer while changing scanout translations.
+
+
+## 2026-11-26 — Correct the native BCM4773 display axes
+
+With the camera at the top and USB port at the bottom, the owner saw the
+lock-screen clock on the right. The same pose produced approximately
++4100 raw X counts, a much smaller Y reading, SensorProxy right-up and
+Mutter transform 3. Under the intermediate matrix `0,1,0;-1,0,0;0,0,1`
+the same pose reported normal and Mutter transform 0. The owner
+confirmed the clock moved to the top.
+
+A second physical sequence showed that with the camera to the right,
+the main raw axis was negative Y, while with the camera to the left,
+it was positive Y. The intermediate matrix classified those as
+right-up and left-up respectively, reversing the physically upper
+edge in both landscape poses. The owner reported an inverted image
+in both landscape poses and when the camera faced down. The latter
+reported bottom-up and transform 2 even with the intermediate rule.
+
+Set the native accelerometer's udev mount matrix to
+`0,-1,0;-1,0,0;0,0,-1`. This maps camera-up to the negative Y
+expected by SensorProxy and camera-right to positive X, and preserves
+the handedness of the axes. The rule scopes the correction to
+`g955n-bcm4773-accel`; the existing 4.4 packed sensor rules are separate.
+
+Verified the rule with udevadm, backed up each previous revision,
+triggered a change for that IIO device alone and restarted the packaged
+SensorProxy service. SensorProxy still exposed acceleration and ambient
+light. The scanout allocation and rendering path was not changed.
+
+The final physical sequence, camera up, right, down and left, produced
+SensorProxy normal, left-up, bottom-up and right-up. Mutter reported
+transforms 0, 1, 2 and 3 in the same order. The owner reported normal
+display orientation after the sequence. GNOME, Wi-Fi and the location
+hub stayed active and the bottom speaker remained the default sink.
+The udev file is installed persistently. No reboot or rotated touch
+target test was performed for this rule change.

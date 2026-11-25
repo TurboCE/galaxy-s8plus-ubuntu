@@ -3038,3 +3038,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Raised the SM-G955N DECON-only reusable DMA pool from 96 to 160 MiB.
 - Verified full-panel DECON allocation, PRIME imports into Panfrost
   and hardware rendering on the existing stock Wayland desktop.
+
+
+## 2026-11-26 — Correct automatic display rotation on 6.18
+
+- Corrected the native BCM4773 accelerometer mount matrix and
+  verified the four display orientations in stock GNOME Wayland.
