@@ -3135,3 +3135,12 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Built the dual-role USB controller with the Exynos PHY available
   during initramfs. Registered the standard role switch with the
   peripheral role as its default.
+
+
+## 2026-11-26 — Link S2MM005 to the standard DWC3 role switch
+
+- Connected the USB-C controller to DWC3 using reciprocal board
+  endpoints. Verified USB device mode on the Mac, including serial
+  and Ethernet after boot and RTC-woken s2idle.
+- Rechecked GNOME Wayland software display off and on after the
+  reported black screen and handset reboot.

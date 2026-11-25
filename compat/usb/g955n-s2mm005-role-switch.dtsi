@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&{/soc@0/usb@10c00000} {
+	port {
+		g955n_dwc3_role_ep: endpoint {
+			remote-endpoint = <&g955n_s2mm005_role_ep>;
+		};
+	};
+};
+
+&{/soc@0/usi@10940000/i2c@10000/usb-typec-controller@33} {
+	port {
+		g955n_s2mm005_role_ep: endpoint {
+			remote-endpoint = <&g955n_dwc3_role_ep>;
+		};
+	};
+};

@@ -36,6 +36,9 @@ Ethernet gadget can start. Keep the Exynos USB DRD PHY built in for
 that initramfs path. The Type-C class can continue to use the matching
 module from the existing installation.
 
-USB host operation also requires connecting the S2MM005 role events
-to the DWC3 role switch and coordinating the board's VBUS supply.
-The Type-C status driver continues to report the firmware's roles.
+The [role-link fragment](g955n-s2mm005-role-switch.dtsi) connects the
+S2MM005 connector to the DWC3 role switch. The status driver requests
+device mode for a USB device attachment. A host request requires a
+VBUS regulator and a confirmed dry source attachment with no reported
+VBUS shorts. The board fragment leaves the VBUS supply unspecified
+until the board's source-power control is ready for a peripheral test.

@@ -8070,3 +8070,35 @@ The trial exercised the peripheral default. The role switch has no
 userspace override in this configuration. S2MM005-driven host
 switching, VBUS-supply control, and enumeration of a physical
 USB peripheral remain to be verified.
+
+
+## 2026-11-26 — S2MM005 role link and display wake after reboot
+
+Built the status module for ARM64 with W=1 and passed checkpatch.
+A host-side test checked all 256 combinations of role and safety
+flags in the host interlock. The live BOOT changed only the graph
+in the decoded board device tree. The kernel Image, initramfs and
+outer DT stayed byte-identical. Verified fresh private recovery
+backups and read back the BOOT write before booting Ubuntu.
+
+The attached Mac was reported as a USB device connection and power
+sink on the phone. The DWC3 gadget stayed configured with USB
+Ethernet connected. Unbinding and rebinding the S2MM005 driver
+produced two role-switch change uevents while the gadget stayed
+configured. The Mac also read the handset's USB serial login
+prompt. Removed the temporary automatic recovery timer after the
+device-mode checks. No VBUS supply is specified in the tested
+graph. Source power and USB host peripherals remain untested.
+
+After the reported black screen and reboot, the previous boot
+retained user-session shutdown messages, with no kernel records
+or new pstore entry for the incident. The cause remains unresolved.
+On the current BOOT, the active GNOME Wayland session completed
+three software off/on cycles. DSI reported Off/disabled and
+On/enabled, and the backlight reported level 12 after each wake.
+An RTC-woken s2idle on the same boot increased the success count
+by one with no increase in failures. DSI was On/enabled with
+brightness 12. USB high-speed device mode, Wi-Fi and the default
+bottom speaker remained available. The kernel logged a Broadcom
+Wi-Fi scan-suppression error after resume. These trials did not
+reproduce the black screen or exercise the physical power key.

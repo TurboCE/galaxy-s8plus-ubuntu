@@ -4,7 +4,10 @@
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/property.h>
+#include <linux/regulator/consumer.h>
 #include <linux/unaligned.h>
+#include <linux/usb/role.h>
 #include <linux/usb/typec.h>
 #include <linux/workqueue.h>
 
@@ -73,7 +76,88 @@ struct s2mm005_typec {
 	struct delayed_work refresh;
 	struct typec_port *port;
 	struct typec_partner *partner;
+	struct usb_role_switch *role_switch;
+	struct regulator *vbus;
+	enum usb_role applied_role;
+	bool vbus_enabled;
 };
+
+static bool s2mm005_host_attached(u32 state, u32 low_power)
+{
+	const u32 host = S2MM005_ATTACH_DONE | S2MM005_IS_SOURCE | S2MM005_IS_DFP;
+
+	return (state & host) == host && (state & S2MM005_PD_STATE) &&
+	       !(state & (S2MM005_VBUS_CC_SHORT | S2MM005_VBUS_SBU_SHORT)) &&
+	       (low_power & S2MM005_RUN_DRY) && !(low_power & S2MM005_WATER_DET);
+}
+
+static int s2mm005_set_controller_role(struct s2mm005_typec *status, enum usb_role role)
+{
+	u32 state, low_power;
+	int ret;
+
+	if (!status->role_switch)
+		return 0;
+
+	if (role != USB_ROLE_HOST && status->vbus_enabled) {
+		ret = regulator_disable(status->vbus);
+		if (ret)
+			return ret;
+		status->vbus_enabled = false;
+	}
+
+	if (role == USB_ROLE_HOST && !status->vbus_enabled) {
+		ret = regulator_enable(status->vbus);
+		if (ret)
+			return ret;
+		status->vbus_enabled = true;
+
+		/* A partner can detach while the regulator is starting. */
+		ret = s2mm005_read_state(status->client, S2MM005_FUNC_STATE, &state);
+		ret = ret ?: s2mm005_read_state(status->client, S2MM005_LP_STATE, &low_power);
+		if (ret || !s2mm005_host_attached(state, low_power)) {
+			ret = ret ?: -ENOTCONN;
+			goto disable_vbus;
+		}
+	}
+
+	if (status->applied_role == role)
+		return 0;
+
+	ret = usb_role_switch_set_role(status->role_switch, role);
+	if (ret)
+		goto disable_vbus;
+
+	status->applied_role = role;
+	dev_dbg(&status->client->dev, "requested controller USB role %s\n", usb_role_string(role));
+	return 0;
+
+disable_vbus:
+	if (status->vbus_enabled && !regulator_disable(status->vbus))
+		status->vbus_enabled = false;
+	return ret;
+}
+
+static void s2mm005_sync_controller(struct s2mm005_typec *status, u32 state)
+{
+	enum usb_role role = USB_ROLE_NONE;
+	u32 low_power;
+	int ret;
+
+	if ((state & S2MM005_ATTACH_DONE) && (state & S2MM005_PD_STATE) &&
+	    !(state & S2MM005_IS_DFP)) {
+		role = USB_ROLE_DEVICE;
+	} else if (status->vbus && (state & S2MM005_IS_DFP) &&
+		   !s2mm005_read_state(status->client, S2MM005_LP_STATE, &low_power) &&
+		   s2mm005_host_attached(state, low_power)) {
+		role = USB_ROLE_HOST;
+	}
+
+	ret = s2mm005_set_controller_role(status, role);
+	if (ret)
+		dev_warn_ratelimited(&status->client->dev, "cannot update controller USB role: %d\n",
+				     ret);
+}
 
 static void s2mm005_report_typec(struct s2mm005_typec *status, u32 state)
 {
@@ -105,8 +189,12 @@ static void s2mm005_refresh_typec(struct work_struct *work)
 						   struct s2mm005_typec, refresh);
 	u32 state;
 
-	if (!s2mm005_read_state(status->client, S2MM005_FUNC_STATE, &state))
+	if (!s2mm005_read_state(status->client, S2MM005_FUNC_STATE, &state)) {
 		s2mm005_report_typec(status, state);
+		s2mm005_sync_controller(status, state);
+	} else if (status->vbus_enabled) {
+		s2mm005_sync_controller(status, 0);
+	}
 	queue_delayed_work(system_freezable_wq, &status->refresh,
 			   round_jiffies_relative(2 * HZ));
 }
@@ -116,6 +204,8 @@ static void s2mm005_unregister_typec(void *data)
 	struct s2mm005_typec *status = data;
 
 	cancel_delayed_work_sync(&status->refresh);
+	s2mm005_sync_controller(status, 0);
+	usb_role_switch_put(status->role_switch);
 	typec_unregister_partner(status->partner);
 	typec_unregister_port(status->port);
 }
@@ -136,16 +226,29 @@ static int s2mm005_register_typec(struct i2c_client *client, u32 state)
 		return -ENOMEM;
 
 	status->client = client;
+	if (device_property_present(dev, "vbus-supply")) {
+		status->vbus = devm_regulator_get_optional(dev, "vbus");
+		if (IS_ERR(status->vbus))
+			return dev_err_probe(dev, PTR_ERR(status->vbus), "cannot get VBUS supply\n");
+	}
+
+	status->role_switch = usb_role_switch_get(dev);
+	if (IS_ERR(status->role_switch))
+		return dev_err_probe(dev, PTR_ERR(status->role_switch), "cannot get USB role switch\n");
+
 	INIT_DELAYED_WORK(&status->refresh, s2mm005_refresh_typec);
 	status->port = typec_register_port(dev, &cap);
-	if (IS_ERR(status->port))
+	if (IS_ERR(status->port)) {
+		usb_role_switch_put(status->role_switch);
 		return dev_err_probe(dev, PTR_ERR(status->port), "cannot register Type-C port\n");
+	}
 
 	ret = devm_add_action_or_reset(dev, s2mm005_unregister_typec, status);
 	if (ret)
 		return ret;
 
 	s2mm005_report_typec(status, state);
+	s2mm005_sync_controller(status, state);
 	queue_delayed_work(system_freezable_wq, &status->refresh,
 			   round_jiffies_relative(2 * HZ));
 	return 0;
