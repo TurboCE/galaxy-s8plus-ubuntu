@@ -2583,3 +2583,11 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Changed the SM-G955N short power-key action to lock and blank
   the screen or wake it, without requesting system suspend.
   Retained the long-press shutdown confirmation.
+
+
+## 2026-11-25 — Black scanout for the DECON output-off state
+
+- Changed the inherited DECON DRM pipe to scan an opaque black
+  DMA frame on display disable. This keeps the boot console out
+  of the output-off transition while retaining direct desktop
+  scanout on enable.

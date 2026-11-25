@@ -5982,3 +5982,18 @@ The boot ID was unchanged. No suspend or shutdown request was
 logged. An injected long press opened the shutdown confirmation,
 which was dismissed without authorizing shutdown. Host tests
 passed for the power-key handler and native root filesystem profile.
+
+
+### R100-vpn2 DECON screen-off scanout
+
+On R100-vpn2, short presses reached the display-only path without
+a new system suspend, yet the DRM disable callback selected the
+firmware framebuffer at 0xcc000000. Built the opaque black
+scanout module against the exact running kernel, installed it as
+a module override and rebooted. BOOT and the kernel release were
+unchanged. Three injected GPIO short-press off/on cycles produced
+successful DECON shadow-latch confirmations for the black frame
+and desktop frame. The firmware frame was not selected during
+those cycles and there was no new suspend entry or latch timeout.
+This test validates the selected scanout buffer. The inherited
+DSI timing and panel power remain under the existing handoff.

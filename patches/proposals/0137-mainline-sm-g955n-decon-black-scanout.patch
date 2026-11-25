@@ -1,0 +1,126 @@
+Subject: [PATCH] drm/g955n: scan out a black framebuffer when the output is disabled
+
+The inherited DECON pipe remains running when the DRM output is
+disabled. Selecting the firmware framebuffer in that state reveals
+the boot console. Allocate an opaque black DMA frame for the DRM
+device and select it on display disable. Preserve the direct desktop
+buffer path and the firmware fallback used during device removal.
+
+--- a/drivers/gpu/drm/tiny/g955n-decon-handoff.c
++++ b/drivers/gpu/drm/tiny/g955n-decon-handoff.c
+@@ -14,6 +14,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/scatterlist.h>
++#include <linux/string.h>
+ 
+ #include <drm/drm_atomic_helper.h>
+ #include <drm/drm_connector.h>
+@@ -23,6 +24,7 @@
+ #include <drm/drm_framebuffer.h>
+ #include <drm/drm_gem_dma_helper.h>
+ #include <drm/drm_gem_framebuffer_helper.h>
++#include <drm/drm_managed.h>
+ #include <drm/drm_mode_config.h>
+ #include <drm/drm_modes.h>
+ #include <drm/drm_probe_helper.h>
+@@ -210,6 +212,8 @@
+ 	struct g955n_decon_handoff *handoff;
+ 	struct drm_framebuffer *active;
+ 	struct drm_framebuffer *uncertain;
++	struct drm_gem_dma_object *black;
++	bool black_may_scanout;
+ 	bool fault;
+ };
+ 
+@@ -288,11 +292,11 @@
+ 	return 0;
+ }
+ 
+-static void g955n_kms_flip(struct g955n_decon_kms *kms, struct drm_framebuffer *fb)
++static void g955n_kms_set_scanout(struct g955n_decon_kms *kms,
++				 struct drm_framebuffer *fb, dma_addr_t addr)
+ {
+ 	struct g955n_decon_handoff *handoff = kms->handoff;
+ 	struct drm_framebuffer *previous;
+-	dma_addr_t addr = fb ? g955n_frame_address(fb) : FIRMWARE_FB;
+ 	int ret;
+ 
+ 	mutex_lock(&handoff->lock);
+@@ -321,6 +325,8 @@
+ 	 */
+ 	if (fb)
+ 		drm_framebuffer_get(fb);
++	if (addr == kms->black->dma_addr)
++		kms->black_may_scanout = true;
+ 	ret = g955n_latch_base(handoff->decon, handoff->g0, lower_32_bits(addr));
+ 	if (ret) {
+ 		kms->uncertain = fb;
+@@ -330,6 +336,9 @@
+ 		goto unlock;
+ 	}
+ 
++	kms->black_may_scanout = addr == kms->black->dma_addr;
++	drm_dbg_kms(&kms->drm, "DECON latched %s scanout\n",
++		    fb ? "desktop" : kms->black_may_scanout ? "black" : "firmware");
+ 	previous = kms->active;
+ 	kms->active = fb;
+ 	if (previous)
+@@ -338,6 +347,13 @@
+ 	mutex_unlock(&handoff->lock);
+ }
+ 
++static void g955n_kms_flip(struct g955n_decon_kms *kms, struct drm_framebuffer *fb)
++{
++	/* Keep the inherited panel timing and scan an immutable black frame. */
++	g955n_kms_set_scanout(kms, fb,
++			     fb ? g955n_frame_address(fb) : kms->black->dma_addr);
++}
++
+ static void g955n_pipe_enable(struct drm_simple_display_pipe *pipe,
+ 			      struct drm_crtc_state *crtc,
+ 			      struct drm_plane_state *plane)
+@@ -398,6 +414,15 @@
+ 	DRM_GEM_DMA_DRIVER_OPS,
+ };
+ 
++static void g955n_release_black(struct drm_device *drm, void *data)
++{
++	struct g955n_decon_kms *kms = data;
++
++	/* A failed latch can leave this buffer in use until reboot. */
++	if (!kms->black_may_scanout)
++		drm_gem_object_put(&kms->black->base);
++}
++
+ static int g955n_register_kms(struct device *dev,
+ 			     struct g955n_decon_handoff *handoff)
+ {
+@@ -410,6 +435,19 @@
+ 		return PTR_ERR(kms);
+ 	kms->handoff = handoff;
+ 	drm = &kms->drm;
++	kms->black = drm_gem_dma_create(drm, PANEL_BYTES);
++	if (IS_ERR(kms->black))
++		return PTR_ERR(kms->black);
++	ret = drmm_add_action_or_reset(drm, g955n_release_black, kms);
++	if (ret)
++		return ret;
++	if (!kms->black->dma_addr || !IS_ALIGNED(kms->black->dma_addr, 16) ||
++	    kms->black->dma_addr > U32_MAX - PANEL_BYTES ||
++	    kms->black->dma_addr == FIRMWARE_FB)
++		return -ERANGE;
++	memset32(kms->black->vaddr, 0xff000000, PANEL_WIDTH * PANEL_HEIGHT);
++	dma_wmb();
++
+ 	ret = drmm_mode_config_init(drm);
+ 	if (ret)
+ 		return ret;
+@@ -531,6 +569,7 @@
+ 	if (handoff->kms) {
+ 		drm_dev_unregister(&handoff->kms->drm);
+ 		drm_atomic_helper_shutdown(&handoff->kms->drm);
++		g955n_kms_set_scanout(handoff->kms, NULL, FIRMWARE_FB);
+ 	} else {
+ 		device_remove_file(&pdev->dev, &dev_attr_scanout_test);
+ 	}
