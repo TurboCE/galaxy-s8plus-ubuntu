@@ -29,6 +29,10 @@ class PowerKeyDisplayTests(unittest.TestCase):
                 enabled.write_text('disabled\n')
                 self.assertFalse(m.panel_is_on())
                 enabled.write_text('enabled\n')
+                dpms = connector / 'dpms'
+                dpms.write_text('Off\n')
+                self.assertFalse(m.panel_is_on())
+                dpms.write_text('On\n')
                 self.assertTrue(m.panel_is_on())
 
     def test_panel_read_failure_restores_display(self):
@@ -46,11 +50,24 @@ class PowerKeyDisplayTests(unittest.TestCase):
         calls=[]
         with patch.object(m,'display_environment',return_value=['DISPLAY=:1']), \
              patch.object(m,'read_command',side_effect=lambda *a:calls.append(a)), \
+             patch.object(m,'wait_for_panel') as wait, \
              patch.object(m,'SLEEP_MARKER') as marker:
             m.wake_display(('c4','x11',['user']))
         self.assertEqual(calls[0][-3:],('/usr/bin/xset','s','reset'))
         self.assertEqual(calls[1][-4:],('/usr/bin/xset','dpms','force','on'))
+        wait.assert_called_once_with(on=True)
         marker.unlink.assert_called_once_with(missing_ok=True)
+
+    def test_wayland_keeps_resume_marker_until_panel_wakes(self):
+        session = ('c4', 'wayland', ['user'])
+        with patch.object(m, 'SLEEP_MARKER') as marker, \
+             patch.object(m, 'read_command') as command, \
+             patch.object(m, 'panel_is_on', return_value=False), \
+             patch.object(m.time, 'monotonic', side_effect=[0, 3]):
+            with self.assertRaisesRegex(RuntimeError, 'Panel did not turn on'):
+                m.wake_display(session)
+        self.assertEqual(command.call_args.args[-3:], ('PowerSaveMode', 'i', '0'))
+        marker.unlink.assert_not_called()
 
     def test_x11_locks_and_blanks_without_requesting_sleep(self):
         calls=[]
@@ -124,7 +141,8 @@ class PowerKeyDisplayTests(unittest.TestCase):
             marker.write_text('42\n')
             with patch.object(m, 'SLEEP_MARKER', marker), \
                  patch.object(m, 'session_locked', side_effect=[True, False]), \
-                 patch.object(m, 'read_command'):
+                 patch.object(m, 'read_command'), \
+                 patch.object(m, 'wait_for_panel'):
                 self.assertFalse(m.should_blank(session, True))
                 self.assertTrue(m.should_blank(session, True))
                 m.wake_display(session)

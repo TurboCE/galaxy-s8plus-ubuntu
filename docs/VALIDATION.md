@@ -7851,3 +7851,30 @@ after the second. The light value matched the direct IIO reading
 after both cycles. GDM, Wi-Fi and the location daemon were active.
 These trials did not repeat the physical four-way rotation test
 or reproduce the intermittent loss of reports from the hub.
+
+
+## 2026-11-26 — Investigate black screen after sleep and a manual reboot
+
+The previous boot completed the two RTC s2idle tests. USB SSH
+still answered near the end of its available journal. GNOME
+repeatedly reported the missing keyboard descendant in its unlock
+dialog after resume. There was no new retained kernel trace or
+power-key action for the reported failure. Those records do not
+establish whether the later black screen came from display wake,
+the unlock UI or a stall after the last captured activity.
+
+On the following boot, three software DPMS off/on cycles reached
+DRM Off/disabled and On/enabled. The installed power-key handler now
+checks both DRM properties and retains its resume marker on an
+unconfirmed wake. It logs receipt of a power-key press separately
+from the confirmed display transition.
+
+Backed up and replaced only the userspace power-key script and
+restarted its service without replacing BOOT or restarting GNOME.
+All 12 host power-key tests passed. Three further DPMS cycles passed
+on the phone at panel brightness 12. A synthetic short press/release
+fed to the same watcher woke the panel and it remained on after
+eight seconds. The active session, its lock state, SensorProxy and
+the default bottom-speaker route remained in place. This verifies
+the display transition and the handler, with the physical key and
+the original intermittent failure still to be reproduced.

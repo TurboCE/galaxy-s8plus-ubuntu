@@ -3088,3 +3088,10 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Connected native acceleration and illuminance to the packaged Ubuntu
   SensorProxy through triggered IIO buffers, retaining the existing
   direct IIO reads and accelerometer orientation matrix.
+
+
+## 2026-11-26 — Verify display transitions requested by the power key
+
+- Record handset power-key input and confirm the DRM connector's
+  enabled and DPMS states after a display request.
+- Keep the resume marker until the display actually reports on.

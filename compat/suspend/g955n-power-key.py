@@ -17,6 +17,7 @@ POWER_KEY = (1, 116)  # EV_KEY, KEY_POWER
 LONG_PRESS = 1.4
 LOCK_TIMEOUT = 5
 LOCK_RETRY_INTERVAL = 1
+DISPLAY_TIMEOUT = 2
 GPIO_KEYS = (
     Path('/dev/input/by-path/platform-gpio-keys-event'),
     Path('/dev/input/by-path/platform-gpio_keys-event'),
@@ -66,7 +67,7 @@ def wake_display(session):
         # Mutter's property does not drive DPMS on the native X11 server.
         env = display_environment(run, ('DISPLAY', 'XAUTHORITY'))
         if not any(value.startswith('DISPLAY=') for value in env):
-            return
+            raise RuntimeError('No active X11 display to wake')
         # A brief resume press can be lost before X sees it. Reset idle time
         # without changing the screen lock, then turn the panel on.
         read_command(*run, *env, '/usr/bin/xset', 's', 'reset')
@@ -74,8 +75,9 @@ def wake_display(session):
     else:
         read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
                      MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '0')
+    wait_for_panel(on=True)
     SLEEP_MARKER.unlink(missing_ok=True)
-    print('Power key requested display wake', flush=True)
+    print('Power key confirmed display on', flush=True)
 
 
 def session_locked(session):
@@ -124,12 +126,8 @@ def blank_display(session):
         else:
             read_command(*run, '/usr/bin/busctl', '--user', 'set-property',
                          MUTTER, MUTTER_PATH, MUTTER, 'PowerSaveMode', 'i', '3')
-        deadline = time.monotonic() + 2
-        while panel_is_on():
-            if time.monotonic() >= deadline:
-                raise RuntimeError('Panel did not blank')
-            time.sleep(.05)
-        print('Power key turned off the display', flush=True)
+        wait_for_panel(on=False)
+        print('Power key confirmed display off', flush=True)
     except (OSError, RuntimeError, subprocess.SubprocessError):
         try:
             wake_display(session)
@@ -157,13 +155,23 @@ def open_power_dialog(session):
 def panel_state():
     for connector in Path('/sys/class/drm').glob('card*-DSI-1'):
         if (connector / 'device/device/driver').resolve().name == 'g955n-decon-handoff':
-            return connector / 'enabled', 'enabled'
-    return PANEL_RUNTIME, 'active'
+            return connector
 
 
 def panel_is_on():
-    path, on_value = panel_state()
-    return path.read_text().strip() == on_value
+    if (connector := panel_state()) is not None:
+        return ((connector / 'enabled').read_text().strip() == 'enabled'
+                and (connector / 'dpms').read_text().strip() == 'On')
+    return PANEL_RUNTIME.read_text().strip() == 'active'
+
+
+def wait_for_panel(*, on):
+    deadline = time.monotonic() + DISPLAY_TIMEOUT
+    while panel_is_on() != on:
+        if time.monotonic() >= deadline:
+            target = 'on' if on else 'off'
+            raise RuntimeError(f'Panel did not turn {target} after the display request')
+        time.sleep(.05)
 
 
 def is_resume_press(pressed_at):
@@ -244,6 +252,7 @@ def watch_keys(key):
         if (kind, code) != POWER_KEY:
             continue
         if value == 1:
+            print(f'Power key pressed (panel was {"on" if was_on else "off"})', flush=True)
             press = (was_on, sec + usec / 1_000_000)
         elif value == 0 and press is not None:
             before, pressed_at = press
