@@ -11,7 +11,7 @@ SSP chip-ID reply remains unverified.
 
 --- a/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
 +++ b/arch/arm64/boot/dts/exynos/exynos8895-dream2lteks.dts
-@@ -578,4 +578,10 @@
+@@ -579,6 +579,12 @@
  		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
  		samsung,pin-drv = <3>;
  	};
@@ -22,6 +22,8 @@ SSP chip-ID reply remains unverified.
 +		samsung,pin-val = <0>;
 +	};
  };
+ 
+ &spi_10 {
 @@ -593,7 +599,8 @@
  		spi-cpol;
  		spi-cpha;
