@@ -3178,3 +3178,9 @@ repeated MMIO conflict in the recovery boot log. The build is opt-in via
 - Connect the S5K3H1 subdevice to a CSIS1 video node that reads
   one BG10 frame per request. Give the video node exclusive CAM0
   ownership in the board fragment.
+
+
+## 2026-11-27 — Validate CAM0 ownership before a BOOT write
+
+- Check the embedded Linux device tree for multiple enabled CAM0
+  consumers before connecting to recovery for a trial.

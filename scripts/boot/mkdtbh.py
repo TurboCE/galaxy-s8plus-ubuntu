@@ -21,33 +21,65 @@ FDT_BEGIN_NODE, FDT_END_NODE, FDT_PROP, FDT_NOP, FDT_END = 1, 2, 3, 4, 9
 PAGE_SIZES = (2048, 4096, 8192, 16384, 32768, 65536, 131072)
 
 
-def root_props(dtb):
-    """The properties of the root node, as {name: raw bytes}."""
+def fdt_nodes(dtb):
+    """Yield device tree paths and property maps in depth-first order."""
     if len(dtb) < 40 or struct.unpack_from(">I", dtb, 0)[0] != FDT_MAGIC:
         raise ValueError("not a flattened device tree")
-    off_struct, off_strings = struct.unpack_from(">II", dtb, 8)
-    pos, depth, props = off_struct, 0, {}
-    while True:
+    total, off_struct, off_strings = struct.unpack_from(">III", dtb, 4)
+    version = struct.unpack_from(">I", dtb, 20)[0]
+    strings_size, struct_size = struct.unpack_from(">II", dtb, 32)
+    if version < 17:
+        struct_size = off_strings - off_struct
+    if (total > len(dtb) or not 40 <= off_struct <= off_struct + struct_size <= total
+            or not 40 <= off_strings <= off_strings + strings_size <= total):
+        raise ValueError("flattened device tree sections exceed its size")
+
+    end_struct = off_struct + struct_size
+    end_strings = off_strings + strings_size
+    pos, names, props = off_struct, [], None
+    while pos + 4 <= end_struct:
         token = struct.unpack_from(">I", dtb, pos)[0]
         pos += 4
         if token == FDT_BEGIN_NODE:
-            depth += 1
-            if depth > 1:
-                return props  # the root's properties all come before its first child
-            end = dtb.index(b"\0", pos)
+            if props is not None:
+                yield "/".join(names) or "/", props
+            end = dtb.index(b"\0", pos, end_struct)
+            names.append(dtb[pos:end].decode())
+            props = {}
             pos = (end + 4) & ~3
         elif token == FDT_PROP:
+            if props is None or pos + 8 > end_struct:
+                raise ValueError("unexpected device tree property")
             length, name_off = struct.unpack_from(">II", dtb, pos)
             pos += 8
-            name = dtb[off_strings + name_off:dtb.index(b"\0", off_strings + name_off)]
+            if pos + length > end_struct or name_off >= strings_size:
+                raise ValueError("device tree property exceeds its section")
+            start = off_strings + name_off
+            name = dtb[start:dtb.index(b"\0", start, end_strings)]
             props[name.decode()] = dtb[pos:pos + length]
             pos = (pos + length + 3) & ~3
         elif token == FDT_NOP:
             continue
-        elif token in (FDT_END_NODE, FDT_END):
-            return props
+        elif token == FDT_END_NODE:
+            if not names:
+                raise ValueError("unexpected device tree end node")
+            if props is not None:
+                yield "/".join(names) or "/", props
+            names.pop()
+            props = None
+        elif token == FDT_END and not names:
+            return
         else:
             raise ValueError(f"bad FDT token {token:#x} at {pos - 4:#x}")
+    raise ValueError("flattened device tree has no end token")
+
+
+def root_props(dtb):
+    """The properties of the root node, as {name: raw bytes}."""
+    node = next(fdt_nodes(dtb), None)
+    if node is None or node[0] != "/":
+        raise ValueError("flattened device tree has no root node")
+    return node[1]
 
 
 def cell(props, name, path):

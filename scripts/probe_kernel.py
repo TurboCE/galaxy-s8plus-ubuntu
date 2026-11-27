@@ -5,7 +5,9 @@ import datetime
 import json
 import os
 from pathlib import Path
+import struct
 import subprocess
+from boot.verify_cam0 import verify_cam0_ownership
 from install_ubuntu import (BASE, PROTECTED, ROOT, digest, verify_backup, verify_boot,
                             expected_boot_hash, expected_installed_boot_hash,
                             verify_rootfs_superblock)
@@ -27,6 +29,13 @@ def main():
                         help='Explicitly update normal Ubuntu BOOT on an already labeled Ubuntu USERDATA')
     args = parser.parse_args()
     verify_boot(args.boot)
+    with args.boot.open('rb') as image:
+        header = image.read(2048)
+        size = struct.unpack_from('<I', header, 8)[0]
+        try:
+            verify_cam0_ownership(image.read(size))
+        except ValueError as error:
+            parser.error(str(error))
     meta = json.loads(args.boot.with_suffix('.json').read_text())
     if (meta.get('target') != 'SM-G955N' or meta.get('kernel_trial') is not (not args.normal_boot)
             or meta.get('image_sha256') != digest(args.boot)):

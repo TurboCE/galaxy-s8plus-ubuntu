@@ -8242,3 +8242,20 @@ enabled. Built and decoded the corrected candidate to confirm a
 single enabled CAM0 consumer. The application-facing test still
 requires a boot of that candidate with the media sensor module
 selected before automatic camera probing.
+
+
+## 2026-11-27 — Regression check for the CAM0 BOOT failure
+
+The Exynos System MMU driver in this build stores one master and
+one owner-list node per controller. A second CAM0 consumer reuses
+that entry for a different owner. The board now gives the V4L2
+receiver sole ownership, and the BOOT preflight checks the actual
+embedded Linux device tree before reaching ADB.
+
+The preflight rejected the BOOT that caused the paging fault.
+It accepted the corrected single-consumer candidate, the retained
+USB role-link restore image and 189 other local BOOT artifacts
+with the expected Android header. Tests covered a disabled second
+consumer, a disabled ancestor and mixed IOMMU specifier lengths.
+The rejected image also failed through the normal probe command
+before it attempted any ADB call.
